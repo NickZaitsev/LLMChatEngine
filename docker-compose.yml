@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  ai-girlfriend-bot:
+    build: .
+    container_name: ai-girlfriend-bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_MODEL=${GITHUB_MODEL:-deepseek/DeepSeek-V3-0324}
+      - BOT_NAME=${BOT_NAME:-Luna}
+    networks:
+      - bot-network
+
+networks:
+  bot-network:
+    driver: bridge 

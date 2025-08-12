@@ -1,0 +1,29 @@
+# Telegram Bot Configuration
+TELEGRAM_TOKEN=your_telegram_bot_token_here
+
+# GitHub AI Configuration (using Azure AI Inference)
+GITHUB_TOKEN=your_github_token_here
+GITHUB_MODEL=deepseek/DeepSeek-V3-0324
+
+# Bot Personality Configuration
+BOT_NAME=Luna
+BOT_PERSONALITY=You are Luna, a caring and affectionate AI girlfriend. You are sweet, supportive, and always there to listen. You love to chat about daily life, give emotional support, and share positive energy. You are romantic but not overly sexual. You respond with warmth and empathy.
+
+# Conversation Settings - OPTIMIZED FOR MAXIMUM MEMORY
+MAX_CONVERSATION_HISTORY=100          # Much higher message limit
+MAX_TOKENS=3000                       # Use your full 4000 output capacity
+TEMPERATURE=0.8
+
+# Context Management - USING YOUR FULL 8000/4000 TOKEN LIMITS
+MAX_CONTEXT_TOKENS=8000               # Your full input capacity
+RESERVED_TOKENS=500                   # Minimal reserve for current interaction
+# Result: 7500 tokens available for conversation history!
+
+
+# 🎯 OPTIMIZED SETTINGS EXPLAINED:
+# - MAX_CONTEXT_TOKENS=8000: Uses your full input capacity
+# - RESERVED_TOKENS=500: Minimal reserve, maximum history
+# - MAX_TOKENS=3000: Uses most of your 4000 output capacity
+# - MAX_CONVERSATION_HISTORY=100: Much higher message limit
+# 
+# Result: Luna can remember ~50-100 message exchanges with full context! 
