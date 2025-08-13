@@ -1,0 +1,379 @@
+"""
+PromptAssembler for building LLM chat prompts with memory integration.
+
+This module provides the PromptAssembler class that orchestrates building
+chat prompts with memory context, conversation history, persona configuration,
+and proper token budgeting.
+"""
+
+import logging
+import math
+from typing import Dict, List, Any, Optional, Mapping, Tuple, Protocol
+from uuid import UUID
+
+from storage.interfaces import MessageRepo, PersonaRepo, Message
+from memory.manager import MemoryManager, MemoryRecord
+from .templates import (
+    SYSTEM_TEMPLATE,
+    format_memory_snippet_from_record,
+    create_persona_system_message,
+    create_user_profile_message,
+    create_memory_context_message,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class Tokenizer(Protocol):
+    """Protocol for tokenizer implementations"""
+    
+    def encode(self, text: str) -> List[int]:
+        """Encode text to tokens"""
+        ...
+    
+    def count_tokens(self, text: str) -> int:
+        """Count tokens in text"""
+        ...
+
+
+class TokenCounter:
+    """Helper class for counting tokens with fallback heuristic"""
+    
+    def __init__(self, tokenizer: Optional[Tokenizer] = None, auto_tiktoken: bool = True):
+        """
+        Initialize token counter.
+        
+        Args:
+            tokenizer: Optional tokenizer implementation (tiktoken preferred)
+            auto_tiktoken: Whether to automatically try tiktoken if no tokenizer provided
+        """
+        self.tokenizer = tokenizer
+        
+        # Try to import tiktoken if no tokenizer provided and auto_tiktoken is enabled
+        if not tokenizer and auto_tiktoken:
+            try:
+                import tiktoken
+                encoding = tiktoken.get_encoding("cl100k_base")
+                
+                class TiktokenWrapper:
+                    def __init__(self, encoding):
+                        self._encoding = encoding
+                    
+                    def encode(self, text: str) -> List[int]:
+                        return self._encoding.encode(text)
+                    
+                    def count_tokens(self, text: str) -> int:
+                        return len(self._encoding.encode(text))
+                
+                self.tokenizer = TiktokenWrapper(encoding)
+                logger.debug("Using tiktoken for token counting")
+            except ImportError:
+                logger.debug("tiktoken not available, using heuristic fallback")
+    
+    def count_tokens(self, text: str) -> int:
+        """
+        Count tokens in text using tokenizer or heuristic fallback.
+        
+        Args:
+            text: Text to count tokens for
+            
+        Returns:
+            Token count
+        """
+        if not text:
+            return 0
+        
+        if self.tokenizer:
+            try:
+                return self.tokenizer.count_tokens(text)
+            except Exception as e:
+                logger.warning(f"Tokenizer failed: {e}, using fallback")
+        
+        # Fallback heuristic: ~4 characters per token
+        return max(1, math.ceil(len(text) / 4))
+
+
+class PromptAssembler:
+    """
+    Main class for assembling LLM chat prompts with memory integration.
+    
+    This class orchestrates the process of:
+    - Building system prompts with persona configuration
+    - Including relevant memories within token budget
+    - Adding conversation history within token constraints
+    - Proper token accounting and metadata tracking
+    """
+    
+    def __init__(
+        self,
+        message_repo: MessageRepo,
+        memory_manager: MemoryManager,
+        persona_repo: Optional[PersonaRepo] = None,
+        tokenizer: Optional[Tokenizer] = None,
+        config: Mapping[str, Any] = None
+    ):
+        """
+        Initialize PromptAssembler.
+        
+        Args:
+            message_repo: Repository for message storage/retrieval
+            memory_manager: Manager for memory operations
+            persona_repo: Optional repository for persona configurations
+            tokenizer: Optional tokenizer for accurate token counting
+            config: Configuration dictionary with:
+                - max_memory_items: Maximum memory items to include (default: 3)
+                - memory_token_budget_ratio: Ratio of history budget for memories (default: 0.4)
+                - truncation_length: Length for message truncation (default: 200)
+                - include_system_template: Whether to include base system template (default: True)
+        """
+        self.message_repo = message_repo
+        self.memory_manager = memory_manager
+        self.persona_repo = persona_repo
+        self.token_counter = TokenCounter(tokenizer)
+        
+        # Set default config values
+        self.config = dict(config or {})
+        self.max_memory_items = self.config.get("max_memory_items", 3)
+        self.memory_token_budget_ratio = self.config.get("memory_token_budget_ratio", 0.4)
+        self.truncation_length = self.config.get("truncation_length", 200)
+        self.include_system_template = self.config.get("include_system_template", True)
+        
+        logger.info(f"PromptAssembler initialized with max_memory_items={self.max_memory_items}")
+    
+    async def build_prompt(
+        self,
+        conversation_id: str,
+        current_user_message: str,
+        reply_token_budget: int = 800,
+        history_budget: int = 5000
+    ) -> List[Dict[str, str]]:
+        """
+        Build a chat prompt for LLM request.
+        
+        Args:
+            conversation_id: UUID string of the conversation
+            current_user_message: The current user message to process
+            reply_token_budget: Tokens reserved for LLM reply
+            history_budget: Tokens available for history and memories
+            
+        Returns:
+            List of message dicts with 'role' and 'content' keys, ordered for LLM
+            
+        Raises:
+            ValueError: If conversation_id is invalid or current_user_message is empty
+        """
+        messages, _ = await self.build_prompt_and_metadata(
+            conversation_id, current_user_message, reply_token_budget, history_budget
+        )
+        return messages
+    
+    async def build_prompt_and_metadata(
+        self,
+        conversation_id: str,
+        current_user_message: str,
+        reply_token_budget: int = 800,
+        history_budget: int = 5000
+    ) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
+        """
+        Build a chat prompt with detailed metadata.
+        
+        Args:
+            conversation_id: UUID string of the conversation
+            current_user_message: The current user message to process
+            reply_token_budget: Tokens reserved for LLM reply
+            history_budget: Tokens available for history and memories
+            
+        Returns:
+            Tuple of (messages, metadata) where:
+            - messages: List of message dicts ordered for LLM
+            - metadata: Dict containing included_memory_ids, token_counts, truncated_message_ids
+            
+        Raises:
+            ValueError: If inputs are invalid
+        """
+        if not conversation_id:
+            raise ValueError("conversation_id cannot be empty")
+        if not current_user_message or not current_user_message.strip():
+            raise ValueError("current_user_message cannot be empty")
+        
+        logger.debug(f"Building prompt for conversation {conversation_id[:8]}...")
+        
+        # Validate conversation_id format
+        try:
+            UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+        
+        # Initialize tracking variables
+        messages = []
+        token_counts = {
+            "system_tokens": 0,
+            "memory_tokens": 0, 
+            "history_tokens": 0,
+            "reply_reserved": reply_token_budget
+        }
+        included_memory_ids = []
+        truncated_message_ids = []
+        
+        # 1. Add system template if enabled
+        if self.include_system_template:
+            system_message = {"role": "system", "content": SYSTEM_TEMPLATE}
+            system_tokens = self.token_counter.count_tokens(SYSTEM_TEMPLATE)
+            messages.append(system_message)
+            token_counts["system_tokens"] += system_tokens
+            logger.debug(f"Added system template: {system_tokens} tokens")
+        
+        # 2. Add persona configuration if available
+        try:
+            if self.persona_repo:
+                # Get conversation to find persona_id
+                # Note: This would require extending the interface or getting conversation details
+                # For now, we'll skip persona integration and log a warning
+                logger.debug("Persona integration skipped - would need conversation details")
+        except Exception as e:
+            logger.warning(f"Failed to load persona configuration: {e}")
+        
+        # 3. Fetch and add user profile (rolling summary)
+        try:
+            summary_memories = await self.memory_manager.memory_repo.list_memories(
+                conversation_id, memory_type="summary"
+            )
+            
+            if summary_memories:
+                # Use the most recent summary
+                latest_summary = max(summary_memories, key=lambda m: m.created_at)
+                
+                # Extract profile text from structured memory
+                profile_text = self._extract_summary_text(latest_summary.text)
+                
+                if profile_text:
+                    profile_message = create_user_profile_message(profile_text)
+                    profile_tokens = self.token_counter.count_tokens(profile_message["content"])
+                    messages.append(profile_message)
+                    token_counts["system_tokens"] += profile_tokens
+                    logger.debug(f"Added user profile: {profile_tokens} tokens")
+            
+        except Exception as e:
+            logger.warning(f"Failed to load user profile: {e}")
+        
+        # 4. Calculate memory token budget
+        memory_budget = int(history_budget * self.memory_token_budget_ratio)
+        remaining_history_budget = history_budget - memory_budget
+        
+        # 5. Retrieve and add relevant memories
+        try:
+            relevant_memories = await self.memory_manager.retrieve_relevant_memories(
+                current_user_message,
+                top_k=max(self.max_memory_items * 2, 6)  # Get more to filter by budget
+            )
+            
+            memory_snippets = []
+            memory_tokens_used = 0
+            
+            for memory in relevant_memories[:self.max_memory_items]:
+                snippet = format_memory_snippet_from_record(memory)
+                snippet_tokens = self.token_counter.count_tokens(snippet)
+                
+                if memory_tokens_used + snippet_tokens <= memory_budget:
+                    memory_snippets.append(snippet)
+                    memory_tokens_used += snippet_tokens
+                    included_memory_ids.append(str(memory.id))
+                else:
+                    break
+            
+            if memory_snippets:
+                memory_message = create_memory_context_message(memory_snippets)
+                memory_message_tokens = self.token_counter.count_tokens(memory_message["content"])
+                messages.append(memory_message)
+                token_counts["memory_tokens"] = memory_message_tokens
+                logger.debug(f"Added {len(memory_snippets)} memories: {memory_message_tokens} tokens")
+            
+        except Exception as e:
+            logger.warning(f"Failed to retrieve memories: {e}")
+        
+        # 6. Fetch recent conversation history
+        try:
+            recent_messages = await self.message_repo.fetch_recent_messages(
+                conversation_id, remaining_history_budget
+            )
+            
+            for msg in recent_messages:
+                # Check if message needs truncation
+                content = msg.content
+                message_tokens = self.token_counter.count_tokens(content)
+                
+                if len(content) > self.truncation_length * 2:  # Only truncate very long messages
+                    content = content[:self.truncation_length] + "... (truncated)"
+                    truncated_message_ids.append(str(msg.id))
+                    message_tokens = self.token_counter.count_tokens(content)
+                
+                history_message = {
+                    "role": msg.role,
+                    "content": content
+                }
+                messages.append(history_message)
+                token_counts["history_tokens"] += message_tokens
+            
+            logger.debug(f"Added {len(recent_messages)} history messages: {token_counts['history_tokens']} tokens")
+            
+        except Exception as e:
+            logger.warning(f"Failed to load conversation history: {e}")
+        
+        # 7. Always add current user message at the end
+        current_message = {
+            "role": "user",
+            "content": current_user_message.strip()
+        }
+        current_tokens = self.token_counter.count_tokens(current_user_message)
+        messages.append(current_message)
+        token_counts["history_tokens"] += current_tokens
+        
+        # 8. Build metadata
+        metadata = {
+            "included_memory_ids": included_memory_ids,
+            "token_counts": token_counts,
+            "truncated_message_ids": truncated_message_ids,
+            "total_tokens": sum(token_counts.values()),
+            "conversation_id": conversation_id
+        }
+        
+        # Log audit information
+        logger.info(f"Built prompt with {len(messages)} messages, "
+                   f"{len(included_memory_ids)} memories, "
+                   f"total tokens: {metadata['total_tokens']}")
+        
+        if included_memory_ids:
+            logger.debug(f"Included memory IDs: {included_memory_ids}")
+        
+        return messages, metadata
+    
+    def _extract_summary_text(self, memory_text: str) -> str:
+        """
+        Extract summary text from structured memory data.
+        
+        Args:
+            memory_text: Raw memory text (potentially JSON)
+            
+        Returns:
+            Extracted summary text
+        """
+        if not memory_text:
+            return ""
+        
+        try:
+            if memory_text.startswith('{'):
+                import json
+                memory_data = json.loads(memory_text)
+                return memory_data.get("profile", memory_data.get("summary", memory_text))
+            else:
+                return memory_text
+        except (json.JSONDecodeError, KeyError):
+            return memory_text
+
+
+# Export public API
+__all__ = [
+    'PromptAssembler',
+    'Tokenizer',
+    'TokenCounter'
+]
