@@ -1,9 +1,12 @@
 # Telegram Bot Configuration
 TELEGRAM_TOKEN=your_telegram_bot_token_here
 
-# GitHub AI Configuration (using Azure AI Inference)
-GITHUB_TOKEN=your_github_token_here
-GITHUB_MODEL=deepseek/DeepSeek-V3-0324
+# LLM Provider Configuration (REQUIRED for AI responses)
+PROVIDER=azure                                    # Options: "azure" or "lmstudio"
+AZURE_ENDPOINT=https://your-endpoint.openai.azure.com/
+AZURE_API_KEY=your_azure_api_key_here
+AZURE_MODEL=your_azure_deployment_name
+LMSTUDIO_MODEL=gpt-3.5-turbo                     # Any LM Studio model name
 
 # Bot Personality Configuration
 BOT_NAME=Luna
@@ -26,4 +29,11 @@ RESERVED_TOKENS=500                   # Minimal reserve for current interaction
 # - MAX_TOKENS=3000: Uses most of your 4000 output capacity
 # - MAX_CONVERSATION_HISTORY=100: Much higher message limit
 # 
-# Result: Luna can remember ~50-100 message exchanges with full context! 
+# Result: Luna can remember ~50-100 message exchanges with full context!
+
+# 🔧 LLM PROVIDER SETUP (REQUIRED):
+# - PROVIDER: Choose between "azure" (cloud) or "lmstudio" (local)
+# - For Azure: Set AZURE_ENDPOINT, AZURE_API_KEY, and AZURE_MODEL
+# - For LM Studio: Set LMSTUDIO_MODEL (runs on localhost:1234)
+# 
+# ⚠️  IMPORTANT: You must configure at least one provider for AI responses to work!

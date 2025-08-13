@@ -7,9 +7,14 @@ services:
     restart: unless-stopped
     environment:
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - GITHUB_MODEL=${GITHUB_MODEL:-deepseek/DeepSeek-V3-0324}
+      - PROVIDER=${PROVIDER:-azure}
+      - AZURE_ENDPOINT=${AZURE_ENDPOINT}
+      - AZURE_API_KEY=${AZURE_API_KEY}
+      - AZURE_MODEL=${AZURE_MODEL}
+      - LMSTUDIO_MODEL=${LMSTUDIO_MODEL:-gpt-3.5-turbo}
       - BOT_NAME=${BOT_NAME:-Luna}
+      - MAX_TOKENS=${MAX_TOKENS:-3000}
+      - TEMPERATURE=${TEMPERATURE:-0.8}
     networks:
       - bot-network
 
