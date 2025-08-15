@@ -14,11 +14,19 @@ except ImportError:
     OpenAI = None
     AzureOpenAI = None
 
+# Import LM Studio Manager
+try:
+    from lmstudio_manager import LMStudioManager
+    LMSTUDIO_MANAGER_AVAILABLE = True
+except ImportError:
+    LMSTUDIO_MANAGER_AVAILABLE = False
+    LMStudioManager = None
+
 # Constants
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_BASE_DELAY = 1.0
 DEFAULT_MAX_DELAY = 60.0
-DEFAULT_REQUEST_TIMEOUT = 30.0
+DEFAULT_REQUEST_TIMEOUT = 120.0
 RETRYABLE_ERROR_PATTERNS = [
     "rate limit", "429", "ratelimitreached", "too many requests",
     "timeout", "timed out", "request timeout",
@@ -53,14 +61,32 @@ class ModelClient:
             logger.info("ModelClient initialized with Azure provider - Model: %s", AZURE_MODEL)
             
         elif provider == "lmstudio":
-            from config import LMSTUDIO_MODEL
+            from config import (LMSTUDIO_MODEL, LMSTUDIO_BASE_URL, LMSTUDIO_AUTO_LOAD,
+                               LMSTUDIO_MAX_LOAD_WAIT, LMSTUDIO_SERVER_TIMEOUT)
             
             self.client = OpenAI(
-                base_url="http://localhost:1234/v1",
+                base_url=LMSTUDIO_BASE_URL,
                 api_key="lm-studio",
             )
             self.model_name = LMSTUDIO_MODEL
-            logger.info("ModelClient initialized with LM Studio provider - Model: %s", LMSTUDIO_MODEL)
+            
+            # Initialize LM Studio Manager for model loading
+            if LMSTUDIO_MANAGER_AVAILABLE:
+                # Extract base URL without /v1 suffix for manager
+                manager_base_url = LMSTUDIO_BASE_URL.replace('/v1', '').rstrip('/')
+                self.lm_studio_manager = LMStudioManager(
+                    base_url=manager_base_url,
+                    timeout=LMSTUDIO_SERVER_TIMEOUT
+                )
+                self.auto_load_model = LMSTUDIO_AUTO_LOAD
+                self.max_load_wait = LMSTUDIO_MAX_LOAD_WAIT
+                logger.info("LMStudioManager initialized (auto_load=%s)", LMSTUDIO_AUTO_LOAD)
+            else:
+                self.lm_studio_manager = None
+                self.auto_load_model = False
+                logger.warning("LMStudioManager not available - model auto-loading disabled")
+            
+            logger.info("ModelClient initialized with LM Studio provider - Model: %s, Base URL: %s", LMSTUDIO_MODEL, LMSTUDIO_BASE_URL)
             
         else:
             raise ValueError(f"Unsupported provider: {provider}. Supported providers: 'azure', 'lmstudio'")
@@ -68,7 +94,19 @@ class ModelClient:
     def ask(self, messages):
         """Send a message to the LLM and get a response"""
         try:
-            logger.debug("Sending request to %s provider", self.provider)
+            logger.info("Sending request to %s provider with %d messages", self.provider, len(messages))
+            
+            
+            # Log the full request content for debugging
+            logger.info("Full LLM Request to %s:", self.provider)
+            logger.info(messages)
+            logger.info("  Model: %s", self.model_name)
+            for i, msg in enumerate(messages):
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                # Truncate very long content for readability, but log more detail here
+                content_preview = content[:1000] + "..." if len(content) > 1000 else content
+                logger.debug("  Request Message %d [%s]: %s", i + 1, role, content_preview)
             
             resp = self.client.chat.completions.create(
                 model=self.model_name,
@@ -76,7 +114,8 @@ class ModelClient:
             )
             
             content = resp.choices[0].message.content
-            logger.debug("Received response from %s provider (%d chars)", self.provider, len(content))
+            logger.info("Received response from %s provider (%d chars)", self.provider, len(content))
+            logger.debug("LLM Response content preview: %s", content[:500] + "..." if len(content) > 500 else content)
             return content
             
         except Exception as e:
@@ -97,10 +136,25 @@ class ModelClient:
                 info["azure_endpoint"] = self.client.azure_endpoint
             if hasattr(self.client, "api_version") and self.client.api_version:
                 info["api_version"] = self.client.api_version
+            
+            # Add LM Studio specific info
+            if self.provider == "lmstudio" and hasattr(self, 'lm_studio_manager') and self.lm_studio_manager:
+                info["auto_load_enabled"] = getattr(self, 'auto_load_model', False)
+                info["max_load_wait"] = getattr(self, 'max_load_wait', 300)
         except Exception:
             pass
             
         return info
+    
+    async def get_lmstudio_status(self):
+        """Get LM Studio model status (async method)"""
+        if self.provider != "lmstudio" or not hasattr(self, 'lm_studio_manager') or not self.lm_studio_manager:
+            return {"error": "LM Studio manager not available"}
+        
+        try:
+            return await self.lm_studio_manager.get_model_info()
+        except Exception as e:
+            return {"error": f"Failed to get LM Studio status: {e}"}
 
 
 class AIHandler:
@@ -141,8 +195,20 @@ class AIHandler:
                 content = msg.get("content", "")
                 if role in ["user", "assistant"]:
                     messages.append({"role": role, "content": content})
+            
+            # Add the current user message that we need to respond to
+            messages.append({"role": "user", "content": user_message})
 
-            logger.info("Sending %d messages to LLM (including system message)", len(messages))
+            logger.info("Sending %d messages to LLM (including system message and current user message)", len(messages))
+            
+            # Log the actual request content for debugging
+            logger.debug("LLM Request Messages:")
+            for i, msg in enumerate(messages):
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                # Truncate very long content for readability
+                content_preview = content[:500] + "..." if len(content) > 500 else content
+                logger.debug("  Message %d [%s]: %s", i + 1, role, content_preview)
             
             # Retry logic with exponential backoff and proper timeout
             for attempt in range(self.max_retries):

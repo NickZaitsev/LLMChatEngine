@@ -121,13 +121,44 @@ class PostgresConversationManager:
         self._conversation_cache[user_id] = conversation
         return conversation
     
+    # Public async methods for direct use from async contexts
+    async def get_conversation_async(self, user_id: int) -> List[Dict]:
+        """Get conversation history for a user (async version)."""
+        return await self._get_conversation_async(user_id)
+    
+    async def get_formatted_conversation_async(self, user_id: int) -> List[Dict]:
+        """Get formatted conversation for AI API (async version)."""
+        return await self._get_formatted_conversation_async(user_id)
+    
+    async def get_user_stats_async(self, user_id: int) -> Dict:
+        """Get user statistics (async version)."""
+        return await self._get_user_stats_async(user_id)
+    
+    async def debug_conversation_state_async(self, user_id: int) -> Dict:
+        """Debug conversation state (async version)."""
+        return await self._debug_conversation_state_async(user_id)
+    
+    async def clear_conversation_async(self, user_id: int) -> None:
+        """Clear conversation history for a user (async version)."""
+        await self._clear_conversation_async(user_id)
+    
     def add_message(self, user_id: int, role: str, content: str) -> None:
         """
         Add a message to the user's conversation history (sync wrapper for async).
         
         This method maintains compatibility with the existing sync interface.
         """
-        asyncio.create_task(self._add_message_async(user_id, role, content))
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If we're in an async context, schedule the task
+                asyncio.create_task(self._add_message_async(user_id, role, content))
+            else:
+                # If not in async context, run it
+                asyncio.run(self._add_message_async(user_id, role, content))
+        except RuntimeError:
+            # No event loop, create one
+            asyncio.run(self._add_message_async(user_id, role, content))
     
     async def _add_message_async(self, user_id: int, role: str, content: str) -> Message:
         """
@@ -158,9 +189,22 @@ class PostgresConversationManager:
         """
         Get the conversation history for a user (sync wrapper).
         
-        Returns conversation in the same format as the original ConversationManager.
+        WARNING: This method should not be called from async contexts.
+        Use get_conversation_async() instead from async code.
         """
-        return asyncio.run(self._get_conversation_async(user_id))
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                logger.error("get_conversation called from async context for user %d - use get_conversation_async() instead", user_id)
+                return []
+            else:
+                return asyncio.run(self._get_conversation_async(user_id))
+        except RuntimeError:
+            # No event loop, create one
+            return asyncio.run(self._get_conversation_async(user_id))
+        except Exception as e:
+            logger.error("Error in get_conversation for user %d: %s", user_id, e)
+            return []
     
     async def _get_conversation_async(self, user_id: int) -> List[Dict]:
         """
@@ -196,22 +240,34 @@ class PostgresConversationManager:
         """
         Clear conversation history for a user (sync wrapper).
         """
-        asyncio.create_task(self._clear_conversation_async(user_id))
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._clear_conversation_async(user_id))
+            else:
+                asyncio.run(self._clear_conversation_async(user_id))
+        except RuntimeError:
+            asyncio.run(self._clear_conversation_async(user_id))
     
     async def _clear_conversation_async(self, user_id: int) -> None:
         """
-        Clear conversation history for a user by creating a new conversation.
+        Clear conversation history for a user by deleting all messages.
         
         Args:
             user_id: Telegram user ID
         """
         try:
-            # Remove from cache to force new conversation creation
+            # Get the current conversation to delete its messages
+            conversation = await self._ensure_user_and_conversation(user_id)
+            
+            # Actually delete all messages from the database
+            deleted_count = await self.storage.messages.delete_messages(str(conversation.id))
+            logger.info("Deleted %d messages from database for user %d", deleted_count, user_id)
+            
+            # Remove from cache to clear any cached data
             if user_id in self._conversation_cache:
                 del self._conversation_cache[user_id]
             
-            # Create new conversation (old messages remain in DB but won't be retrieved)
-            await self._ensure_user_and_conversation(user_id)
             logger.info("Cleared conversation for user %d", user_id)
             
         except Exception as e:
@@ -220,8 +276,22 @@ class PostgresConversationManager:
     def get_formatted_conversation(self, user_id: int) -> List[Dict]:
         """
         Get conversation formatted for AI API with token management (sync wrapper).
+        
+        WARNING: This method should not be called from async contexts.
+        Use get_formatted_conversation_async() instead from async code.
         """
-        return asyncio.run(self._get_formatted_conversation_async(user_id))
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                logger.error("get_formatted_conversation called from async context for user %d - use get_formatted_conversation_async() instead", user_id)
+                return []
+            else:
+                return asyncio.run(self._get_formatted_conversation_async(user_id))
+        except RuntimeError:
+            return asyncio.run(self._get_formatted_conversation_async(user_id))
+        except Exception as e:
+            logger.error("Error in get_formatted_conversation for user %d: %s", user_id, e)
+            return []
     
     async def _get_formatted_conversation_async(self, user_id: int) -> List[Dict]:
         """
@@ -258,8 +328,22 @@ class PostgresConversationManager:
     def get_user_stats(self, user_id: int) -> Dict:
         """
         Get statistics about user's conversation (sync wrapper).
+        
+        WARNING: This method should not be called from async contexts.
+        Use get_user_stats_async() instead from async code.
         """
-        return asyncio.run(self._get_user_stats_async(user_id))
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                logger.error("get_user_stats called from async context for user %d - use get_user_stats_async() instead", user_id)
+                return {"total_messages": 0, "user_messages": 0, "bot_messages": 0, "estimated_tokens": 0}
+            else:
+                return asyncio.run(self._get_user_stats_async(user_id))
+        except RuntimeError:
+            return asyncio.run(self._get_user_stats_async(user_id))
+        except Exception as e:
+            logger.error("Error in get_user_stats for user %d: %s", user_id, e)
+            return {"total_messages": 0, "user_messages": 0, "bot_messages": 0, "estimated_tokens": 0}
     
     async def _get_user_stats_async(self, user_id: int) -> Dict:
         """
@@ -337,8 +421,40 @@ class PostgresConversationManager:
     def debug_conversation_state(self, user_id: int) -> Dict:
         """
         Debug method to show current conversation state (sync wrapper).
+        
+        WARNING: This method should not be called from async contexts.
+        Use debug_conversation_state_async() instead from async code.
         """
-        return asyncio.run(self._debug_conversation_state_async(user_id))
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                logger.error("debug_conversation_state called from async context for user %d - use debug_conversation_state_async() instead", user_id)
+                return {
+                    "raw_conversation_length": 0,
+                    "formatted_conversation_length": 0,
+                    "raw_tokens": 0,
+                    "formatted_tokens": 0,
+                    "max_context_tokens": MAX_CONTEXT_TOKENS,
+                    "available_history_tokens": AVAILABLE_HISTORY_TOKENS,
+                    "last_messages": [],
+                    "formatted_messages": []
+                }
+            else:
+                return asyncio.run(self._debug_conversation_state_async(user_id))
+        except RuntimeError:
+            return asyncio.run(self._debug_conversation_state_async(user_id))
+        except Exception as e:
+            logger.error("Error in debug_conversation_state for user %d: %s", user_id, e)
+            return {
+                "raw_conversation_length": 0,
+                "formatted_conversation_length": 0,
+                "raw_tokens": 0,
+                "formatted_tokens": 0,
+                "max_context_tokens": MAX_CONTEXT_TOKENS,
+                "available_history_tokens": AVAILABLE_HISTORY_TOKENS,
+                "last_messages": [],
+                "formatted_messages": []
+            }
     
     async def _debug_conversation_state_async(self, user_id: int) -> Dict:
         """

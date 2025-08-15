@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   ai-girlfriend-bot:
@@ -10,9 +9,43 @@ services:
       - AZURE_API_KEY=${AZURE_API_KEY}
       - AZURE_MODEL=${AZURE_MODEL:-deepseek/DeepSeek-V3-0324}
       - BOT_NAME=${BOT_NAME:-Luna}
+      - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:-ai_bot_pass}@postgres:5432/ai_bot
+      - USE_POSTGRES=true
+      - PROVIDER=${PROVIDER:-lmstudio}
+      - LMSTUDIO_MODEL=${LMSTUDIO_MODEL:-openai/gpt-oss-20b}
+      - LMSTUDIO_BASE_URL=http://host-machine:1234/v1
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - bot-network
+    extra_hosts:
+      - "host-machine:host-gateway"
+
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: ai-girlfriend-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=ai_bot
+      - POSTGRES_USER=ai_bot
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-ai_bot_pass}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-pgvector.sql:/docker-entrypoint-initdb.d/init-pgvector.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - bot-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_bot -d ai_bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
 
 networks:
   bot-network:
-    driver: bridge `
+    driver: bridge

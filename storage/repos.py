@@ -285,6 +285,35 @@ class PostgresMessageRepo:
                 for msg in messages
             ]
     
+    async def delete_messages(self, conversation_id: str) -> int:
+        """
+        Delete all messages for a conversation.
+        
+        Args:
+            conversation_id: UUID string of the conversation
+            
+        Returns:
+            Number of messages deleted
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+        
+        async with self.session_maker() as session:
+            # Use bulk delete for efficiency
+            from sqlalchemy import delete
+            stmt = delete(MessageModel).where(
+                MessageModel.conversation_id == conversation_uuid
+            )
+            
+            result = await session.execute(stmt)
+            await session.commit()
+            
+            deleted_count = result.rowcount
+            logger.info("Deleted %d messages for conversation %s", deleted_count, conversation_id)
+            return deleted_count
+
     def estimate_tokens(self, text: str) -> int:
         """
         Estimate token count for given text.

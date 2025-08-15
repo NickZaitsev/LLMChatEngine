@@ -202,4 +202,25 @@ class ConversationManager:
                 }
                 for msg in formatted_conversation[-5:]
             ] if formatted_conversation else []
-        } 
+        }
+    
+    # Async versions for compatibility with PostgresConversationManager
+    async def get_conversation_async(self, user_id: int) -> List[Dict]:
+        """Async version of get_conversation for compatibility."""
+        return self.get_conversation(user_id)
+    
+    async def get_formatted_conversation_async(self, user_id: int) -> List[Dict]:
+        """Async version of get_formatted_conversation for compatibility."""
+        return self.get_formatted_conversation(user_id)
+    
+    async def get_user_stats_async(self, user_id: int) -> Dict:
+        """Async version of get_user_stats for compatibility."""
+        return self.get_user_stats(user_id)
+    
+    async def debug_conversation_state_async(self, user_id: int) -> Dict:
+        """Async version of debug_conversation_state for compatibility."""
+        return self.debug_conversation_state(user_id)
+    
+    async def clear_conversation_async(self, user_id: int) -> None:
+        """Async version of clear_conversation for compatibility."""
+        self.clear_conversation(user_id)
