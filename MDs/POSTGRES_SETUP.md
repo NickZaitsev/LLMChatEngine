@@ -24,7 +24,6 @@ The bot now supports two storage modes:
 # Database Configuration
 DATABASE_URL=postgresql+asyncpg://ai_bot:your_secure_password@postgres:5432/ai_bot
 DB_PASSWORD=your_secure_password
-USE_POSTGRES=true
 USE_PGVECTOR=true
 ```
 
@@ -120,7 +119,6 @@ Update your `.env` file:
 # Database Configuration
 DATABASE_URL=postgresql+asyncpg://ai_bot:your_secure_password@localhost:5432/ai_bot
 DB_PASSWORD=your_secure_password
-USE_POSTGRES=true
 USE_PGVECTOR=true  # Set to false if pgvector is not available
 ```
 
@@ -158,14 +156,12 @@ If you see errors, check:
 
 The PostgreSQL system is a **drop-in replacement** for the in-memory system. Simply:
 
-1. Set `USE_POSTGRES=true` in your `.env` file
 2. Configure `DATABASE_URL`
 3. Restart the bot
 
 **Important Notes:**
 - Existing conversation history from the in-memory system will not be migrated. Users will start with fresh conversations.
-- **The bot will fail to start** if `USE_POSTGRES=true` but PostgreSQL is unavailable. This prevents accidental data loss.
-- To disable PostgreSQL, set `USE_POSTGRES=false` in your `.env` file.
+- **The bot will fail to start** if PostgreSQL is unavailable. This prevents accidental data loss
 
 ## Configuration Options
 
@@ -173,7 +169,6 @@ The PostgreSQL system is a **drop-in replacement** for the in-memory system. Sim
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `USE_POSTGRES` | `false` | Enable PostgreSQL storage |
 | `DATABASE_URL` | - | PostgreSQL connection URL |
 | `DB_PASSWORD` | `ai_bot_pass` | Database password |
 | `USE_PGVECTOR` | `true` | Enable semantic search |
@@ -231,7 +226,6 @@ Bot cannot start with PostgreSQL enabled but database unavailable
 **This is expected behavior** - the bot won't start to prevent data loss. Solutions:
 - Check PostgreSQL is running: `sudo systemctl status postgresql`
 - Verify connection details in `.env`
-- Or disable PostgreSQL: set `USE_POSTGRES=false`
 
 **2. Connection refused**
 ```

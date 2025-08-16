@@ -7,11 +7,26 @@ import traceback
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
-from config import TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_POSTGRES, USE_PGVECTOR, PROVIDER, LMSTUDIO_STARTUP_CHECK
-from conversation_manager import ConversationManager
+from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
+                   PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED,
+                   PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
+                   PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
+                   MEMORY_EMBED_MODEL, MEMORY_SUMMARIZER_MODE, MEMORY_CHUNK_OVERLAP)
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
 from typing_manager import TypingIndicatorManager
+
+# PromptAssembler and Memory Manager imports (conditional)
+if MEMORY_ENABLED:
+	try:
+		from memory.manager import MemoryManager
+		from prompt.assembler import PromptAssembler
+		MEMORY_IMPORTS_AVAILABLE = True
+	except ImportError as e:
+		logger.warning("Memory/PromptAssembler imports failed: %s", e)
+		MEMORY_IMPORTS_AVAILABLE = False
+else:
+	MEMORY_IMPORTS_AVAILABLE = False
 
 # Constants
 RATE_LIMIT_DURATION = 60
@@ -29,13 +44,15 @@ logger = logging.getLogger(__name__)
 
 class AIGirlfriendBot:
 	def __init__(self):
-		# Initialize conversation manager based on configuration
-		if USE_POSTGRES and DATABASE_URL:
-			self.conversation_manager = PostgresConversationManager(DATABASE_URL, USE_PGVECTOR)
-			logger.info("Using PostgreSQL conversation manager with database: %s", self._mask_db_url(DATABASE_URL))
-		else:
-			self.conversation_manager = ConversationManager()
-			logger.info("Using in-memory conversation manager")
+		# Initialize PostgreSQL conversation manager (required)
+		if not DATABASE_URL:
+			raise RuntimeError(
+				"PostgreSQL configuration is required. Please set:\n"
+				"DATABASE_URL=postgresql://user:password@host:port/database\n"
+			)
+		
+		self.conversation_manager = PostgresConversationManager(DATABASE_URL, USE_PGVECTOR)
+		logger.info("Using PostgreSQL conversation manager with database: %s", self._mask_db_url(DATABASE_URL))
 		
 		self.ai_handler = AIHandler()
 		self.typing_manager = TypingIndicatorManager()
@@ -44,6 +61,11 @@ class AIGirlfriendBot:
 		self.rate_limit_duration = RATE_LIMIT_DURATION
 		self.pending_clear_confirmation = set()
 		self._storage_initialized = False
+		
+		# Initialize memory and prompt components
+		self.memory_manager = None
+		self.prompt_assembler = None
+		self._memory_initialized = False
 	
 	def _is_user_rate_limited(self, user_id: int) -> bool:
 		"""Check if a user is currently rate limited"""
@@ -249,17 +271,35 @@ My responses: {stats['bot_messages']}
 		else:
 			rate_limit_info = "✅ **Rate Limit:** Not limited"
 		
+		# Check memory components status
+		memory_status = "❌ Not Available"
+		prompt_status = "❌ Not Available"
+		
+		if MEMORY_ENABLED and self.memory_manager:
+			memory_status = "✅ Enabled & Working"
+		elif MEMORY_ENABLED and not self.memory_manager:
+			memory_status = "⚠️ Enabled but Failed to Initialize"
+		
+		if  self.prompt_assembler:
+			prompt_status = "✅ Enabled & Working"
+		elif not self.prompt_assembler:
+			prompt_status = "⚠️ Enabled but Failed to Initialize"
+		
+		storage_status = "✅ PostgreSQL Connected" if self._storage_initialized else "❌ PostgreSQL Not Connected"
+		
 		status_text = f"""📊 **{BOT_NAME} Status Report** 📊
 
 🔧 **Bot Status:** ✅ Running normally
 📡 **Telegram Connection:** ✅ Connected
-💾 **Memory:** ✅ Working
+💾 **Storage:** {storage_status}
+🧠 **Memory Manager:** {memory_status}
+🔧 **Prompt Assembler:** {prompt_status}
 {rate_limit_info}
 
 💬 **Your Chat Stats:**
-   • Total messages: {stats['total_messages']}
-   • Your messages: {stats['user_messages']}
-   • My responses: {stats['bot_messages']}
+		 • Total messages: {stats['total_messages']}
+		 • Your messages: {stats['user_messages']}
+		 • My responses: {stats['bot_messages']}
 
 ✨ **Everything is working perfectly!** 💕
 
@@ -513,10 +553,21 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 			# Start typing indicator BEFORE making LLM request
 			await self.typing_manager.start_typing(bot, chat_id)
 			
+			# Get conversation_id for PromptAssembler (if using PostgreSQL)
+			conversation_id = None
+			if hasattr(self.conversation_manager, 'storage') and self.conversation_manager.storage:
+				try:
+					# Get the conversation object to extract UUID
+					conversation = await self.conversation_manager._ensure_user_and_conversation(user_id)
+					conversation_id = str(conversation.id)
+					logger.debug("Retrieved conversation_id %s for user %s", conversation_id[:8], user_id)
+				except Exception as e:
+					logger.warning("Failed to get conversation_id for user %s: %s", user_id, e)
+			
 			# Make the actual AI request
 			logger.info("Generating AI response for user %s", user_id)
 			ai_response = await asyncio.wait_for(
-				self.ai_handler.generate_response(user_message, conversation_history),
+				self.ai_handler.generate_response(user_message, conversation_history, conversation_id),
 				timeout=REQUEST_TIMEOUT
 			)
 			
@@ -545,8 +596,20 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 		"""Legacy method - kept for compatibility with other parts of the code"""
 		try:
 			logger.info("Generating AI response for user %s (legacy method)", user_id)
+			
+			# Get conversation_id for PromptAssembler (if using PostgreSQL)
+			conversation_id = None
+			if hasattr(self.conversation_manager, 'storage') and self.conversation_manager.storage:
+				try:
+					# Get the conversation object to extract UUID
+					conversation = await self.conversation_manager._ensure_user_and_conversation(user_id)
+					conversation_id = str(conversation.id)
+					logger.debug("Retrieved conversation_id %s for user %s (legacy)", conversation_id[:8], user_id)
+				except Exception as e:
+					logger.warning("Failed to get conversation_id for user %s: %s", user_id, e)
+			
 			ai_response = await asyncio.wait_for(
-				self.ai_handler.generate_response(user_message, conversation_history),
+				self.ai_handler.generate_response(user_message, conversation_history, conversation_id),
 				timeout=REQUEST_TIMEOUT
 			)
 			logger.info("AI response received for user %s (%d chars)", user_id, len(ai_response))
@@ -633,7 +696,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 	
 	async def _initialize_storage(self):
 		"""Initialize PostgreSQL storage if needed"""
-		if USE_POSTGRES and hasattr(self.conversation_manager, 'initialize') and not self._storage_initialized:
+		if hasattr(self.conversation_manager, 'initialize') and not self._storage_initialized:
 			try:
 				await self.conversation_manager.initialize()
 				self._storage_initialized = True
@@ -643,6 +706,87 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 				logger.error("Bot cannot start with PostgreSQL enabled but database unavailable")
 				logger.error("Please check your database configuration and ensure PostgreSQL is running")
 				raise RuntimeError(f"PostgreSQL initialization failed: {e}") from e
+	
+	async def _initialize_memory_components(self):
+		"""Initialize MemoryManager and PromptAssembler if enabled"""
+		if not MEMORY_IMPORTS_AVAILABLE:
+			if MEMORY_ENABLED:
+				logger.warning("Memory components requested but imports failed - running without memory/prompt features")
+			return
+		
+		if not hasattr(self.conversation_manager, 'storage') or not self.conversation_manager.storage:
+			raise RuntimeError("PostgreSQL storage not available for memory components. Ensure PostgreSQL is properly initialized.")
+		
+		try:
+			storage = self.conversation_manager.storage
+			
+			# Initialize MemoryManager if enabled
+			if MEMORY_ENABLED:
+				# Create LLM summarize function that uses our AI handler
+				async def llm_summarize_func(text: str, instruction: str = None) -> str:
+					"""Summarization function using the bot's AI handler"""
+					try:
+						prompt = f"Please summarize the following conversation text:\n\n{text}"
+						if instruction:
+							prompt = f"{instruction}\n\n{text}"
+						
+						# Use a simple conversation history for summarization
+						simple_history = [{"role": "user", "content": prompt}]
+						response = await self.ai_handler.generate_response(prompt, [])
+						return response
+					except Exception as e:
+						logger.error("LLM summarization failed: %s", e)
+						return f"Summary unavailable due to error: {str(e)[:100]}"
+				
+				# Memory manager configuration
+				memory_config = {
+					"embed_model": MEMORY_EMBED_MODEL,
+					"summarizer_mode": MEMORY_SUMMARIZER_MODE,
+					"llm_summarize": llm_summarize_func,
+					"chunk_overlap": MEMORY_CHUNK_OVERLAP
+				}
+				
+				self.memory_manager = MemoryManager(
+					message_repo=storage.messages,
+					memory_repo=storage.memories,
+					conversation_repo=storage.conversations,
+					config=memory_config
+				)
+				logger.info("MemoryManager initialized successfully")
+			
+			# Initialize PromptAssembler if enabled
+			if self.memory_manager:
+				# PromptAssembler configuration
+				prompt_config = {
+					"max_memory_items": PROMPT_MAX_MEMORY_ITEMS,
+					"memory_token_budget_ratio": PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
+					"truncation_length": PROMPT_TRUNCATION_LENGTH,
+					"include_system_template": PROMPT_INCLUDE_SYSTEM_TEMPLATE
+				}
+				
+				self.prompt_assembler = PromptAssembler(
+					message_repo=storage.messages,
+					memory_manager=self.memory_manager,
+					persona_repo=storage.personas,
+					config=prompt_config
+				)
+				logger.info("PromptAssembler initialized successfully")
+				
+				# Set PromptAssembler in AIHandler
+				self.ai_handler.set_prompt_assembler(self.prompt_assembler)
+				logger.info("PromptAssembler integrated with AIHandler")
+				
+			else:
+				logger.warning("PromptAssembler requires MemoryManager - running without prompt assembly")
+			
+			self._memory_initialized = True
+			logger.info("Memory components initialization completed")
+			
+		except Exception as e:
+			logger.error("Failed to initialize memory components: %s", e)
+			logger.warning("Bot will continue without memory/prompt features")
+			self.memory_manager = None
+			self.prompt_assembler = None
 	
 	async def _initialize_lmstudio_model(self):
 		"""Initialize LM Studio model loading if needed"""
@@ -730,6 +874,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 		# Initialize storage and LM Studio model in the event loop
 		async def initialize_bot():
 			await self._initialize_storage()
+			await self._initialize_memory_components()
 			await self._initialize_lmstudio_model()
 		
 		# Run initialization
@@ -739,9 +884,8 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 			loop.run_until_complete(initialize_bot())
 		except Exception as e:
 			logger.error("CRITICAL: Failed to initialize bot: %s", e)
-			if USE_POSTGRES:
-				logger.error("Bot startup failed due to PostgreSQL configuration issues")
-				logger.error("Please check POSTGRES_SETUP.md for troubleshooting steps")
+			logger.error("Bot startup failed due to PostgreSQL configuration issues")
+			logger.error("Please check POSTGRES_SETUP.md for troubleshooting steps")
 			raise SystemExit(1) from e
 		
 		# High-priority watcher to manage /clear confirmation lifecycle

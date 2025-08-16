@@ -526,23 +526,22 @@ class PostgresConversationManager:
             return "***masked***"
 
 
-# Factory function to create the appropriate conversation manager
-def create_conversation_manager(use_postgres: bool = True, db_url: str = None) -> 'ConversationManager':
+# Factory function to create PostgreSQL conversation manager
+def create_conversation_manager(db_url: str, use_pgvector: bool = True) -> 'PostgresConversationManager':
     """
-    Factory function to create either PostgreSQL or in-memory conversation manager.
+    Factory function to create PostgreSQL conversation manager.
     
     Args:
-        use_postgres: Whether to use PostgreSQL backend
-        db_url: Database URL (required if use_postgres=True)
+        db_url: Database URL (required)
+        use_pgvector: Whether to enable pgvector for semantic search
         
     Returns:
-        Conversation manager instance
+        PostgreSQL conversation manager instance
+        
+    Raises:
+        ValueError: If db_url is not provided
     """
-    if use_postgres:
-        if not db_url:
-            raise ValueError("db_url is required when use_postgres=True")
-        return PostgresConversationManager(db_url)
-    else:
-        # Import and return original in-memory manager
-        from conversation_manager import ConversationManager
-        return ConversationManager()
+    if not db_url:
+        raise ValueError("db_url is required - PostgreSQL is the only supported backend")
+    
+    return PostgresConversationManager(db_url, use_pgvector)

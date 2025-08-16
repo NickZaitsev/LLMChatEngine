@@ -10,7 +10,6 @@ services:
       - AZURE_MODEL=${AZURE_MODEL:-deepseek/DeepSeek-V3-0324}
       - BOT_NAME=${BOT_NAME:-Luna}
       - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:-ai_bot_pass}@postgres:5432/ai_bot
-      - USE_POSTGRES=true
       - PROVIDER=${PROVIDER:-lmstudio}
       - LMSTUDIO_MODEL=${LMSTUDIO_MODEL:-openai/gpt-oss-20b}
       - LMSTUDIO_BASE_URL=http://host-machine:1234/v1

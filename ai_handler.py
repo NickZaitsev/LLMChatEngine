@@ -158,10 +158,11 @@ class ModelClient:
 
 
 class AIHandler:
-    def __init__(self):
+    def __init__(self, prompt_assembler=None):
         self.personality = BOT_PERSONALITY
         self.max_tokens = MAX_TOKENS
         self.temperature = TEMPERATURE
+        self.prompt_assembler = prompt_assembler
         
         # Retry configuration
         self.max_retries = DEFAULT_MAX_RETRIES
@@ -178,28 +179,47 @@ class AIHandler:
             logger.error("Failed to initialize ModelClient: %s", e)
             self.model_client = None
     
-    async def generate_response(self, user_message: str, conversation_history: List[Dict]) -> str:
+    def set_prompt_assembler(self, prompt_assembler):
+        """Set the PromptAssembler instance for advanced prompt building."""
+        self.prompt_assembler = prompt_assembler
+        logger.info("PromptAssembler set for AIHandler")
+
+    async def generate_response(self, user_message: str, conversation_history: List[Dict], conversation_id: str = None) -> str:
         """Generate a response using ModelClient with proper timeout handling."""
         if not self.model_client:
             logger.error("ModelClient not available; cannot generate AI response")
             return "I'm having technical difficulties right now. Please check my configuration! 💕"
 
         try:
-            logger.info("Generating response for message (%d chars), history: %d messages", 
+            logger.info("Generating response for message (%d chars), history: %d messages",
                        len(user_message), len(conversation_history))
 
-            # Build messages in OpenAI format
-            messages = [{"role": "system", "content": self.personality}]
-            for msg in conversation_history:
-                role = msg.get("role")
-                content = msg.get("content", "")
-                if role in ["user", "assistant"]:
-                    messages.append({"role": role, "content": content})
-            
-            # Add the current user message that we need to respond to
-            messages.append({"role": "user", "content": user_message})
+            # Use PromptAssembler if available and conversation_id is provided
+            if self.prompt_assembler and conversation_id:
+                logger.info("Using PromptAssembler for advanced prompt building")
+                try:
+                    from config import PROMPT_HISTORY_BUDGET, PROMPT_REPLY_TOKEN_BUDGET
+                    
+                    messages = await self.prompt_assembler.build_prompt(
+                        conversation_id=conversation_id,
+                        current_user_message=user_message,
+                        reply_token_budget=PROMPT_REPLY_TOKEN_BUDGET,
+                        history_budget=PROMPT_HISTORY_BUDGET
+                    )
+                    
+                    logger.info("PromptAssembler built %d messages for LLM", len(messages))
+                    
+                except Exception as e:
+                    logger.error("PromptAssembler failed, falling back to legacy mode: %s", e)
+                    # Fall back to legacy method
+                    messages = self._build_legacy_messages(user_message, conversation_history)
+            else:
+                # Legacy method - build messages manually
+                if conversation_id and not self.prompt_assembler:
+                    logger.debug("conversation_id provided but PromptAssembler not available - using legacy mode")
+                messages = self._build_legacy_messages(user_message, conversation_history)
 
-            logger.info("Sending %d messages to LLM (including system message and current user message)", len(messages))
+            logger.info("Sending %d messages to LLM", len(messages))
             
             # Log the actual request content for debugging
             logger.debug("LLM Request Messages:")
@@ -263,6 +283,19 @@ class AIHandler:
         except Exception as e:
             logger.exception("Error in AI generation: %s", e)
             return self._get_error_response(str(e))
+    
+    def _build_legacy_messages(self, user_message: str, conversation_history: List[Dict]) -> List[Dict]:
+        """Build messages using the legacy method (for fallback compatibility)."""
+        messages = [{"role": "system", "content": self.personality}]
+        for msg in conversation_history:
+            role = msg.get("role")
+            content = msg.get("content", "")
+            if role in ["user", "assistant"]:
+                messages.append({"role": role, "content": content})
+        
+        # Add the current user message that we need to respond to
+        messages.append({"role": "user", "content": user_message})
+        return messages
     
     def _get_error_response(self, error_message: str) -> str:
         """Generate appropriate error response based on error type"""
