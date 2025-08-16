@@ -4,8 +4,10 @@ TELEGRAM_TOKEN=your_telegram_bot_token_here
 # Database Configuration (NEW - PostgreSQL Storage)
 DATABASE_URL=postgresql+asyncpg://ai_bot:your_secure_password@localhost:5432/ai_bot
 DB_PASSWORD=your_secure_password_here
-USE_POSTGRES=true
 USE_PGVECTOR=true
+
+# Tokenizers Configuration
+TOKENIZERS_PARALLELISM=false
 
 # LLM Provider Configuration (REQUIRED for AI responses)
 PROVIDER=azure                                    # Options: "azure" or "lmstudio"
@@ -36,6 +38,43 @@ RESERVED_TOKENS=500                   # Minimal reserve for current interaction
 # Result: 7500 tokens available for conversation history!
 
 
+# PromptAssembler Configuration Example
+
+# PostgreSQL Configuration (MANDATORY - In-memory storage is no longer supported)
+DATABASE_URL=postgresql://user:password@localhost:5432/ai_bot_db
+USE_PGVECTOR=true
+
+
+# PromptAssembler Settings
+PROMPT_MAX_MEMORY_ITEMS=3
+PROMPT_MEMORY_TOKEN_BUDGET_RATIO=0.4
+PROMPT_TRUNCATION_LENGTH=200  
+PROMPT_INCLUDE_SYSTEM_TEMPLATE=true
+PROMPT_HISTORY_BUDGET=7500
+PROMPT_REPLY_TOKEN_BUDGET=500
+
+# Memory Manager Configuration (required for PromptAssembler)
+MEMORY_ENABLED=true
+MEMORY_EMBED_MODEL=sentence-transformers/all-MiniLM-L6-v2
+MEMORY_SUMMARIZER_MODE=llm
+MEMORY_CHUNK_OVERLAP=2
+
+# Note: PromptAssembler requires:
+# 2. DATABASE_URL configured
+# 3. MEMORY_ENABLED=true
+# 4. PostgreSQL with pgvector extension (for embeddings)
+
+# Example complete configuration:
+# DATABASE_URL=postgresql://user:password@localhost:5432/ai_bot_db
+# USE_PGVECTOR=true
+# MEMORY_ENABLED=true
+
+
+
+
+
+
+
 # 🎯 OPTIMIZED SETTINGS EXPLAINED:
 # - MAX_CONTEXT_TOKENS=8000: Uses your full input capacity
 # - RESERVED_TOKENS=500: Minimal reserve, maximum history
@@ -56,3 +95,4 @@ RESERVED_TOKENS=500                   # Minimal reserve for current interaction
 # - The bot will ensure your model is loaded before processing any requests!
 #
 # ⚠️  IMPORTANT: You must configure at least one provider for AI responses to work!
+

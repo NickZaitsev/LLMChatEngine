@@ -203,8 +203,8 @@ class TestPromptAssembler:
         messages = await prompt_assembler.build_prompt(
             conversation_id=sample_conversation_id,
             current_user_message="What should I eat for dinner?",
-            reply_token_budget=800,
-            history_budget=5000
+            reply_token_budget=500,  # Updated to match config default
+            history_budget=7500   # Updated to match config default
         )
         
         # Verify structure
@@ -229,8 +229,8 @@ class TestPromptAssembler:
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id,
             current_user_message="What should I eat for dinner?",
-            reply_token_budget=800,
-            history_budget=5000
+            reply_token_budget=500,  # Updated to match config default
+            history_budget=7500   # Updated to match config default
         )
         
         # Verify metadata structure
@@ -248,7 +248,7 @@ class TestPromptAssembler:
         assert "reply_reserved" in token_counts
         
         # Verify token accounting
-        assert token_counts["reply_reserved"] == 800
+        assert token_counts["reply_reserved"] == 500  # Updated to match config default
         assert metadata["total_tokens"] > 0
         
         # Verify memory inclusion
@@ -327,7 +327,7 @@ class TestPromptAssembler:
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id,
             current_user_message="Test message",
-            history_budget=5000
+            history_budget=7500  # Updated to match config default
         )
         
         # Should have truncated the long message
@@ -379,6 +379,7 @@ class TestPromptAssembler:
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id,
             current_user_message="Test message"
+            # Using default values from config
         )
         
         # Should still work without memories
@@ -397,6 +398,7 @@ class TestPromptAssembler:
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id,
             current_user_message="Test message"
+            # Using default values from config
         )
         
         # Should still include system message and current message
@@ -425,6 +427,7 @@ class TestPromptAssembler:
         messages, metadata = await assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id,
             current_user_message="Test message"
+            # Using default values from config
         )
         
         # Should not include system template
@@ -444,6 +447,7 @@ class TestPromptAssembler:
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id,
             current_user_message="What should I eat for dinner?"
+            # Using default values from config
         )
         
         # Verify ordering: system messages first, then history, then current user message
@@ -479,6 +483,7 @@ class TestEdgeCases:
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id,
             current_user_message="Test message"
+            # Using default values from config
         )
         
         # Should at least have system template and current message

@@ -20,6 +20,7 @@ from .templates import (
     create_user_profile_message,
     create_memory_context_message,
 )
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -144,8 +145,8 @@ class PromptAssembler:
         self,
         conversation_id: str,
         current_user_message: str,
-        reply_token_budget: int = 800,
-        history_budget: int = 5000
+        reply_token_budget: int = None,
+        history_budget: int = None
     ) -> List[Dict[str, str]]:
         """
         Build a chat prompt for LLM request.
@@ -153,8 +154,8 @@ class PromptAssembler:
         Args:
             conversation_id: UUID string of the conversation
             current_user_message: The current user message to process
-            reply_token_budget: Tokens reserved for LLM reply
-            history_budget: Tokens available for history and memories
+            reply_token_budget: Tokens reserved for LLM reply (default from config)
+            history_budget: Tokens available for history and memories (default from config)
             
         Returns:
             List of message dicts with 'role' and 'content' keys, ordered for LLM
@@ -162,6 +163,12 @@ class PromptAssembler:
         Raises:
             ValueError: If conversation_id is invalid or current_user_message is empty
         """
+        # Use config defaults if not provided
+        if reply_token_budget is None:
+            reply_token_budget = config.PROMPT_REPLY_TOKEN_BUDGET
+        if history_budget is None:
+            history_budget = config.PROMPT_HISTORY_BUDGET
+            
         messages, _ = await self.build_prompt_and_metadata(
             conversation_id, current_user_message, reply_token_budget, history_budget
         )
@@ -171,8 +178,8 @@ class PromptAssembler:
         self,
         conversation_id: str,
         current_user_message: str,
-        reply_token_budget: int = 800,
-        history_budget: int = 5000
+        reply_token_budget: int = None,
+        history_budget: int = None
     ) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
         """
         Build a chat prompt with detailed metadata.
@@ -180,8 +187,8 @@ class PromptAssembler:
         Args:
             conversation_id: UUID string of the conversation
             current_user_message: The current user message to process
-            reply_token_budget: Tokens reserved for LLM reply
-            history_budget: Tokens available for history and memories
+            reply_token_budget: Tokens reserved for LLM reply (default from config)
+            history_budget: Tokens available for history and memories (default from config)
             
         Returns:
             Tuple of (messages, metadata) where:
@@ -191,6 +198,12 @@ class PromptAssembler:
         Raises:
             ValueError: If inputs are invalid
         """
+        # Use config defaults if not provided
+        if reply_token_budget is None:
+            reply_token_budget = config.PROMPT_REPLY_TOKEN_BUDGET
+        if history_budget is None:
+            history_budget = config.PROMPT_HISTORY_BUDGET
+            
         if not conversation_id:
             raise ValueError("conversation_id cannot be empty")
         if not current_user_message or not current_user_message.strip():

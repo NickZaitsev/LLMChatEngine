@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-async def test_storage_connection(db_url: str) -> bool:
+async def _test_storage_connection(db_url: str) -> bool:
     """Test basic storage connection and operations."""
     try:
         logger.info("Testing storage connection...")
@@ -123,7 +123,7 @@ async def test_storage_connection(db_url: str) -> bool:
         return False
 
 
-async def test_conversation_manager(db_url: str) -> bool:
+async def _test_conversation_manager(db_url: str) -> bool:
     """Test the PostgresConversationManager."""
     try:
         logger.info("Testing PostgresConversationManager...")
@@ -184,14 +184,14 @@ async def main():
     logger.info("\n" + "="*50)
     logger.info("TEST 1: Basic Storage Operations")
     logger.info("="*50)
-    if not await test_storage_connection(db_url):
+    if not await _test_storage_connection(db_url):
         success = False
     
     # Test conversation manager
     logger.info("\n" + "="*50)
     logger.info("TEST 2: Conversation Manager")
     logger.info("="*50)
-    if not await test_conversation_manager(db_url):
+    if not await _test_conversation_manager(db_url):
         success = False
     
     # Final result

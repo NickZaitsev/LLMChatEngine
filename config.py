@@ -26,7 +26,6 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 
 # Database Configuration
 DATABASE_URL = os.getenv('DATABASE_URL')
-USE_POSTGRES = os.getenv('USE_POSTGRES', 'false').lower() in ('true', '1', 'yes', 'on')
 USE_PGVECTOR = os.getenv('USE_PGVECTOR', 'true').lower() in ('true', '1', 'yes', 'on')
 DB_PASSWORD = os.getenv('DB_PASSWORD', 'ai_bot_pass')
 
@@ -58,14 +57,29 @@ MAX_CONTEXT_TOKENS = int(os.getenv('MAX_CONTEXT_TOKENS', str(DEFAULT_MAX_CONTEXT
 RESERVED_TOKENS = int(os.getenv('RESERVED_TOKENS', str(DEFAULT_RESERVED_TOKENS)))
 AVAILABLE_HISTORY_TOKENS = MAX_CONTEXT_TOKENS - RESERVED_TOKENS
 
+# PromptAssembler Configuration
+PROMPT_MAX_MEMORY_ITEMS = int(os.getenv('PROMPT_MAX_MEMORY_ITEMS', '3'))
+PROMPT_MEMORY_TOKEN_BUDGET_RATIO = float(os.getenv('PROMPT_MEMORY_TOKEN_BUDGET_RATIO', '0.4'))
+PROMPT_TRUNCATION_LENGTH = int(os.getenv('PROMPT_TRUNCATION_LENGTH', '200'))
+PROMPT_INCLUDE_SYSTEM_TEMPLATE = os.getenv('PROMPT_INCLUDE_SYSTEM_TEMPLATE', 'true').lower() in ('true', '1', 'yes', 'on')
+PROMPT_HISTORY_BUDGET = int(os.getenv('PROMPT_HISTORY_BUDGET', str(AVAILABLE_HISTORY_TOKENS)))
+PROMPT_REPLY_TOKEN_BUDGET = int(os.getenv('PROMPT_REPLY_TOKEN_BUDGET', str(RESERVED_TOKENS)))
+
+# Memory Manager Configuration
+MEMORY_EMBED_MODEL = os.getenv('MEMORY_EMBED_MODEL', 'sentence-transformers/all-MiniLM-L6-v2')
+MEMORY_SUMMARIZER_MODE = os.getenv('MEMORY_SUMMARIZER_MODE', 'llm')  # 'llm' or 'local'
+MEMORY_CHUNK_OVERLAP = int(os.getenv('MEMORY_CHUNK_OVERLAP', '2'))
+MEMORY_ENABLED = os.getenv('MEMORY_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
+
 # Validation
 def _validate_config():
     """Validate configuration and warn about issues"""
     if not TELEGRAM_TOKEN:
         warnings.warn("TELEGRAM_TOKEN is not set. The bot cannot run without it.")
 
-    if USE_POSTGRES and not DATABASE_URL:
-        warnings.warn("USE_POSTGRES is enabled but DATABASE_URL is not set")
+    
+    if not DATABASE_URL:
+        warnings.warn("DATABASE_URL is required for PostgreSQL storage.")
 
     if PROVIDER not in ['azure', 'lmstudio']:
         warnings.warn(f"PROVIDER '{PROVIDER}' is not supported. Supported values: 'azure', 'lmstudio'")
@@ -85,6 +99,20 @@ def _validate_config():
             warnings.warn("LMSTUDIO_BASE_URL is not set for LM Studio provider")
         if LMSTUDIO_MAX_LOAD_WAIT < 30:
             warnings.warn("LMSTUDIO_MAX_LOAD_WAIT is very low, model loading might timeout")
+    
+    # PromptAssembler validation
+    if PROMPT_MEMORY_TOKEN_BUDGET_RATIO < 0 or PROMPT_MEMORY_TOKEN_BUDGET_RATIO > 1:
+        warnings.warn("PROMPT_MEMORY_TOKEN_BUDGET_RATIO should be between 0 and 1")
+    if PROMPT_MAX_MEMORY_ITEMS < 1:
+        warnings.warn("PROMPT_MAX_MEMORY_ITEMS should be at least 1")
+    if PROMPT_HISTORY_BUDGET > MAX_CONTEXT_TOKENS:
+        warnings.warn("PROMPT_HISTORY_BUDGET should not exceed MAX_CONTEXT_TOKENS")
+    if PROMPT_REPLY_TOKEN_BUDGET > MAX_CONTEXT_TOKENS:
+        warnings.warn("PROMPT_REPLY_TOKEN_BUDGET should not exceed MAX_CONTEXT_TOKENS")
+    
+    # Memory Manager validation
+    if MEMORY_ENABLED and MEMORY_SUMMARIZER_MODE not in ['llm', 'local']:
+        warnings.warn("MEMORY_SUMMARIZER_MODE must be 'llm' or 'local'")
 
 # Perform validation
 _validate_config()
