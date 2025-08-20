@@ -76,8 +76,6 @@ class AIGirlfriendBot:
 		self.prompt_assembler = None
 		self._memory_initialized = False
 		
-		# Initialize personality manager (will be set up after storage initialization)
-		self.personality_manager = None
 		self.user_states = {}  # Track user interaction states
 	
 	def _is_user_rate_limited(self, user_id: int) -> bool:
@@ -580,7 +578,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 			# Make the actual AI request
 			logger.info("Generating AI response for user %s", user_id)
 			ai_response = await asyncio.wait_for(
-				self.ai_handler.generate_response(user_message, conversation_history, conversation_id, user_id),
+				self.ai_handler.generate_response(user_message, conversation_history, conversation_id),
 				timeout=REQUEST_TIMEOUT
 			)
 			
@@ -780,8 +778,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 				message_repo=storage.messages,
 				memory_manager=self.memory_manager,
 				persona_repo=storage.personas,
-				config=prompt_config,
-				personality_manager=self.personality_manager
+				config=prompt_config
 			)
 			logger.info("PromptAssembler initialized successfully")
 			
