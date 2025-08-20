@@ -209,7 +209,7 @@ class PromptAssembler:
         if not current_user_message or not current_user_message.strip():
             raise ValueError("current_user_message cannot be empty")
         
-        logger.debug(f"Building prompt for conversation {conversation_id[:8]}...")
+        logger.info(f"Building prompt for conversation {conversation_id[:8]}...")
         
         # Validate conversation_id format
         try:
@@ -227,7 +227,7 @@ class PromptAssembler:
         }
         included_memory_ids = []
         truncated_message_ids = []
-        
+
         # 1. Add system template if enabled
         if self.include_system_template:
             system_message = {"role": "system", "content": SYSTEM_TEMPLATE}

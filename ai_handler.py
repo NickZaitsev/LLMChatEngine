@@ -25,8 +25,8 @@ except ImportError:
 # Constants
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_BASE_DELAY = 1.0
-DEFAULT_MAX_DELAY = 60.0
-DEFAULT_REQUEST_TIMEOUT = 120.0
+DEFAULT_MAX_DELAY = 180.0
+DEFAULT_REQUEST_TIMEOUT = 360.0
 RETRYABLE_ERROR_PATTERNS = [
     "rate limit", "429", "ratelimitreached", "too many requests",
     "timeout", "timed out", "request timeout",

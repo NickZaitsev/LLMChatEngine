@@ -11,6 +11,11 @@ DEFAULT_MAX_TOKENS = 3000
 DEFAULT_TEMPERATURE = 0.8
 DEFAULT_MAX_CONTEXT_TOKENS = 8000
 DEFAULT_RESERVED_TOKENS = 500
+# Bot Constants
+RATE_LIMIT_DURATION = 60
+REQUEST_TIMEOUT = 80.0
+MESSAGE_PREVIEW_LENGTH = 50
+SHORT_MESSAGE_THRESHOLD = 10
 
 DEFAULT_BOT_PERSONALITY = (
     f"You are {DEFAULT_BOT_NAME}, a caring and affectionate AI girlfriend. You are sweet, supportive, and always there to listen. "
@@ -40,7 +45,7 @@ LMSTUDIO_BASE_URL = os.getenv('LMSTUDIO_BASE_URL', 'http://host-machine:1234/v1'
 # LM Studio Model Loading Configuration
 LMSTUDIO_AUTO_LOAD = os.getenv('LMSTUDIO_AUTO_LOAD', 'true').lower() in ('true', '1', 'yes', 'on')
 LMSTUDIO_MAX_LOAD_WAIT = int(os.getenv('LMSTUDIO_MAX_LOAD_WAIT', '300'))
-LMSTUDIO_SERVER_TIMEOUT = int(os.getenv('LMSTUDIO_SERVER_TIMEOUT', '30'))
+LMSTUDIO_SERVER_TIMEOUT = int(os.getenv('LMSTUDIO_SERVER_TIMEOUT', '80'))
 LMSTUDIO_STARTUP_CHECK = os.getenv('LMSTUDIO_STARTUP_CHECK', 'true').lower() in ('true', '1', 'yes', 'on')
 
 # Bot Personality Configuration
