@@ -14,7 +14,7 @@ from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                    MEMORY_EMBED_MODEL, MEMORY_SUMMARIZER_MODE, MEMORY_CHUNK_OVERLAP,
                    RATE_LIMIT_DURATION, REQUEST_TIMEOUT, MESSAGE_PREVIEW_LENGTH, SHORT_MESSAGE_THRESHOLD)
 from storage_conversation_manager import PostgresConversationManager
-from ai_handler import AIHandler
+from ai_handler import AIHandler, send_ai_response
 from typing_manager import TypingIndicatorManager
 
 # PromptAssembler and Memory Manager imports (conditional)
@@ -546,12 +546,12 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 		
 		# Send final response to user
 		try:
-			await update.message.reply_text(ai_response)
+			await send_ai_response(chat_id=chat_id, text=ai_response, bot=context.bot)
 			logger.info("Response sent to user %s", user_id)
 		except Exception as e:
 			logger.error("Failed to send response to user %s: %s", user_id, e)
 			try:
-				await update.message.reply_text("😔 I'm having trouble sending my response. Please try again! 💕")
+				await send_ai_response(chat_id=chat_id, text="😔 I'm having trouble sending my response. Please try again! 💕", bot=context.bot)
 			except Exception:
 				logger.error("Failed to send error message to user %s", user_id)
 	
