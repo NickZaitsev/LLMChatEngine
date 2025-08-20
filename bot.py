@@ -520,8 +520,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 			)
 			return
 		
-		# Store conversation message before starting LLM request
-		self.conversation_manager.add_message(user_id, "user", user_message)
+		# Get conversation history (without pre-adding the current message)
 		conversation_history = await self.conversation_manager.get_formatted_conversation_async(user_id)
 		
 		# Start typing indicator and get AI response
