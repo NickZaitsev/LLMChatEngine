@@ -11,7 +11,8 @@ from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                    PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED,
                    PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
                    PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
-                   MEMORY_EMBED_MODEL, MEMORY_SUMMARIZER_MODE, MEMORY_CHUNK_OVERLAP)
+                   MEMORY_EMBED_MODEL, MEMORY_SUMMARIZER_MODE, MEMORY_CHUNK_OVERLAP,
+                   RATE_LIMIT_DURATION, REQUEST_TIMEOUT, MESSAGE_PREVIEW_LENGTH, SHORT_MESSAGE_THRESHOLD)
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
 from typing_manager import TypingIndicatorManager
@@ -28,12 +29,6 @@ if MEMORY_ENABLED:
 else:
 	MEMORY_IMPORTS_AVAILABLE = False
 
-# Constants
-RATE_LIMIT_DURATION = 60
-REQUEST_TIMEOUT = 35.0
-MESSAGE_PREVIEW_LENGTH = 50
-SHORT_MESSAGE_THRESHOLD = 10
-
 # Set up logging
 logging.basicConfig(
 	format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -43,6 +38,20 @@ logger = logging.getLogger(__name__)
 
 
 class AIGirlfriendBot:
+	def _mask_db_url(self, db_url: str) -> str:
+		"""Mask sensitive parts of database URL for logging."""
+		try:
+			if '@' in db_url and '://' in db_url:
+				scheme_and_auth, rest = db_url.split('://', 1)
+				if '@' in rest:
+					auth, host_and_path = rest.split('@', 1)
+					if ':' in auth:
+						user, _ = auth.split(':', 1)
+						return f"{scheme_and_auth}://{user}:***@{host_and_path}"
+			return db_url[:20] + "***"
+		except Exception:
+			return "***masked***"
+	
 	def __init__(self):
 		# Initialize PostgreSQL conversation manager (required)
 		if not DATABASE_URL:
@@ -66,6 +75,10 @@ class AIGirlfriendBot:
 		self.memory_manager = None
 		self.prompt_assembler = None
 		self._memory_initialized = False
+		
+		# Initialize personality manager (will be set up after storage initialization)
+		self.personality_manager = None
+		self.user_states = {}  # Track user interaction states
 	
 	def _is_user_rate_limited(self, user_id: int) -> bool:
 		"""Check if a user is currently rate limited"""
@@ -132,14 +145,12 @@ Here are the commands you can use:
 /start - Start a new conversation with me
 /help - Show this help message
 /ping - Quick health check (no AI required)
-/deps - Check dependencies status
 /clear - Clear our conversation history
 /stats - Show our chat statistics
 /status - Check bot and AI service health
 /debug - Show current conversation history
 /personality - Change my personality
 /reset - Clear rate limits and conversation history
-/stop - Stop our conversation
 
 You can also just send me messages and I'll respond naturally!
 
@@ -312,6 +323,8 @@ Use /help to see all available commands!"""
 		await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 		
 		user_id = update.effective_user.id
+		user_name = update.effective_user.first_name or update.effective_user.username or "there"
+		
 		logger.info("Personality command from user %s", user_id)
 		
 		keyboard = [
@@ -567,7 +580,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 			# Make the actual AI request
 			logger.info("Generating AI response for user %s", user_id)
 			ai_response = await asyncio.wait_for(
-				self.ai_handler.generate_response(user_message, conversation_history, conversation_id),
+				self.ai_handler.generate_response(user_message, conversation_history, conversation_id, user_id),
 				timeout=REQUEST_TIMEOUT
 			)
 			
@@ -711,8 +724,9 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 		"""Initialize MemoryManager and PromptAssembler if enabled"""
 		if not MEMORY_IMPORTS_AVAILABLE:
 			if MEMORY_ENABLED:
-				logger.warning("Memory components requested but imports failed - running without memory/prompt features")
-			return
+				raise RuntimeError("Memory components are required but imports failed. Please check your installation.")
+			else:
+				raise RuntimeError("Memory components are required but not enabled. Please enable MEMORY_ENABLED in config.")
 		
 		if not hasattr(self.conversation_manager, 'storage') or not self.conversation_manager.storage:
 			raise RuntimeError("PostgreSQL storage not available for memory components. Ensure PostgreSQL is properly initialized.")
@@ -720,73 +734,67 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 		try:
 			storage = self.conversation_manager.storage
 			
-			# Initialize MemoryManager if enabled
-			if MEMORY_ENABLED:
-				# Create LLM summarize function that uses our AI handler
-				async def llm_summarize_func(text: str, instruction: str = None) -> str:
-					"""Summarization function using the bot's AI handler"""
-					try:
-						prompt = f"Please summarize the following conversation text:\n\n{text}"
-						if instruction:
-							prompt = f"{instruction}\n\n{text}"
-						
-						# Use a simple conversation history for summarization
-						simple_history = [{"role": "user", "content": prompt}]
-						response = await self.ai_handler.generate_response(prompt, [])
-						return response
-					except Exception as e:
-						logger.error("LLM summarization failed: %s", e)
-						return f"Summary unavailable due to error: {str(e)[:100]}"
-				
-				# Memory manager configuration
-				memory_config = {
-					"embed_model": MEMORY_EMBED_MODEL,
-					"summarizer_mode": MEMORY_SUMMARIZER_MODE,
-					"llm_summarize": llm_summarize_func,
-					"chunk_overlap": MEMORY_CHUNK_OVERLAP
-				}
-				
-				self.memory_manager = MemoryManager(
-					message_repo=storage.messages,
-					memory_repo=storage.memories,
-					conversation_repo=storage.conversations,
-					config=memory_config
-				)
-				logger.info("MemoryManager initialized successfully")
+			# Initialize MemoryManager - now required
+			# Create LLM summarize function that uses our AI handler
+			async def llm_summarize_func(text: str, instruction: str = None) -> str:
+				"""Summarization function using the bot's AI handler"""
+				try:
+					prompt = f"Please summarize the following conversation text:\n\n{text}"
+					if instruction:
+						prompt = f"{instruction}\n\n{text}"
+					
+					# Use a simple conversation history for summarization
+					simple_history = [{"role": "user", "content": prompt}]
+					response = await self.ai_handler.generate_response(prompt, [], None)  # No conversation_id for summarization
+					return response
+				except Exception as e:
+					logger.error("LLM summarization failed: %s", e)
+					return f"Summary unavailable due to error: {str(e)[:100]}"
 			
-			# Initialize PromptAssembler if enabled
-			if self.memory_manager:
-				# PromptAssembler configuration
-				prompt_config = {
-					"max_memory_items": PROMPT_MAX_MEMORY_ITEMS,
-					"memory_token_budget_ratio": PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
-					"truncation_length": PROMPT_TRUNCATION_LENGTH,
-					"include_system_template": PROMPT_INCLUDE_SYSTEM_TEMPLATE
-				}
-				
-				self.prompt_assembler = PromptAssembler(
-					message_repo=storage.messages,
-					memory_manager=self.memory_manager,
-					persona_repo=storage.personas,
-					config=prompt_config
-				)
-				logger.info("PromptAssembler initialized successfully")
-				
-				# Set PromptAssembler in AIHandler
-				self.ai_handler.set_prompt_assembler(self.prompt_assembler)
-				logger.info("PromptAssembler integrated with AIHandler")
-				
-			else:
-				logger.warning("PromptAssembler requires MemoryManager - running without prompt assembly")
+			# Memory manager configuration
+			memory_config = {
+				"embed_model": MEMORY_EMBED_MODEL,
+				"summarizer_mode": MEMORY_SUMMARIZER_MODE,
+				"llm_summarize": llm_summarize_func,
+				"chunk_overlap": MEMORY_CHUNK_OVERLAP
+			}
+			
+			self.memory_manager = MemoryManager(
+				message_repo=storage.messages,
+				memory_repo=storage.memories,
+				conversation_repo=storage.conversations,
+				config=memory_config
+			)
+			logger.info("MemoryManager initialized successfully")
+			
+			# Initialize PromptAssembler - now required
+			# PromptAssembler configuration
+			prompt_config = {
+				"max_memory_items": PROMPT_MAX_MEMORY_ITEMS,
+				"memory_token_budget_ratio": PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
+				"truncation_length": PROMPT_TRUNCATION_LENGTH,
+				"include_system_template": PROMPT_INCLUDE_SYSTEM_TEMPLATE
+			}
+			
+			self.prompt_assembler = PromptAssembler(
+				message_repo=storage.messages,
+				memory_manager=self.memory_manager,
+				persona_repo=storage.personas,
+				config=prompt_config,
+				personality_manager=self.personality_manager
+			)
+			logger.info("PromptAssembler initialized successfully")
+			
+			# Set PromptAssembler in AIHandler
+			self.ai_handler.set_prompt_assembler(self.prompt_assembler)
+			logger.info("PromptAssembler integrated with AIHandler")
 			
 			self._memory_initialized = True
 			logger.info("Memory components initialization completed")
 			
 		except Exception as e:
 			logger.error("Failed to initialize memory components: %s", e)
-			logger.warning("Bot will continue without memory/prompt features")
-			self.memory_manager = None
-			self.prompt_assembler = None
+			raise RuntimeError(f"Memory components are required but failed to initialize: {e}") from e
 	
 	async def _initialize_lmstudio_model(self):
 		"""Initialize LM Studio model loading if needed"""
@@ -833,6 +841,26 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 				logger.error("Error during LM Studio model initialization: %s", e)
 				logger.warning("Bot will continue startup, but LM Studio model may not be loaded")
 
+	async def _initialize_embedding_model(self):
+		"""Initialize the sentence-transformers embedding model for memory functionality"""
+		if MEMORY_ENABLED and self.memory_manager:
+			try:
+				logger.info("Initializing embedding model: %s", MEMORY_EMBED_MODEL)
+					
+					# Import the embedding module
+				from memory.embedding import _load_model
+					
+					# Preload the embedding model
+				_load_model(MEMORY_EMBED_MODEL)
+					
+				logger.info("✅ Embedding model %s loaded and ready", MEMORY_EMBED_MODEL)
+			except ImportError as e:
+				logger.error("Failed to import embedding module: %s", e)
+				logger.warning("Embedding functionality may not work properly")
+			except Exception as e:
+				logger.error("Error during embedding model initialization: %s", e)
+				logger.warning("Bot will continue startup, but embedding model may not be loaded")
+
 	async def cleanup(self):
 		"""Cleanup resources when shutting down"""
 		logger.info("Cleaning up bot resources...")
@@ -849,20 +877,6 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 				logger.info("Storage connection cleaned up successfully")
 			except Exception as e:
 				logger.error("Error during storage cleanup: %s", e)
-	
-	def _mask_db_url(self, db_url: str) -> str:
-		"""Mask sensitive parts of database URL for logging."""
-		try:
-			if '@' in db_url and '://' in db_url:
-				scheme_and_auth, rest = db_url.split('://', 1)
-				if '@' in rest:
-					auth, host_and_path = rest.split('@', 1)
-					if ':' in auth:
-						user, _ = auth.split(':', 1)
-						return f"{scheme_and_auth}://{user}:***@{host_and_path}"
-			return db_url[:20] + "***"
-		except Exception:
-			return "***masked***"
 
 	def run(self):
 		"""Start the bot"""
@@ -876,6 +890,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 			await self._initialize_storage()
 			await self._initialize_memory_components()
 			await self._initialize_lmstudio_model()
+			await self._initialize_embedding_model()
 		
 		# Run initialization
 		import asyncio
@@ -901,9 +916,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 		self.application.add_handler(CommandHandler("status", self.status_command))
 		self.application.add_handler(CommandHandler("debug", self.debug_command))
 		self.application.add_handler(CommandHandler("personality", self.personality_command))
-		self.application.add_handler(CommandHandler("stop", self.stop_command))
 		self.application.add_handler(CommandHandler("reset", self.reset_command))
-		self.application.add_handler(CommandHandler("deps", self.deps_command))
 		
 		# Add callback query handler for inline keyboards
 		self.application.add_handler(CallbackQueryHandler(self.handle_callback_query))
