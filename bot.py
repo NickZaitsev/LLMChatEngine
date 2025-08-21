@@ -547,7 +547,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         
         # Send final response to user
         try:
-            await send_ai_response(chat_id=chat_id, text=ai_response, bot=context.bot)
+            await send_ai_response(chat_id=chat_id, text=ai_response, bot=context.bot, typing_manager=self.typing_manager)
             logger.info("Response sent to user %s", user_id)
         except Exception as e:
             logger.error("Failed to send response to user %s: %s", user_id, e)

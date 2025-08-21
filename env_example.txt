@@ -95,4 +95,19 @@ MEMORY_CHUNK_OVERLAP=2
 # - The bot will ensure your model is loaded before processing any requests!
 #
 # ⚠️  IMPORTANT: You must configure at least one provider for AI responses to work!
+# Typing Simulation Configuration
+# Minimum typing speed in characters per second
+MIN_TYPING_SPEED=10
+
+# Maximum typing speed in characters per second
+MAX_TYPING_SPEED=30
+
+# Maximum delay in seconds between messages
+MAX_DELAY=5
+
+# Minimum random offset in seconds
+RANDOM_OFFSET_MIN=0.1
+
+# Maximum random offset in seconds
+RANDOM_OFFSET_MAX=0.5
 
