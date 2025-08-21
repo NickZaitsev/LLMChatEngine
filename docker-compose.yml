@@ -39,9 +39,9 @@ services:
       - backup_network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ai_bot -d ai_bot"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 5s
+      timeout: 3s
+      retries: 3
 
   postgres-backup:
     build: ./backup
