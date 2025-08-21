@@ -17,6 +17,26 @@ class Message:
 
 
 @dataclass
+class MessageLog:
+    """Data class representing a message log entry"""
+    id: UUID
+    user_id: UUID
+    role: str
+    content: str
+    created_at: datetime
+
+
+@dataclass
+class MessageUser:
+    """Data class representing a user message"""
+    id: UUID
+    user_id: UUID
+    role: str
+    content: str
+    created_at: datetime
+
+
+@dataclass
 class Memory:
     """Data class representing a memory entry"""
     id: UUID
@@ -69,6 +89,16 @@ class MessageRepo(Protocol):
     async def delete_messages(self, conversation_id: str) -> int: ...
     
     def estimate_tokens(self, text: str) -> int: ...
+
+
+class MessageHistoryRepo(Protocol):
+    """Protocol for message history repository operations"""
+    
+    async def save_message(self, user_id: UUID, role: str, content: str) -> tuple[MessageLog, MessageUser]: ...
+    
+    async def get_user_history(self, user_id: UUID, limit: int = 100) -> List[MessageUser]: ...
+    
+    async def clear_user_history(self, user_id: UUID) -> int: ...
 
 
 class MemoryRepo(Protocol):

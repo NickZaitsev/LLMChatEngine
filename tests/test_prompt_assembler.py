@@ -202,16 +202,13 @@ class TestPromptAssembler:
         # Build prompt
         messages = await prompt_assembler.build_prompt(
             conversation_id=sample_conversation_id,
-            current_user_message="What should I eat for dinner?",
             reply_token_budget=500,  # Updated to match config default
             history_budget=7500   # Updated to match config default
         )
         
         # Verify structure
-        assert len(messages) >= 4  # system + profile + memories + history + current
+        assert len(messages) >= 3  # system + profile + memories + history
         assert messages[0]["role"] == "system"
-        assert messages[-1]["role"] == "user"
-        assert messages[-1]["content"] == "What should I eat for dinner?"
         
         # Verify system template is included
         assert SYSTEM_TEMPLATE in messages[0]["content"]
@@ -228,7 +225,6 @@ class TestPromptAssembler:
         # Build prompt with metadata
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id,
-            current_user_message="What should I eat for dinner?",
             reply_token_budget=500,  # Updated to match config default
             history_budget=7500   # Updated to match config default
         )
@@ -266,7 +262,6 @@ class TestPromptAssembler:
         
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id,
-            current_user_message="Test message",
             history_budget=100  # Small budget
         )
         
@@ -297,7 +292,6 @@ class TestPromptAssembler:
         
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id,
-            current_user_message="Test message",
             history_budget=10000  # Large budget
         )
         
@@ -326,7 +320,6 @@ class TestPromptAssembler:
         
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id,
-            current_user_message="Test message",
             history_budget=7500  # Updated to match config default
         )
         
@@ -349,23 +342,20 @@ class TestPromptAssembler:
         """Test handling of invalid conversation ID"""
         with pytest.raises(ValueError, match="Invalid conversation_id format"):
             await prompt_assembler.build_prompt(
-                conversation_id="invalid-uuid",
-                current_user_message="Test message"
+                conversation_id="invalid-uuid"
             )
     
     @pytest.mark.asyncio
-    async def test_empty_user_message(self, prompt_assembler, sample_conversation_id):
-        """Test handling of empty user message"""
-        with pytest.raises(ValueError, match="current_user_message cannot be empty"):
+    async def test_empty_conversation_id(self, prompt_assembler):
+        """Test handling of empty conversation ID"""
+        with pytest.raises(ValueError, match="conversation_id cannot be empty"):
             await prompt_assembler.build_prompt(
-                conversation_id=sample_conversation_id,
-                current_user_message=""
+                conversation_id=""
             )
         
-        with pytest.raises(ValueError, match="current_user_message cannot be empty"):
-            await prompt_assembler.build_prompt(
-                conversation_id=sample_conversation_id,
-                current_user_message="   "  # Only whitespace
+        with pytest.raises(ValueError, match="conversation_id cannot be empty"):
+            await prompt_assembler.build_prompt_and_metadata(
+                conversation_id=""
             )
     
     @pytest.mark.asyncio
@@ -377,13 +367,12 @@ class TestPromptAssembler:
         prompt_assembler.memory_manager.memory_repo.list_memories.return_value = []
         
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
-            conversation_id=sample_conversation_id,
-            current_user_message="Test message"
+            conversation_id=sample_conversation_id
             # Using default values from config
         )
         
         # Should still work without memories
-        assert len(messages) >= 2  # At least system + current message
+        assert len(messages) >= 1  # At least system message
         assert metadata["token_counts"]["memory_tokens"] >= 0
         assert len(metadata["included_memory_ids"]) == 0
     
@@ -396,15 +385,13 @@ class TestPromptAssembler:
         prompt_assembler.memory_manager.memory_repo.list_memories.return_value = []
         
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
-            conversation_id=sample_conversation_id,
-            current_user_message="Test message"
+            conversation_id=sample_conversation_id
             # Using default values from config
         )
         
         # Should still include system message and current message
-        assert len(messages) >= 2
-        assert messages[-1]["content"] == "Test message"
-        assert metadata["token_counts"]["history_tokens"] > 0  # From current message
+        assert len(messages) >= 1
+        assert metadata["token_counts"]["history_tokens"] >= 0
     
     @pytest.mark.asyncio
     async def test_system_template_disabled(self, mock_message_repo, mock_memory_manager, 
@@ -425,8 +412,7 @@ class TestPromptAssembler:
         mock_memory_manager.memory_repo.list_memories.return_value = []
         
         messages, metadata = await assembler.build_prompt_and_metadata(
-            conversation_id=sample_conversation_id,
-            current_user_message="Test message"
+            conversation_id=sample_conversation_id
             # Using default values from config
         )
         
@@ -445,20 +431,17 @@ class TestPromptAssembler:
         prompt_assembler.memory_manager.memory_repo.list_memories.return_value = [sample_summary_memory]
         
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
-            conversation_id=sample_conversation_id,
-            current_user_message="What should I eat for dinner?"
+            conversation_id=sample_conversation_id
             # Using default values from config
         )
         
-        # Verify ordering: system messages first, then history, then current user message
+        # Verify ordering: system messages first, then history
         assert messages[0]["role"] == "system"  # System template first
-        assert messages[-1]["role"] == "user"  # Current message last
-        assert messages[-1]["content"] == "What should I eat for dinner?"
         
         # Verify all system messages come before user/assistant messages from history
         first_history_index = None
         for i, msg in enumerate(messages):
-            if msg["role"] in ["user", "assistant"] and msg["content"] != "What should I eat for dinner?":
+            if msg["role"] in ["user", "assistant"]:
                 first_history_index = i
                 break
         
@@ -481,14 +464,12 @@ class TestEdgeCases:
         
         # Should still work despite errors (with warnings logged)
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
-            conversation_id=sample_conversation_id,
-            current_user_message="Test message"
+            conversation_id=sample_conversation_id
             # Using default values from config
         )
         
-        # Should at least have system template and current message
-        assert len(messages) >= 2
-        assert messages[-1]["content"] == "Test message"
+        # Should at least have system template
+        assert len(messages) >= 1
     
     @pytest.mark.asyncio
     async def test_zero_budgets(self, prompt_assembler, sample_conversation_id):
@@ -500,7 +481,6 @@ class TestEdgeCases:
         
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id,
-            current_user_message="Test",
             reply_token_budget=0,
             history_budget=0
         )
