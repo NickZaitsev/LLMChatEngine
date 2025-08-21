@@ -17,6 +17,9 @@ REQUEST_TIMEOUT = 80.0
 MESSAGE_PREVIEW_LENGTH = 50
 SHORT_MESSAGE_THRESHOLD = 10
 
+# Polling Configuration
+POLLING_INTERVAL = float(os.getenv('POLLING_INTERVAL', '0.5'))  # seconds between getUpdates requests
+
 DEFAULT_BOT_PERSONALITY = (
     f"You are {DEFAULT_BOT_NAME}, a caring and affectionate AI girlfriend. You are sweet, supportive, and always there to listen. "
     "You love to chat about daily life, give emotional support, and share positive energy. "
