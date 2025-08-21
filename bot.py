@@ -12,7 +12,8 @@ from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                    PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
                    PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
                    MEMORY_EMBED_MODEL, MEMORY_SUMMARIZER_MODE, MEMORY_CHUNK_OVERLAP,
-                   RATE_LIMIT_DURATION, REQUEST_TIMEOUT, MESSAGE_PREVIEW_LENGTH, SHORT_MESSAGE_THRESHOLD)
+                   RATE_LIMIT_DURATION, REQUEST_TIMEOUT, MESSAGE_PREVIEW_LENGTH, SHORT_MESSAGE_THRESHOLD,
+                   POLLING_INTERVAL)
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
 from message_manager import TypingIndicatorManager, send_ai_response
@@ -839,24 +840,27 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                 logger.warning("Bot will continue startup, but LM Studio model may not be loaded")
     
     async def _initialize_embedding_model(self):
-        """Initialize the sentence-transformers embedding model for memory functionality"""
-        if MEMORY_ENABLED and self.memory_manager:
-            try:
-                logger.info("Initializing embedding model: %s", MEMORY_EMBED_MODEL)
-                    
-                # Import the embedding module
-                from memory.embedding import _load_model
-                    
-                # Preload the embedding model
-                _load_model(MEMORY_EMBED_MODEL)
-                    
-                logger.info("✅ Embedding model %s loaded and ready", MEMORY_EMBED_MODEL)
-            except ImportError as e:
-                logger.error("Failed to import embedding module: %s", e)
-                logger.warning("Embedding functionality may not work properly")
-            except Exception as e:
-                logger.error("Error during embedding model initialization: %s", e)
-                logger.warning("Bot will continue startup, but embedding model may not be loaded")
+            """Initialize the sentence-transformers embedding model for memory functionality"""
+            # Only initialize the sentence-transformers model when MEMORY_SUMMARIZER_MODE is 'local'
+            if MEMORY_ENABLED and self.memory_manager and MEMORY_SUMMARIZER_MODE == 'local':
+                try:
+                    logger.info("Initializing embedding model: %s", MEMORY_EMBED_MODEL)
+                        
+                    # Import the embedding module
+                    from memory.embedding import _load_model
+                        
+                    # Preload the embedding model
+                    _load_model(MEMORY_EMBED_MODEL)
+                        
+                    logger.info("✅ Embedding model %s loaded and ready", MEMORY_EMBED_MODEL)
+                except ImportError as e:
+                    logger.error("Failed to import embedding module: %s", e)
+                    logger.warning("Embedding functionality may not work properly")
+                except Exception as e:
+                    logger.error("Error during embedding model initialization: %s", e)
+                    logger.warning("Bot will continue startup, but embedding model may not be loaded")
+            elif MEMORY_ENABLED and self.memory_manager and MEMORY_SUMMARIZER_MODE != 'local':
+                logger.info("Skipping embedding model initialization - MEMORY_SUMMARIZER_MODE is not 'local'")
     
     async def cleanup(self):
         """Cleanup resources when shutting down"""
@@ -932,7 +936,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         print(f"🤖 {BOT_NAME} is starting up...")
         print("💕 Bot is now running! Press Ctrl+C to stop.")
         
-        self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+        self.application.run_polling(allowed_updates=Update.ALL_TYPES, poll_interval=POLLING_INTERVAL)
 
 
 async def shutdown_handler(bot_instance):

@@ -111,3 +111,7 @@ RANDOM_OFFSET_MIN=0.1
 # Maximum random offset in seconds
 RANDOM_OFFSET_MAX=0.5
 
+# Polling Configuration
+# Time in seconds between getUpdates requests (lower = more frequent updates, higher = less server load)
+POLLING_INTERVAL=0.1
+
