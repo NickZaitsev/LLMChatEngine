@@ -120,51 +120,7 @@ docker-compose down
 
 echo.
 echo 📦 Building and starting services...
-docker-compose up -d --build
-
-REM Wait a moment for services to start
-timeout /t 5 /nobreak >nul
-
-echo.
-echo 📊 Container Status:
-docker-compose ps
-
-echo.
-echo 🔍 Checking PostgreSQL health...
-timeout /t 3 /nobreak >nul
-docker-compose exec -T postgres pg_isready -U ai_bot -d ai_bot > pg_temp.txt 2>&1
-if %errorlevel% equ 0 (
-    del pg_temp.txt 2>nul
-    echo ✅ PostgreSQL is ready
-) else (
-    del pg_temp.txt 2>nul
-    echo ⚠️ PostgreSQL may still be starting up...
-)
-
-echo.
-echo 📋 Useful Commands:
-echo   View logs:           docker-compose logs -f
-echo   View bot logs:       docker-compose logs -f ai-girlfriend-bot
-echo   View postgres logs:  docker-compose logs -f postgres
-echo   Stop services:       docker-compose down
-echo   Restart bot:         docker-compose restart ai-girlfriend-bot
-echo   Run tests:           docker-compose exec ai-girlfriend-bot python tests/test_postgres_storage.py
-echo.
-
-echo 🎉 AI Girlfriend Bot is starting with PostgreSQL!
-echo.
-echo 📝 Check logs with: docker-compose logs -f
-echo 🛑 Stop with: docker-compose down
-echo.
-
-REM Ask if user wants to see logs
-set /p "choice=Would you like to view the logs now? (y/n): "
-if /i "%choice%"=="y" (
-    echo.
-    echo 📋 Showing live logs (Press Ctrl+C to exit logs view)...
-    echo.
-    start cmd /k "docker-compose logs -f"
-)
+docker-compose up --build
 
 echo.
 echo ✨ Docker startup complete!
