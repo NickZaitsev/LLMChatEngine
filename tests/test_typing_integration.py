@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 async def test_typing_manager():
     """Test the TypingIndicatorManager class"""
     try:
-        from typing_manager import TypingIndicatorManager
+        from message_manager import TypingIndicatorManager
         
         logger.info("✓ TypingIndicatorManager imported successfully")
         
@@ -64,7 +64,7 @@ async def test_bot_integration():
     try:
         # Test imports
         from bot import AIGirlfriendBot
-        from typing_manager import TypingIndicatorManager
+        from message_manager import TypingIndicatorManager
         
         logger.info("✓ Bot and TypingIndicatorManager imported successfully")
         
@@ -152,7 +152,7 @@ async def test_message_flow_simulation():
         mock_context.bot.send_chat_action = AsyncMock()
         
         # Test the new flow components
-        from typing_manager import TypingIndicatorManager
+        from message_manager import TypingIndicatorManager
         typing_manager = TypingIndicatorManager()
         
         chat_id = mock_update.effective_chat.id

@@ -7,7 +7,7 @@ This module tests the message splitting functionality for various message length
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 import textwrap
-from ai_handler import send_ai_response
+from message_manager import send_ai_response
 
 
 def simulate_send_ai_response(text):

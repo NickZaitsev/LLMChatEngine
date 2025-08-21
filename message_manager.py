@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import textwrap
 from typing import Dict, Set
 from telegram import Bot
 
@@ -94,3 +95,25 @@ class TypingIndicatorManager:
         """Cleanup method to stop all typing indicators"""
         await self.stop_all_typing()
         self._typing_locks.clear()
+
+
+async def send_ai_response(chat_id: int, text: str, bot):
+    """
+    Splits AI response into safe message chunks and sends them sequentially.
+    
+    :param chat_id: Telegram chat ID
+    :param text: Raw AI model response (string)
+    :param bot: Telegram bot instance
+    """
+    # Split by paragraphs
+    parts = text.split("\n\n")
+    
+    # Chunk long parts
+    safe_parts = []
+    for part in parts:
+        chunks = textwrap.wrap(part, width=4000, break_long_words=False, break_on_hyphens=False)
+        safe_parts.extend(chunks)
+    
+    # Send each processed part as an individual sendMessage call to Telegram in sequence
+    for part in safe_parts:
+        await bot.send_message(chat_id=chat_id, text=part)
