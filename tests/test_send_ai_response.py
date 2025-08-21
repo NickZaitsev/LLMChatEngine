@@ -7,13 +7,16 @@ This module tests the message splitting functionality for various message length
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 import textwrap
-from message_manager import send_ai_response, TypingIndicatorManager
+from message_manager import send_ai_response, TypingIndicatorManager, clean_ai_response
 
 
 def simulate_send_ai_response(text):
     """
     Simulate the send_ai_response function to generate expected results for testing
     """
+    # Clean the text before processing
+    text = clean_ai_response(text)
+    
     # Split by paragraphs
     parts = text.split("\n\n")
     
@@ -176,7 +179,35 @@ class TestSendAIResponse:
             call_args = mock_bot.send_message.call_args_list[i]
             args, kwargs = call_args
             assert kwargs['text'] == expected_text
-    
+
+    @pytest.mark.asyncio
+    async def test_clean_text_functionality(self):
+        """Test that the clean_text function properly cleans the text"""
+        # Create a message with extra whitespace and newlines
+        dirty_message = "  \n\n  Hello world!  \n\n\n  This is a test.  \n\n  "
+        
+        # Create a mock bot
+        mock_bot = AsyncMock()
+        
+        # Call the function
+        await send_ai_response(chat_id=123, text=dirty_message, bot=mock_bot)
+        
+        # The expected cleaned text should have:
+        # - Leading/trailing whitespace removed
+        # - Multiple consecutive newlines reduced to double newlines
+        # - Leading/trailing whitespace removed from each line
+        # After splitting by "\n\n", we should get two parts
+        expected_parts = ["Hello world!", "This is a test."]
+        
+        # Verify the bot's send_message was called twice with the cleaned message parts
+        assert mock_bot.send_message.call_count == 2
+        
+        # Verify each call was made with the expected text
+        for i, expected_text in enumerate(expected_parts):
+            call_args = mock_bot.send_message.call_args_list[i]
+            args, kwargs = call_args
+            assert kwargs['text'] == expected_text
+
     @pytest.mark.asyncio
     async def test_message_with_only_paragraph_breaks(self):
         """Test behavior with a message containing only paragraph breaks"""

@@ -4,10 +4,30 @@ import random
 import time
 from config import MIN_TYPING_SPEED, MAX_TYPING_SPEED, MAX_DELAY, RANDOM_OFFSET_MIN, RANDOM_OFFSET_MAX
 import textwrap
+import re
 from typing import Dict, Set
 from telegram import Bot
 
 logger = logging.getLogger(__name__)
+def clean_ai_response(text: str) -> str:
+    """
+    Clean and normalize text by:
+    - Stripping leading/trailing whitespace
+    - Reducing multiple consecutive newlines to double newlines
+    - Removing leading/trailing whitespace from each line
+    """
+    text = text.strip()
+    
+    # Reduce multiple consecutive newlines to double newlines
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    # Remove leading/trailing whitespace from each line
+    text = re.sub(r'^[ \t]+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'[ \t]+$', '', text, flags=re.MULTILINE)
+
+    text = re.sub(r'\n{2,}\.\.\.', '\n\n', text)
+    
+    return text
 
 
 class TypingIndicatorManager:
@@ -109,6 +129,9 @@ async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'Typing
     :param bot: Telegram bot instance
     :param typing_manager: TypingIndicatorManager instance (optional)
     """
+    # Clean the text before processing
+    text = clean_ai_response(text)
+    
     # Split by paragraphs
     parts = text.split("\n\n")
     
