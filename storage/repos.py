@@ -13,14 +13,14 @@ from typing import List, Dict, Any, Optional, Union
 from uuid import UUID, uuid4
 from pathlib import Path
 
-from sqlalchemy import select, func, desc, and_, or_, text
+from sqlalchemy import select, func, desc, and_, or_, text, delete
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.exc import IntegrityError, NoResultFound
 
 from .interfaces import (
-    Message, Memory, Conversation, User, Persona,
-    MessageRepo, MemoryRepo, ConversationRepo, UserRepo, PersonaRepo
+    Message, Memory, Conversation, User, Persona, MessageLog, MessageUser,
+    MessageRepo, MemoryRepo, ConversationRepo, UserRepo, PersonaRepo, MessageHistoryRepo
 )
 from .models import (
     Message as MessageModel,
@@ -28,6 +28,8 @@ from .models import (
     Conversation as ConversationModel,
     User as UserModel,
     Persona as PersonaModel,
+    MessageLog as MessageLogModel,
+    MessageUser as MessageUserModel,
     PGVECTOR_AVAILABLE
 )
 
@@ -302,7 +304,6 @@ class PostgresMessageRepo:
         
         async with self.session_maker() as session:
             # Use bulk delete for efficiency
-            from sqlalchemy import delete
             stmt = delete(MessageModel).where(
                 MessageModel.conversation_id == conversation_uuid
             )
@@ -311,7 +312,8 @@ class PostgresMessageRepo:
             await session.commit()
             
             deleted_count = result.rowcount
-            logger.info("Deleted %d messages for conversation %s", deleted_count, conversation_id)
+            # Reduced logging - let the caller handle detailed logging
+            # logger.info("Deleted %d messages for conversation %s", deleted_count, conversation_id)
             return deleted_count
 
     def estimate_tokens(self, text: str) -> int:
@@ -325,6 +327,144 @@ class PostgresMessageRepo:
             Estimated token count
         """
         return self.token_estimator.estimate_tokens(text)
+
+
+class PostgresMessageHistoryRepo:
+    """PostgreSQL implementation of MessageHistoryRepo interface"""
+    
+    def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
+        """
+        Initialize the message history repository.
+        
+        Args:
+            session_maker: SQLAlchemy async session maker
+        """
+        self.session_maker = session_maker
+    
+    async def save_message(self, user_id: UUID, role: str, content: str) -> tuple[MessageLog, MessageUser]:
+        """
+        Save a message to both messages_log and messages_user tables.
+        
+        Args:
+            user_id: Telegram user ID (as UUID)
+            role: Role of the message sender ("user" | "bot")
+            content: The message content
+            
+        Returns:
+            Tuple of (MessageLog, MessageUser) objects
+        """
+        async with self.session_maker() as session:
+            try:
+                # Create message log entry (permanent)
+                message_log_model = MessageLogModel(
+                    user_id=user_id,
+                    role=role,
+                    content=content
+                )
+                
+                # Create user message entry (can be cleared)
+                message_user_model = MessageUserModel(
+                    user_id=user_id,
+                    role=role,
+                    content=content
+                )
+                
+                session.add(message_log_model)
+                session.add(message_user_model)
+                await session.commit()
+                await session.refresh(message_log_model)
+                await session.refresh(message_user_model)
+                
+                message_log = MessageLog(
+                    id=message_log_model.id,
+                    user_id=message_log_model.user_id,
+                    role=message_log_model.role,
+                    content=message_log_model.content,
+                    created_at=message_log_model.created_at
+                )
+                
+                message_user = MessageUser(
+                    id=message_user_model.id,
+                    user_id=message_user_model.user_id,
+                    role=message_user_model.role,
+                    content=message_user_model.content,
+                    created_at=message_user_model.created_at
+                )
+                
+                # Reduced logging - let the caller handle detailed logging
+                # logger.info("Saved message to both tables: user_id=%s, role=%s, length=%d chars", 
+                #            user_id, role, len(content))
+                
+                return (message_log, message_user)
+                
+            except Exception as e:
+                await session.rollback()
+                logger.error("Failed to save message to history tables: %s", e)
+                raise
+    
+    async def get_user_history(self, user_id: UUID, limit: int = 100) -> List[MessageUser]:
+        """
+        Get user message history from messages_user table.
+        
+        Args:
+            user_id: Telegram user ID (as UUID)
+            limit: Maximum number of messages to return
+            
+        Returns:
+            List of MessageUser objects ordered by creation time
+        """
+        async with self.session_maker() as session:
+            try:
+                stmt = select(MessageUserModel).where(
+                    MessageUserModel.user_id == user_id
+                ).order_by(MessageUserModel.created_at).limit(limit)
+                
+                result = await session.execute(stmt)
+                messages = result.scalars().all()
+                
+                return [
+                    MessageUser(
+                        id=msg.id,
+                        user_id=msg.user_id,
+                        role=msg.role,
+                        content=msg.content,
+                        created_at=msg.created_at
+                    )
+                    for msg in messages
+                ]
+                
+            except Exception as e:
+                logger.error("Failed to get user history: %s", e)
+                return []
+    
+    async def clear_user_history(self, user_id: UUID) -> int:
+        """
+        Clear user message history from messages_user table only.
+        
+        Args:
+            user_id: Telegram user ID (as UUID)
+            
+        Returns:
+            Number of messages deleted
+        """
+        async with self.session_maker() as session:
+            try:
+                stmt = delete(MessageUserModel).where(
+                    MessageUserModel.user_id == user_id
+                )
+                
+                result = await session.execute(stmt)
+                await session.commit()
+                
+                deleted_count = result.rowcount
+                # Reduced logging - let the caller handle detailed logging
+                # logger.info("Cleared %d messages from messages_user table for user %s", deleted_count, user_id)
+                return deleted_count
+                
+            except Exception as e:
+                await session.rollback()
+                logger.error("Failed to clear user history: %s", e)
+                return 0
 
 
 class PostgresMemoryRepo:
@@ -963,6 +1103,7 @@ class PostgresPersonaRepo:
 __all__ = [
     'TokenEstimator',
     'PostgresMessageRepo',
+    'PostgresMessageHistoryRepo',
     'PostgresMemoryRepo', 
     'PostgresConversationRepo',
     'PostgresUserRepo',

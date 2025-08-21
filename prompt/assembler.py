@@ -142,7 +142,6 @@ class PromptAssembler:
     async def build_prompt(
         self,
         conversation_id: str,
-        current_user_message: str,
         reply_token_budget: int = None,
         history_budget: int = None
     ) -> List[Dict[str, str]]:
@@ -151,7 +150,6 @@ class PromptAssembler:
         
         Args:
             conversation_id: UUID string of the conversation
-            current_user_message: The current user message to process
             reply_token_budget: Tokens reserved for LLM reply (default from config)
             history_budget: Tokens available for history and memories (default from config)
             
@@ -159,7 +157,7 @@ class PromptAssembler:
             List of message dicts with 'role' and 'content' keys, ordered for LLM
             
         Raises:
-            ValueError: If conversation_id is invalid or current_user_message is empty
+            ValueError: If conversation_id is invalid
         """
         # Use config defaults if not provided
         if reply_token_budget is None:
@@ -168,14 +166,13 @@ class PromptAssembler:
             history_budget = config.PROMPT_HISTORY_BUDGET
             
         messages, _ = await self.build_prompt_and_metadata(
-            conversation_id, current_user_message, reply_token_budget, history_budget
+            conversation_id, reply_token_budget, history_budget
         )
         return messages
     
     async def build_prompt_and_metadata(
         self,
         conversation_id: str,
-        current_user_message: str,
         reply_token_budget: int = None,
         history_budget: int = None
     ) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
@@ -184,7 +181,6 @@ class PromptAssembler:
         
         Args:
             conversation_id: UUID string of the conversation
-            current_user_message: The current user message to process
             reply_token_budget: Tokens reserved for LLM reply (default from config)
             history_budget: Tokens available for history and memories (default from config)
             
@@ -204,8 +200,6 @@ class PromptAssembler:
             
         if not conversation_id:
             raise ValueError("conversation_id cannot be empty")
-        if not current_user_message or not current_user_message.strip():
-            raise ValueError("current_user_message cannot be empty")
         
         logger.info(f"Building prompt for conversation {conversation_id[:8]}...")
         
@@ -273,15 +267,14 @@ class PromptAssembler:
         
         # 5. Retrieve and add relevant memories
         try:
-            relevant_memories = await self.memory_manager.retrieve_relevant_memories(
-                current_user_message,
-                top_k=max(self.max_memory_items * 2, 6)  # Get more to filter by budget
-            )
+            # We don't have a current user message to use for relevance search anymore
+            # So we'll get all memories and filter by budget
+            all_memories = await self.memory_manager.memory_repo.list_memories(conversation_id)
             
             memory_snippets = []
             memory_tokens_used = 0
             
-            for memory in relevant_memories[:self.max_memory_items]:
+            for memory in all_memories[:self.max_memory_items]:
                 snippet = format_memory_snippet_from_record(memory)
                 snippet_tokens = self.token_counter.count_tokens(snippet)
                 
@@ -330,16 +323,7 @@ class PromptAssembler:
         except Exception as e:
             logger.warning(f"Failed to load conversation history: {e}")
         
-        # 7. Always add current user message at the end
-        current_message = {
-            "role": "user",
-            "content": current_user_message.strip()
-        }
-        current_tokens = self.token_counter.count_tokens(current_user_message)
-        messages.append(current_message)
-        token_counts["history_tokens"] += current_tokens
-        
-        # 8. Build metadata
+        # 7. Build metadata
         metadata = {
             "included_memory_ids": included_memory_ids,
             "token_counts": token_counts,

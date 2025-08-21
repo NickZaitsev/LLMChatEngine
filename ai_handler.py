@@ -202,7 +202,6 @@ class AIHandler:
                     
                     messages = await self.prompt_assembler.build_prompt(
                         conversation_id=conversation_id,
-                        current_user_message=user_message,
                         reply_token_budget=PROMPT_REPLY_TOKEN_BUDGET,
                         history_budget=PROMPT_HISTORY_BUDGET
                     )

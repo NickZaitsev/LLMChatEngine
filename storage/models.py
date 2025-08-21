@@ -262,6 +262,110 @@ class Message(Base):
         return f"<Message(id={self.id}, role='{self.role}', content='{content_preview}')>"
 
 
+class MessageLog(Base):
+    """
+    MessageLog model representing permanent message logs for analytics/debugging.
+    
+    Attributes:
+        id: Unique identifier for the message log entry
+        user_id: Telegram user ID (as UUID to match existing schema)
+        role: Role of the message sender ("user" | "bot")
+        content: The message content text
+        created_at: Timestamp when the message was created
+    """
+    __tablename__ = 'messages_log'
+    
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), 
+        primary_key=True, 
+        default=uuid.uuid4,
+        doc="Unique identifier for the message log entry"
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), 
+        nullable=False,
+        doc="Telegram user ID"
+    )
+    role: Mapped[str] = mapped_column(
+        String(50), 
+        nullable=False,
+        doc="Role of the message sender (user|bot)"
+    )
+    content: Mapped[str] = mapped_column(
+        Text, 
+        nullable=False,
+        doc="The message content text"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), 
+        nullable=False, 
+        default=func.now(),
+        doc="Timestamp when the message was created"
+    )
+    
+    # Indexes for efficient querying
+    __table_args__ = (
+        Index('ix_messages_log_user_id', 'user_id'),
+        Index('ix_messages_log_created_at', 'created_at'),
+    )
+    
+    def __repr__(self) -> str:
+        content_preview = self.content[:50] + "..." if len(self.content) > 50 else self.content
+        return f"<MessageLog(id={self.id}, user_id={self.user_id}, role='{self.role}', content='{content_preview}')>"
+
+
+class MessageUser(Base):
+    """
+    MessageUser model representing active conversation history for each user.
+    
+    Attributes:
+        id: Unique identifier for the message
+        user_id: Telegram user ID (as UUID to match existing schema)
+        role: Role of the message sender ("user" | "bot")
+        content: The message content text
+        created_at: Timestamp when the message was created
+    """
+    __tablename__ = 'messages_user'
+    
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), 
+        primary_key=True, 
+        default=uuid.uuid4,
+        doc="Unique identifier for the message"
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), 
+        nullable=False,
+        doc="Telegram user ID"
+    )
+    role: Mapped[str] = mapped_column(
+        String(50), 
+        nullable=False,
+        doc="Role of the message sender (user|bot)"
+    )
+    content: Mapped[str] = mapped_column(
+        Text, 
+        nullable=False,
+        doc="The message content text"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), 
+        nullable=False, 
+        default=func.now(),
+        doc="Timestamp when the message was created"
+    )
+    
+    # Indexes for efficient querying
+    __table_args__ = (
+        Index('ix_messages_user_user_id', 'user_id'),
+        Index('ix_messages_user_created_at', 'created_at'),
+    )
+    
+    def __repr__(self) -> str:
+        content_preview = self.content[:50] + "..." if len(self.content) > 50 else self.content
+        return f"<MessageUser(id={self.id}, user_id={self.user_id}, role='{self.role}', content='{content_preview}')>"
+
+
 class Memory(Base):
     """
     Memory model representing stored conversation memories with optional vector embeddings.
@@ -345,7 +449,8 @@ __all__ = [
     'User', 
     'Persona',
     'Conversation',
-    'Message',
+    'MessageLog',
+    'MessageUser',
     'Memory',
     'PGVECTOR_AVAILABLE'
 ]
