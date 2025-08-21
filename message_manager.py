@@ -1,5 +1,8 @@
 import asyncio
 import logging
+import random
+import time
+from config import MIN_TYPING_SPEED, MAX_TYPING_SPEED, MAX_DELAY, RANDOM_OFFSET_MIN, RANDOM_OFFSET_MAX
 import textwrap
 from typing import Dict, Set
 from telegram import Bot
@@ -97,13 +100,14 @@ class TypingIndicatorManager:
         self._typing_locks.clear()
 
 
-async def send_ai_response(chat_id: int, text: str, bot):
+async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'TypingIndicatorManager' = None):
     """
-    Splits AI response into safe message chunks and sends them sequentially.
+    Splits AI response into safe message chunks and sends them sequentially with intelligent delays.
     
     :param chat_id: Telegram chat ID
     :param text: Raw AI model response (string)
     :param bot: Telegram bot instance
+    :param typing_manager: TypingIndicatorManager instance (optional)
     """
     # Split by paragraphs
     parts = text.split("\n\n")
@@ -115,5 +119,39 @@ async def send_ai_response(chat_id: int, text: str, bot):
         safe_parts.extend(chunks)
     
     # Send each processed part as an individual sendMessage call to Telegram in sequence
-    for part in safe_parts:
+    for i, part in enumerate(safe_parts):
+        # Add delay between messages (but not before the first message)
+        if i > 0:
+            # Calculate delay based on message length and random variation
+            message_length = len(part)
+            
+            # Select a random typing speed between min and max
+            typing_speed = random.randint(MIN_TYPING_SPEED, MAX_TYPING_SPEED)
+            
+            # Calculate base delay
+            base_delay = message_length / typing_speed
+            
+            # Add random offset
+            random_offset = random.uniform(RANDOM_OFFSET_MIN, RANDOM_OFFSET_MAX)
+            
+            # Calculate total delay
+            delay = base_delay + random_offset
+            
+            # Ensure delay doesn't exceed maximum
+            delay = min(delay, MAX_DELAY)
+            
+            # Start typing indicator if manager is provided and wait for the delay concurrently
+            if typing_manager and delay > 0.7:
+                # Start typing indicator
+                await typing_manager.start_typing(bot, chat_id)
+                
+                # Wait for the calculated delay
+                await asyncio.sleep(delay)
+                
+                # Stop typing indicator
+                await typing_manager.stop_typing(chat_id)
+            else:
+                # Wait for the calculated delay without typing indicator
+                await asyncio.sleep(delay)
+        
         await bot.send_message(chat_id=chat_id, text=part)
