@@ -14,8 +14,8 @@ from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                    MEMORY_EMBED_MODEL, MEMORY_SUMMARIZER_MODE, MEMORY_CHUNK_OVERLAP,
                    RATE_LIMIT_DURATION, REQUEST_TIMEOUT, MESSAGE_PREVIEW_LENGTH, SHORT_MESSAGE_THRESHOLD)
 from storage_conversation_manager import PostgresConversationManager
-from ai_handler import AIHandler, send_ai_response
-from typing_manager import TypingIndicatorManager
+from ai_handler import AIHandler
+from message_manager import TypingIndicatorManager, send_ai_response
 
 # PromptAssembler and Memory Manager imports (conditional)
 if MEMORY_ENABLED:

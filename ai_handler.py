@@ -440,27 +440,3 @@ class AIHandler:
                 "Take care! 💖 I'll be thinking of you!"
             ])
 
-
-async def send_ai_response(chat_id: int, text: str, bot):
-    """
-    Splits AI response into safe message chunks and sends them sequentially.
-    
-    :param chat_id: Telegram chat ID
-    :param text: Raw AI model response (string)
-    :param bot: Telegram bot instance
-    """
-    import textwrap
-    import asyncio
-    
-    # Split by paragraphs
-    parts = text.split("\n\n")
-    
-    # Chunk long parts
-    safe_parts = []
-    for part in parts:
-        chunks = textwrap.wrap(part, width=4000, break_long_words=False, break_on_hyphens=False)
-        safe_parts.extend(chunks)
-    
-    # Send each processed part as an individual sendMessage call to Telegram in sequence
-    for part in safe_parts:
-        await bot.send_message(chat_id=chat_id, text=part)
