@@ -16,7 +16,7 @@ from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                    POLLING_INTERVAL)
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
-from message_manager import TypingIndicatorManager, send_ai_response
+from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response
 
 # PromptAssembler and Memory Manager imports (conditional)
 if MEMORY_ENABLED:
@@ -532,30 +532,28 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             )
             
             if not ai_response:
-                ai_response = self._get_fallback_response(user_message, user_name)
+                logger.error("Error getting AI response for user %s: %s", user_id, e)
+                return
             else:
                 # Store AI response in conversation history
                 try:
-                    self.conversation_manager.add_message(user_id, "assistant", ai_response)
+                    cleaned_ai_response = clean_ai_response(ai_response)
+                    self.conversation_manager.add_message(user_id, "assistant", cleaned_ai_response)
                 except Exception as e:
                     logger.error("Failed to add response to history for user %s: %s", user_id, e)
         except Exception as e:
             logger.error("Error getting AI response for user %s: %s", user_id, e)
-            ai_response = self._get_fallback_response(user_message, user_name)
         finally:
             # Ensure typing is stopped even on errors
             await self.typing_manager.stop_typing(chat_id)
         
+
         # Send final response to user
         try:
-            await send_ai_response(chat_id=chat_id, text=ai_response, bot=context.bot, typing_manager=self.typing_manager)
+            await send_ai_response(chat_id=chat_id, text=cleaned_ai_response, bot=context.bot, typing_manager=self.typing_manager)
             logger.info("Response sent to user %s", user_id)
         except Exception as e:
             logger.error("Failed to send response to user %s: %s", user_id, e)
-            try:
-                await send_ai_response(chat_id=chat_id, text="😔 I'm having trouble sending my response. Please try again! 💕", bot=context.bot)
-            except Exception:
-                logger.error("Failed to send error message to user %s", user_id)
     
     async def _get_ai_response_with_typing(self, bot, chat_id: int, user_id: int, user_message: str, conversation_history: list) -> str:
         """Get AI response with typing indicator management"""

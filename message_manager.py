@@ -129,9 +129,7 @@ async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'Typing
     :param bot: Telegram bot instance
     :param typing_manager: TypingIndicatorManager instance (optional)
     """
-    # Clean the text before processing
-    text = clean_ai_response(text)
-    
+
     # Split by paragraphs
     parts = text.split("\n\n")
     
