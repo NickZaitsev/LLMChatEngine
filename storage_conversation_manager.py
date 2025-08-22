@@ -201,6 +201,20 @@ class PostgresConversationManager:
             # No event loop, create one
             asyncio.run(self._add_message_async(user_id, role, content))
     
+    async def add_message_async(self, user_id: int, role: str, content: str) -> Message:
+        """
+        Add a message to the user's conversation history (async version).
+        
+        Args:
+            user_id: Telegram user ID
+            role: Message role ("user" or "assistant")
+            content: Message content
+            
+        Returns:
+            The created Message object
+        """
+        return await self._add_message_async(user_id, role, content)
+    
     async def _add_message_async(self, user_id: int, role: str, content: str) -> Message:
         """
         Add a message to the user's conversation history (async implementation).
@@ -228,7 +242,7 @@ class PostgresConversationManager:
         except Exception as e:
             logger.error("Failed to save message to history tables: %s", e)
         
-        logger.info("Added message: user=%d, role=%s, length=%d chars", 
+        logger.info("Added message: user=%d, role=%s, length=%d chars",
                    user_id, role, len(content))
         return message
     

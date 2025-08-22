@@ -522,7 +522,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             return
         
         # Add user message to conversation history and then get the updated history
-        self.conversation_manager.add_message(user_id, "user", user_message)
+        await self.conversation_manager.add_message_async(user_id, "user", user_message)
         conversation_history = await self.conversation_manager.get_formatted_conversation_async(user_id)
         
         # Start typing indicator and get AI response
@@ -538,7 +538,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                 # Store AI response in conversation history
                 try:
                     cleaned_ai_response = clean_ai_response(ai_response)
-                    self.conversation_manager.add_message(user_id, "assistant", cleaned_ai_response)
+                    await self.conversation_manager.add_message_async(user_id, "assistant", cleaned_ai_response)
                 except Exception as e:
                     logger.error("Failed to add response to history for user %s: %s", user_id, e)
         except Exception as e:
