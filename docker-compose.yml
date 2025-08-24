@@ -57,9 +57,38 @@ services:
     networks:
       - backup_network
 
+  redis:
+    image: redis:alpine
+    container_name: ai-girlfriend-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - backup_network
+
+  celery-worker:
+    build: .
+    container_name: ai-girlfriend-celery-worker
+    restart: unless-stopped
+    command: celery -A proactive_messaging.celery_app worker --loglevel=info
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:-ai_bot_pass}@postgres:5432/ai_bot
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - .:/app
+    networks:
+      - backup_network
+
 volumes:
   postgres_data:
   backups:
+  redis_data:
 
 networks:
   backup_network:

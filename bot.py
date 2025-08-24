@@ -18,6 +18,14 @@ from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
 from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response
 
+# Proactive messaging import (conditional)
+try:
+    from proactive_messaging import proactive_messaging_service
+    PROACTIVE_MESSAGING_AVAILABLE = True
+except ImportError as e:
+    logger.warning("Proactive messaging imports failed: %s", e)
+    PROACTIVE_MESSAGING_AVAILABLE = False
+
 # PromptAssembler and Memory Manager imports (conditional)
 if MEMORY_ENABLED:
     try:
@@ -78,6 +86,15 @@ class AIGirlfriendBot:
         self._memory_initialized = False
         
         self.user_states = {}  # Track user interaction states
+        
+        # Initialize proactive messaging service
+        self.proactive_messaging_service = None
+        if PROACTIVE_MESSAGING_AVAILABLE:
+            try:
+                self.proactive_messaging_service = proactive_messaging_service
+                logger.info("Proactive messaging service initialized successfully")
+            except Exception as e:
+                logger.error("Failed to initialize proactive messaging service: %s", e)
     
     def _is_user_rate_limited(self, user_id: int) -> bool:
         """Check if a user is currently rate limited"""
@@ -554,6 +571,14 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             logger.info("Response sent to user %s", user_id)
         except Exception as e:
             logger.error("Failed to send response to user %s: %s", user_id, e)
+        
+        # Notify proactive messaging service about user message
+        if self.proactive_messaging_service:
+            try:
+                self.proactive_messaging_service.handle_user_message(user_id, self)
+                logger.info("Notified proactive messaging service about user message from user %s", user_id)
+            except Exception as e:
+                logger.error("Failed to notify proactive messaging service: %s", e)
     
     async def _get_ai_response_with_typing(self, bot, chat_id: int, user_id: int, user_message: str, conversation_history: list) -> str:
         """Get AI response with typing indicator management"""
@@ -890,6 +915,17 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             await self._initialize_memory_components()
             await self._initialize_lmstudio_model()
             await self._initialize_embedding_model()
+            
+            # Initialize proactive messaging if available
+            if self.proactive_messaging_service:
+                try:
+                    logger.info("Initializing proactive messaging service...")
+                    # Schedule initial proactive messages for existing users
+                    # This is a simplified approach - in a real implementation,
+                    # you would query the database for all users and schedule messages for them
+                    logger.info("Proactive messaging service initialized")
+                except Exception as e:
+                    logger.error("Failed to initialize proactive messaging service: %s", e)
         
         # Run initialization
         import asyncio
