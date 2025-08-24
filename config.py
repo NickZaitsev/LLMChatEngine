@@ -1,4 +1,5 @@
 import os
+import re
 import warnings
 from dotenv import load_dotenv
 
@@ -84,6 +85,34 @@ MAX_TYPING_SPEED = int(os.getenv('MAX_TYPING_SPEED', '30'))  # characters per se
 MAX_DELAY = int(os.getenv('MAX_DELAY', '5'))  # maximum delay in seconds
 RANDOM_OFFSET_MIN = float(os.getenv('RANDOM_OFFSET_MIN', '0.1'))  # minimum random offset in seconds
 RANDOM_OFFSET_MAX = float(os.getenv('RANDOM_OFFSET_MAX', '0.5'))  # maximum random offset in seconds
+# Proactive Messaging Configuration
+PROACTIVE_MESSAGING_ENABLED = os.getenv('PROACTIVE_MESSAGING_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
+PROACTIVE_MESSAGING_REDIS_URL = os.getenv('PROACTIVE_MESSAGING_REDIS_URL', 'redis://redis:6379/0')
+
+# Proactive messaging intervals (in seconds)
+PROACTIVE_MESSAGING_INTERVAL_1H = int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1H', '3600'))  # 1 hour
+PROACTIVE_MESSAGING_INTERVAL_9H = int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_9H', '32400'))  # 9 hours
+PROACTIVE_MESSAGING_INTERVAL_1D = int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1D', '86400'))  # 1 day
+PROACTIVE_MESSAGING_INTERVAL_1W = int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1W', '604800'))  # 1 week
+PROACTIVE_MESSAGING_INTERVAL_1MO = int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1MO', '2592000'))  # 1 month
+
+# Jitter for intervals (in seconds)
+PROACTIVE_MESSAGING_JITTER_1H = int(os.getenv('PROACTIVE_MESSAGING_JITTER_1H', '900'))  # 15 minutes
+PROACTIVE_MESSAGING_JITTER_9H = int(os.getenv('PROACTIVE_MESSAGING_JITTER_9H', '1800'))  # 30 minutes
+PROACTIVE_MESSAGING_JITTER_1D = int(os.getenv('PROACTIVE_MESSAGING_JITTER_1D', '7200'))  # 2 hours
+PROACTIVE_MESSAGING_JITTER_1W = int(os.getenv('PROACTIVE_MESSAGING_JITTER_1W', '43200'))  # 12 hours
+PROACTIVE_MESSAGING_JITTER_1MO = int(os.getenv('PROACTIVE_MESSAGING_JITTER_1MO', '86400'))  # 1 day
+
+# Quiet hours (in 24-hour format)
+PROACTIVE_MESSAGING_QUIET_HOURS_START = os.getenv('PROACTIVE_MESSAGING_QUIET_HOURS_START', '02:30')
+PROACTIVE_MESSAGING_QUIET_HOURS_END = os.getenv('PROACTIVE_MESSAGING_QUIET_HOURS_END', '08:00')
+
+# Consecutive outreach settings
+PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES = int(os.getenv('PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES', '5'))
+
+# Retry policies
+PROACTIVE_MESSAGING_RETRY_DELAY = int(os.getenv('PROACTIVE_MESSAGING_RETRY_DELAY', '300'))  # 5 minutes
+PROACTIVE_MESSAGING_MAX_RETRIES = int(os.getenv('PROACTIVE_MESSAGING_MAX_RETRIES', '3'))
 
 # Validation
 def _validate_config():
@@ -127,6 +156,53 @@ def _validate_config():
     # Memory Manager validation
     if MEMORY_ENABLED and MEMORY_SUMMARIZER_MODE not in ['llm', 'local']:
         warnings.warn("MEMORY_SUMMARIZER_MODE must be 'llm' or 'local'")
+# Proactive Messaging validation
+    if PROACTIVE_MESSAGING_ENABLED:
+        if not PROACTIVE_MESSAGING_REDIS_URL:
+            warnings.warn("PROACTIVE_MESSAGING_REDIS_URL is required when proactive messaging is enabled")
+        
+        # Validate intervals are positive
+        intervals = [
+            ("PROACTIVE_MESSAGING_INTERVAL_1H", PROACTIVE_MESSAGING_INTERVAL_1H),
+            ("PROACTIVE_MESSAGING_INTERVAL_9H", PROACTIVE_MESSAGING_INTERVAL_9H),
+            ("PROACTIVE_MESSAGING_INTERVAL_1D", PROACTIVE_MESSAGING_INTERVAL_1D),
+            ("PROACTIVE_MESSAGING_INTERVAL_1W", PROACTIVE_MESSAGING_INTERVAL_1W),
+            ("PROACTIVE_MESSAGING_INTERVAL_1MO", PROACTIVE_MESSAGING_INTERVAL_1MO)
+        ]
+        
+        for name, value in intervals:
+            if value <= 0:
+                warnings.warn(f"{name} should be positive")
+        
+        # Validate jitter values are non-negative
+        jitter_values = [
+            ("PROACTIVE_MESSAGING_JITTER_1H", PROACTIVE_MESSAGING_JITTER_1H),
+            ("PROACTIVE_MESSAGING_JITTER_9H", PROACTIVE_MESSAGING_JITTER_9H),
+            ("PROACTIVE_MESSAGING_JITTER_1D", PROACTIVE_MESSAGING_JITTER_1D),
+            ("PROACTIVE_MESSAGING_JITTER_1W", PROACTIVE_MESSAGING_JITTER_1W),
+            ("PROACTIVE_MESSAGING_JITTER_1MO", PROACTIVE_MESSAGING_JITTER_1MO)
+        ]
+        
+        for name, value in jitter_values:
+            if value < 0:
+                warnings.warn(f"{name} should be non-negative")
+        
+        # Validate quiet hours format
+        time_pattern = re.compile(r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$')
+        if not time_pattern.match(PROACTIVE_MESSAGING_QUIET_HOURS_START):
+            warnings.warn("PROACTIVE_MESSAGING_QUIET_HOURS_START should be in HH:MM format (24-hour)")
+        if not time_pattern.match(PROACTIVE_MESSAGING_QUIET_HOURS_END):
+            warnings.warn("PROACTIVE_MESSAGING_QUIET_HOURS_END should be in HH:MM format (24-hour)")
+        
+        # Validate consecutive outreach limit
+        if PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES <= 0:
+            warnings.warn("PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES should be positive")
+        
+        # Validate retry settings
+        if PROACTIVE_MESSAGING_RETRY_DELAY < 0:
+            warnings.warn("PROACTIVE_MESSAGING_RETRY_DELAY should be non-negative")
+        if PROACTIVE_MESSAGING_MAX_RETRIES < 0:
+            warnings.warn("PROACTIVE_MESSAGING_MAX_RETRIES should be non-negative")
 
 # Perform validation
 _validate_config()
