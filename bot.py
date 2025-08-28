@@ -16,7 +16,7 @@ from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                    POLLING_INTERVAL)
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
-from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response
+from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response
 
 # Proactive messaging import (conditional)
 try:
@@ -544,8 +544,8 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         
         # Start typing indicator and get AI response
         try:
-            ai_response = await self._get_ai_response_with_typing(
-                context.bot, chat_id, user_id, user_message, conversation_history
+            ai_response = await generate_ai_response(
+                self.ai_handler, self.typing_manager, context.bot, chat_id, user_message, conversation_history, None, "user", True
             )
             
             if not ai_response:
@@ -580,52 +580,6 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             except Exception as e:
                 logger.error("Failed to notify proactive messaging service: %s", e)
     
-    async def _get_ai_response_with_typing(self, bot, chat_id: int, user_id: int, user_message: str, conversation_history: list) -> str:
-        """Get AI response with typing indicator management"""
-        try:
-            logger.info("Starting AI request with typing indicator for user %s", user_id)
-            
-            # Start typing indicator BEFORE making LLM request
-            await self.typing_manager.start_typing(bot, chat_id)
-            
-            # Get conversation_id for PromptAssembler (if using PostgreSQL)
-            conversation_id = None
-            if hasattr(self.conversation_manager, 'storage') and self.conversation_manager.storage:
-                try:
-                    # Get the conversation object to extract UUID
-                    conversation = await self.conversation_manager._ensure_user_and_conversation(user_id)
-                    conversation_id = str(conversation.id)
-                    logger.debug("Retrieved conversation_id %s for user %s", conversation_id[:8], user_id)
-                except Exception as e:
-                    logger.warning("Failed to get conversation_id for user %s: %s", user_id, e)
-            
-            # Make the actual AI request
-            logger.info("Generating AI response for user %s", user_id)
-            ai_response = await asyncio.wait_for(
-                self.ai_handler.generate_response(user_message, conversation_history, conversation_id),
-                timeout=REQUEST_TIMEOUT
-            )
-            
-            logger.info("AI response received for user %s (%d chars)", user_id, len(ai_response))
-            return ai_response
-            
-        except asyncio.TimeoutError:
-            logger.warning("AI request timeout for user %s", user_id)
-            return None
-            
-        except Exception as e:
-            logger.error("AI request failed for user %s: %s", user_id, e)
-            error_message = str(e).lower()
-            
-            if any(pattern in error_message for pattern in ["rate limit", "429", "ratelimitreached", "too many requests"]):
-                logger.warning("Rate limit error for user %s, setting cooldown", user_id)
-                self._set_user_rate_limit(user_id, 60)
-            
-            return None
-        
-        finally:
-            # Typing will be stopped in the calling function to ensure it happens after message is sent
-            pass
     
     def _get_fallback_response(self, user_message: str, user_name: str = None) -> str:
         return f"I hear you! 💕 I'm having trouble with my AI service right now, but I'm still here listening. Can you try again in a few minutes?"

@@ -176,3 +176,58 @@ async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'Typing
                 await asyncio.sleep(delay)
         
         await bot.send_message(chat_id=chat_id, text=part)
+
+
+async def generate_ai_response(
+    ai_handler,
+    typing_manager,
+    bot,
+    chat_id: int,
+    prompt: str,
+    conversation_history: list,
+    conversation_id: str = None,
+    role: str = "user",
+    show_typing: bool = True
+) -> str:
+    """
+    Generate AI response with typing indicator management.
+    
+    Args:
+        ai_handler: AIHandler instance
+        typing_manager: TypingIndicatorManager instance
+        bot: Telegram bot instance
+        chat_id: Chat ID
+        prompt: Prompt to send to AI
+        conversation_history: Conversation history
+        conversation_id: Conversation ID for PromptAssembler
+        role: Role for the prompt ("user" or "system")
+        show_typing: Whether to show typing indicators
+    
+    Returns:
+        AI response text or None if failed
+    """
+    try:
+        logger.info("Starting AI request with typing indicator for chat %s", chat_id)
+        
+        # Start typing indicator BEFORE making LLM request if enabled
+        if show_typing:
+            await typing_manager.start_typing(bot, chat_id)
+        
+        # Make the actual AI request with timeout from config
+        from config import REQUEST_TIMEOUT
+        logger.info("Generating AI response for chat %s", chat_id)
+        ai_response = await asyncio.wait_for(
+            ai_handler.generate_response(prompt, conversation_history, conversation_id, role),
+            timeout=REQUEST_TIMEOUT
+        )
+        
+        logger.info("AI response received for chat %s (%d chars)", chat_id, len(ai_response))
+        return ai_response
+        
+    except asyncio.TimeoutError:
+        logger.warning("AI request timeout for chat %s", chat_id)
+        return None
+        
+    except Exception as e:
+        logger.error("AI request failed for chat %s: %s", chat_id, e)
+        return None

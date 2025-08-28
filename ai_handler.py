@@ -210,8 +210,11 @@ class AIHandler:
                     
                 except Exception as e:
                     logger.error("PromptAssembler failed: %s", e)
+                    # Fall back to legacy method
+                    messages = self._build_legacy_messages(user_message, conversation_history, role)
             else:
-                logger.debug("ERROR, conversation_id provided but PromptAssembler not available")
+                # Use legacy method for building messages
+                messages = self._build_legacy_messages(user_message, conversation_history, role)
 
             logger.info("Sending %d messages to LLM", len(messages))
             
@@ -276,27 +279,27 @@ class AIHandler:
         
         except Exception as e:
             logger.exception("Error in AI generation: %s", e)
-            return self._get_error_response(str(e))
+            # return self._get_error_response(str(e))
     
     
-    def _get_error_response(self, error_message: str) -> str:
-        """Generate appropriate error response based on error type"""
-        error_lower = error_message.lower()
+    # def _get_error_response(self, error_message: str) -> str:
+    #     """Generate appropriate error response based on error type"""
+    #     error_lower = error_message.lower()
         
-        if any(pattern in error_lower for pattern in ["rate limit", "429", "ratelimitreached"]):
-            return "😔 I'm getting a bit overwhelmed right now! Too many people are chatting with me at once. Please wait a few minutes and try again! 💕"
-        elif any(pattern in error_lower for pattern in ["timeout", "timed out"]):
-            return "⏰ I'm taking longer than usual to think! The AI service is a bit slow right now. Please try again in a moment! 💕"
-        elif any(pattern in error_lower for pattern in ["unauthorized", "401"]):
-            return "🔑 I'm having trouble with my credentials right now. Please check my configuration! 💕"
-        elif any(pattern in error_lower for pattern in ["quota exceeded", "quota"]):
-            return "💳 I've reached my conversation limit for today! Please try again tomorrow! 💕"
-        elif any(pattern in error_lower for pattern in ["service unavailable", "503"]):
-            return "🔧 The AI service is temporarily unavailable! Please try again in a few minutes! 💕"
-        elif any(pattern in error_lower for pattern in ["network", "connection"]):
-            return "🌐 I'm having trouble connecting to my brain right now! Please check your internet connection and try again! 💕"
-        else:
-            return "😔 I'm having some technical difficulties right now. Please try again later! 💕"
+    #     if any(pattern in error_lower for pattern in ["rate limit", "429", "ratelimitreached"]):
+    #         return "😔 I'm getting a bit overwhelmed right now! Too many people are chatting with me at once. Please wait a few minutes and try again! 💕"
+    #     elif any(pattern in error_lower for pattern in ["timeout", "timed out"]):
+    #         return "⏰ I'm taking longer than usual to think! The AI service is a bit slow right now. Please try again in a moment! 💕"
+    #     elif any(pattern in error_lower for pattern in ["unauthorized", "401"]):
+    #         return "🔑 I'm having trouble with my credentials right now. Please check my configuration! 💕"
+    #     elif any(pattern in error_lower for pattern in ["quota exceeded", "quota"]):
+    #         return "💳 I've reached my conversation limit for today! Please try again tomorrow! 💕"
+    #     elif any(pattern in error_lower for pattern in ["service unavailable", "503"]):
+    #         return "🔧 The AI service is temporarily unavailable! Please try again in a few minutes! 💕"
+    #     elif any(pattern in error_lower for pattern in ["network", "connection"]):
+    #         return "🌐 I'm having trouble connecting to my brain right now! Please check your internet connection and try again! 💕"
+    #     else:
+    #         return "😔 I'm having some technical difficulties right now. Please try again later! 💕"
     
     async def _make_ai_request(self, messages):
         """Make the actual AI API request using ModelClient"""
@@ -422,4 +425,17 @@ class AIHandler:
                 "Bye! ✨ Have a wonderful day!",
                 "Take care! 💖 I'll be thinking of you!"
             ])
+
+    def _build_legacy_messages(self, user_message: str, conversation_history: List[Dict], role: str = "user") -> List[Dict]:
+        """Build messages using the legacy method (for fallback compatibility)."""
+        messages = [{"role": "system", "content": self.personality}]
+        for msg in conversation_history:
+            msg_role = msg.get("role")
+            content = msg.get("content", "")
+            if msg_role in ["user", "assistant"]:
+                messages.append({"role": msg_role, "content": content})
+        
+        # Add the current user message that we need to respond to
+        messages.append({"role": role, "content": user_message})
+        return messages
 

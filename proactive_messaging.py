@@ -36,7 +36,7 @@ from config import (
 
 # Import components for proactive messaging
 from ai_handler import AIHandler
-from message_manager import send_ai_response, TypingIndicatorManager, clean_ai_response
+from message_manager import send_ai_response, TypingIndicatorManager, clean_ai_response, generate_ai_response
 from storage_conversation_manager import PostgresConversationManager
 
 # Import celery configuration
@@ -384,6 +384,10 @@ def send_proactive_message(user_id: int):
         typing_manager = TypingIndicatorManager()
         conversation_manager = PostgresConversationManager(DATABASE_URL, USE_PGVECTOR)
         
+        # Create Telegram bot instance
+        from telegram import Bot
+        bot = Bot(token=TELEGRAM_TOKEN)
+        
         # Initialize the conversation manager storage
         async def init_storage():
             await conversation_manager.initialize()
@@ -400,18 +404,14 @@ def send_proactive_message(user_id: int):
         # Generate proactive message prompt
         proactive_prompt = PROACTIVE_MESSAGING_PROMPT
         
-        # Generate AI response
+        # Generate AI response using shared function
         ai_response = loop.run_until_complete(
-            ai_handler.generate_response(proactive_prompt, conversation_history, role = "system")
+            generate_ai_response(ai_handler, typing_manager, bot, user_id, proactive_prompt, conversation_history, None, "system", True)
         )
         
         if ai_response:
             # Clean the AI response
             cleaned_response = clean_ai_response(ai_response)
-            
-            # Create Telegram bot instance
-            from telegram import Bot
-            bot = Bot(token=TELEGRAM_TOKEN)
             
             # Send the message
             loop.run_until_complete(
