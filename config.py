@@ -115,7 +115,7 @@ PROACTIVE_MESSAGING_RETRY_DELAY = int(os.getenv('PROACTIVE_MESSAGING_RETRY_DELAY
 PROACTIVE_MESSAGING_MAX_RETRIES = int(os.getenv('PROACTIVE_MESSAGING_MAX_RETRIES', '3'))
 
 # Rescheduling delay for proactive messaging restart (in seconds)
-PROACTIVE_MESSAGING_RESTART_DELAY_MAX = int(os.getenv('PROACTIVE_MESSAGING_RESTART_DELAY_MAX', '300'))  # 5 minutes
+PROACTIVE_MESSAGING_RESTART_DELAY_MAX = int(os.getenv('PROACTIVE_MESSAGING_RESTART_DELAY_MAX', '900'))  # 5 minutes
 
 # Proactive message prompt
 PROACTIVE_MESSAGING_PROMPT = os.getenv('PROACTIVE_MESSAGING_PROMPT', (
@@ -214,8 +214,8 @@ def _validate_config():
             warnings.warn("PROACTIVE_MESSAGING_MAX_RETRIES should be non-negative")
         
         # Validate rescheduling delay
-        if PROACTIVE_MESSAGING_RESTART_DELAY_MAX <= 0:
-            warnings.warn("PROACTIVE_MESSAGING_RESTART_DELAY_MAX should be positive")
+        if PROACTIVE_MESSAGING_RESTART_DELAY_MAX <= 31:
+            warnings.warn("PROACTIVE_MESSAGING_RESTART_DELAY_MAX should be positive and >31s" )
         
         # Validate proactive messaging prompt
         if not PROACTIVE_MESSAGING_PROMPT:

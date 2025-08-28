@@ -237,7 +237,7 @@ class ProactiveMessagingService:
                     logger.info(f"Found missed proactive message for user {user_id}, scheduled at {scheduled_time}")
                     
                     # Generate a random delay (up to PROACTIVE_MESSAGING_RESTART_DELAY_MAX seconds)
-                    delay = random.randint(0, PROACTIVE_MESSAGING_RESTART_DELAY_MAX)
+                    delay = random.randint(30, PROACTIVE_MESSAGING_RESTART_DELAY_MAX)
                     new_scheduled_time = datetime.now() + timedelta(seconds=delay)
                     
                     logger.info(f"Rescheduling missed message for user {user_id} with delay of {delay} seconds (at {new_scheduled_time})")
