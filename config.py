@@ -114,6 +114,12 @@ PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES = int(os.getenv('PROACTIVE_MESSAG
 PROACTIVE_MESSAGING_RETRY_DELAY = int(os.getenv('PROACTIVE_MESSAGING_RETRY_DELAY', '300'))  # 5 minutes
 PROACTIVE_MESSAGING_MAX_RETRIES = int(os.getenv('PROACTIVE_MESSAGING_MAX_RETRIES', '3'))
 
+# Proactive message prompt
+PROACTIVE_MESSAGING_PROMPT = os.getenv('PROACTIVE_MESSAGING_PROMPT', (
+    "Сгенерируй дружеское, заботливое сообщение, чтобы проверить, как у пользователя дела, на том языке, на котором ты обычно с ним разговариваешь. "
+    "Помни: ты человек, а не ИИ. Сообщение должно быть кратким и естественным. "
+))
+
 # Validation
 def _validate_config():
     """Validate configuration and warn about issues"""
@@ -203,6 +209,10 @@ def _validate_config():
             warnings.warn("PROACTIVE_MESSAGING_RETRY_DELAY should be non-negative")
         if PROACTIVE_MESSAGING_MAX_RETRIES < 0:
             warnings.warn("PROACTIVE_MESSAGING_MAX_RETRIES should be non-negative")
+        
+        # Validate proactive messaging prompt
+        if not PROACTIVE_MESSAGING_PROMPT:
+            warnings.warn("PROACTIVE_MESSAGING_PROMPT should not be empty")
 
 # Perform validation
 _validate_config()
