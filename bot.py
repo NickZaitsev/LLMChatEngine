@@ -548,7 +548,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             )
             
             if not ai_response:
-                logger.error("Error getting AI response for user %s: %s", user_id, e)
+                logger.error("Error getting AI response for user %s: No response returned", user_id)
                 return
             else:
                 # Store AI response in conversation history
@@ -557,8 +557,11 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                     await self.conversation_manager.add_message_async(user_id, "assistant", cleaned_ai_response)
                 except Exception as e:
                     logger.error("Failed to add response to history for user %s: %s", user_id, e)
+                    # If we can't store the response, we still want to send it to the user
+                    cleaned_ai_response = clean_ai_response(ai_response) if 'cleaned_ai_response' not in locals() else cleaned_ai_response
         except Exception as e:
             logger.error("Error getting AI response for user %s: %s", user_id, e)
+            return  # Exit early if we couldn't get an AI response
         finally:
             # Ensure typing is stopped even on errors
             await self.typing_manager.stop_typing(chat_id)
@@ -566,8 +569,12 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 
         # Send final response to user
         try:
-            await send_ai_response(chat_id=chat_id, text=cleaned_ai_response, bot=context.bot, typing_manager=self.typing_manager)
-            logger.info("Response sent to user %s", user_id)
+            # Make sure cleaned_ai_response is defined
+            if 'cleaned_ai_response' in locals():
+                await send_ai_response(chat_id=chat_id, text=cleaned_ai_response, bot=context.bot, typing_manager=self.typing_manager)
+                logger.info("Response sent to user %s", user_id)
+            else:
+                logger.error("No response to send to user %s", user_id)
         except Exception as e:
             logger.error("Failed to send response to user %s: %s", user_id, e)
         

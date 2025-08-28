@@ -194,6 +194,9 @@ class AIHandler:
             logger.info("Generating response for message (%d chars), history: %d messages",
                        len(user_message), len(conversation_history))
 
+            # Initialize messages variable
+            messages = None
+
             # Use PromptAssembler if available and conversation_id is provided
             if self.prompt_assembler and conversation_id:
                 logger.info("Using PromptAssembler for advanced prompt building")
@@ -212,6 +215,17 @@ class AIHandler:
                     logger.error("PromptAssembler failed: %s", e)
             else:
                 logger.error("PromptAssembler is not available")
+                # Fallback to creating messages from conversation history
+                messages = [
+                    {"role": "system", "content": self.personality},
+                    *conversation_history,
+                    {"role": role, "content": user_message}
+                ]
+
+            # Check if messages were successfully created
+            if messages is None:
+                logger.error("Failed to create messages for LLM")
+                return "I'm having technical difficulties right now. Please try again later! 💕"
 
             logger.info("Sending %d messages to LLM", len(messages))
             
