@@ -145,5 +145,8 @@ PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES=5
 PROACTIVE_MESSAGING_RETRY_DELAY=300
 PROACTIVE_MESSAGING_MAX_RETRIES=3
 
+# Rescheduling delay for proactive messaging restart (in seconds)
+PROACTIVE_MESSAGING_RESTART_DELAY_MAX=300
+
 # Proactive messaging prompt
 PROACTIVE_MESSAGING_PROMPT=Сгенерируй дружеское, заботливое сообщение, чтобы проверить, как у пользователя дела, на том языке, на котором ты обычно с ним разговариваешь. Помни: ты человек, а не ИИ. Сообщение должно быть кратким и естественным.
