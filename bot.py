@@ -626,43 +626,6 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         finally:
             # Typing will be stopped in the calling function to ensure it happens after message is sent
             pass
-
-    async def _get_ai_response(self, user_id: int, user_message: str, conversation_history: list) -> str:
-        """Legacy method - kept for compatibility with other parts of the code"""
-        try:
-            logger.info("Generating AI response for user %s (legacy method)", user_id)
-            
-            # Get conversation_id for PromptAssembler (if using PostgreSQL)
-            conversation_id = None
-            if hasattr(self.conversation_manager, 'storage') and self.conversation_manager.storage:
-                try:
-                    # Get the conversation object to extract UUID
-                    conversation = await self.conversation_manager._ensure_user_and_conversation(user_id)
-                    conversation_id = str(conversation.id)
-                    logger.debug("Retrieved conversation_id %s for user %s (legacy)", conversation_id[:8], user_id)
-                except Exception as e:
-                    logger.warning("Failed to get conversation_id for user %s: %s", user_id, e)
-            
-            ai_response = await asyncio.wait_for(
-                self.ai_handler.generate_response(user_message, conversation_history, conversation_id),
-                timeout=REQUEST_TIMEOUT
-            )
-            logger.info("AI response received for user %s (%d chars)", user_id, len(ai_response))
-            return ai_response
-            
-        except asyncio.TimeoutError:
-            logger.warning("AI request timeout for user %s", user_id)
-            return None
-            
-        except Exception as e:
-            logger.error("AI request failed for user %s: %s", user_id, e)
-            error_message = str(e).lower()
-            
-            if any(pattern in error_message for pattern in ["rate limit", "429", "ratelimitreached", "too many requests"]):
-                logger.warning("Rate limit error for user %s, setting cooldown", user_id)
-                self._set_user_rate_limit(user_id, 60)
-            
-            return None
     
     def _get_fallback_response(self, user_message: str, user_name: str = None) -> str:
         return f"I hear you! 💕 I'm having trouble with my AI service right now, but I'm still here listening. Can you try again in a few minutes?"

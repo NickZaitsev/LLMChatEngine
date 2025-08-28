@@ -174,7 +174,6 @@ The application follows professional software engineering practices with a clean
 bot.py                     # Main bot application
 ├── config.py             # Configuration with constants and validation
 ├── ai_handler.py         # Clean AI integration
-├── conversation_manager.py  # Legacy memory management (deprecated)
 ├── memory/               # Advanced memory management system
 │   ├── __init__.py       # Memory package interface
 │   ├── manager.py        # MemoryManager for episodic memories and summaries

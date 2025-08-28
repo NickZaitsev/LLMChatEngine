@@ -402,7 +402,7 @@ def send_proactive_message(user_id: int):
         
         # Generate AI response
         ai_response = loop.run_until_complete(
-            ai_handler.generate_response(proactive_prompt, conversation_history)
+            ai_handler.generate_response(proactive_prompt, conversation_history, role = "system")
         )
         
         if ai_response:
