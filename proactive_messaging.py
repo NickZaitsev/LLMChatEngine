@@ -33,6 +33,7 @@ from config import (
     PROACTIVE_MESSAGING_QUIET_HOURS_END,
     PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES,
     PROACTIVE_MESSAGING_PROMPT,
+    PROACTIVE_MESSAGING_RESTART_DELAY_MAX,
     TELEGRAM_TOKEN, DATABASE_URL, USE_PGVECTOR
 )
 
@@ -156,6 +157,107 @@ class ProactiveMessagingService:
             self.redis_client.set(f"proactive_messaging:user:{user_id}", state_json)
         except Exception as e:
             logger.error(f"Error setting user state for user {user_id} in Redis: {e}")
+
+    def _get_all_user_states(self):
+        """
+        Get all user states from Redis.
+        
+        Returns:
+            Dictionary of user states keyed by user ID
+        """
+        try:
+            # Get all keys matching the pattern
+            pattern = "proactive_messaging:user:*"
+            keys = self.redis_client.keys(pattern)
+            
+            user_states = {}
+            for key in keys:
+                try:
+                    # Extract user ID from key
+                    user_id = int(key.decode('utf-8').split(':')[-1])
+                    state_json = self.redis_client.get(key)
+                    if state_json:
+                        state = json.loads(state_json)
+                        # Convert datetime strings back to datetime objects
+                        if 'last_proactive_message' in state and state['last_proactive_message']:
+                            try:
+                                state['last_proactive_message'] = datetime.fromisoformat(state['last_proactive_message'])
+                            except ValueError:
+                                # If parsing fails, remove the field
+                                state['last_proactive_message'] = None
+                        if 'scheduled_time' in state and state['scheduled_time']:
+                            try:
+                                state['scheduled_time'] = datetime.fromisoformat(state['scheduled_time'])
+                            except ValueError:
+                                # If parsing fails, remove the field
+                                state['scheduled_time'] = None
+                        user_states[user_id] = state
+                except Exception as e:
+                    logger.error(f"Error processing key {key}: {e}")
+                    continue
+            
+            return user_states
+        except Exception as e:
+            logger.error(f"Error getting all user states from Redis: {e}")
+            return {}
+
+    def _is_scheduled_time_in_past(self, scheduled_time):
+        """
+        Check if the scheduled time is in the past.
+        
+        Args:
+            scheduled_time: Scheduled datetime
+            
+        Returns:
+            True if scheduled time is in the past, False otherwise
+        """
+        if not scheduled_time:
+            return False
+        return scheduled_time < datetime.now()
+
+    def _reschedule_missed_messages(self):
+        """
+        Reschedule missed messages with a random delay.
+        """
+        logger.info("Checking for missed proactive messages to reschedule...")
+        
+        # Get all user states
+        user_states = self._get_all_user_states()
+        
+        rescheduled_count = 0
+        for user_id, state in user_states.items():
+            try:
+                # Check if there's a scheduled time
+                scheduled_time = state.get('scheduled_time')
+                if not scheduled_time:
+                    continue
+                
+                # Check if scheduled time is in the past
+                if self._is_scheduled_time_in_past(scheduled_time):
+                    logger.info(f"Found missed proactive message for user {user_id}, scheduled at {scheduled_time}")
+                    
+                    # Generate a random delay (up to PROACTIVE_MESSAGING_RESTART_DELAY_MAX seconds)
+                    delay = random.randint(0, PROACTIVE_MESSAGING_RESTART_DELAY_MAX)
+                    new_scheduled_time = datetime.now() + timedelta(seconds=delay)
+                    
+                    logger.info(f"Rescheduling missed message for user {user_id} with delay of {delay} seconds (at {new_scheduled_time})")
+                    
+                    # Update the user state with the new scheduled time
+                    state['scheduled_time'] = new_scheduled_time
+                    self._set_user_state(user_id, state)
+                    
+                    # Schedule the Celery task with the new time
+                    send_proactive_message.apply_async(
+                        args=[user_id],
+                        eta=new_scheduled_time
+                    )
+                    
+                    rescheduled_count += 1
+            except Exception as e:
+                logger.error(f"Error rescheduling message for user {user_id}: {e}")
+                continue
+        
+        logger.info(f"Rescheduled {rescheduled_count} missed proactive messages")
         logger.info("Proactive Messaging Service initialized")
     
     def parse_time(self, time_str: str) -> tuple:
@@ -609,3 +711,22 @@ celery_app.conf.beat_schedule = {
 
 # Default queue
 celery_app.conf.task_default_queue = 'proactive_messaging'
+
+# Import Celery signals
+from celery.signals import worker_ready
+
+@worker_ready.connect
+def startup_proactive_messaging(sender=None, **kwargs):
+    """
+    Function to run when Celery worker is ready.
+    Checks for and reschedules any missed proactive messages.
+    """
+    logger.info("Celery worker is ready, checking for missed proactive messages...")
+    try:
+        # Ensure the proactive messaging service is initialized
+        if proactive_messaging_service is not None:
+            proactive_messaging_service._reschedule_missed_messages()
+        else:
+            logger.error("Proactive messaging service is not initialized")
+    except Exception as e:
+        logger.error(f"Error during startup proactive message rescheduling: {e}")
