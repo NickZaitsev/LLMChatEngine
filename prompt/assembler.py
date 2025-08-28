@@ -14,6 +14,7 @@ from uuid import UUID
 from storage.interfaces import MessageRepo, PersonaRepo, Message
 from memory.manager import MemoryManager, MemoryRecord
 from .templates import (
+    SYSTEM_TEMPLATE,
     format_memory_snippet_from_record,
     create_user_profile_message,
     create_memory_context_message,
@@ -222,8 +223,8 @@ class PromptAssembler:
 
         # 1. Add system template if enabled
         if self.include_system_template:
-            system_message = {"role": "system", "content": config.BOT_PERSONALITY}
-            system_tokens = self.token_counter.count_tokens(config.BOT_PERSONALITY)
+            system_message = {"role": "system", "content": SYSTEM_TEMPLATE}
+            system_tokens = self.token_counter.count_tokens(SYSTEM_TEMPLATE)
             messages.append(system_message)
             token_counts["system_tokens"] += system_tokens
             logger.debug(f"Added system template: {system_tokens} tokens")

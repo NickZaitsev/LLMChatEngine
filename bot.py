@@ -362,9 +362,8 @@ Use /help to see all available commands!"""
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
         user = update.effective_user
-        user_name = user.first_name or user.username or "there"
         
-        goodbye = self.ai_handler.generate_goodbye(user_name)
+        goodbye = "bye"
         await update.message.reply_text(f"{goodbye}")
     
     async def reset_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

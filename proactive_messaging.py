@@ -589,7 +589,7 @@ def send_proactive_message(self, user_id: int):
         try:
             ai_response = loop.run_until_complete(
                 run_with_timeout(
-                    generate_ai_response(ai_handler, typing_manager, bot, user_id, proactive_prompt, conversation_history, None, "system", True),
+                    generate_ai_response(ai_handler, typing_manager, bot, user_id, proactive_prompt, conversation_history, None, "user", True),
                     timeout=60
                 )
             )

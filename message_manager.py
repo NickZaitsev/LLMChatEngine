@@ -22,9 +22,11 @@ def clean_ai_response(text: str) -> str:
     text = re.sub(r'\n{3,}', '\n\n', text)
     
     # Remove leading/trailing whitespace from each line
-    text = re.sub(r'^[ \t]+', '', text, flags=re.MULTILINE)
-    text = re.sub(r'[ \t]+$', '', text, flags=re.MULTILINE)
+    lines = text.split('\n')
+    cleaned_lines = [line.strip() for line in lines]
+    text = '\n'.join(cleaned_lines)
 
+    # Additional cleanup for cases with remaining whitespace
     text = re.sub(r'\n{2,}\.\.\.', '\n\n', text)
     
     return text
@@ -130,6 +132,9 @@ async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'Typing
     :param typing_manager: TypingIndicatorManager instance (optional)
     """
 
+    # Clean the text before processing
+    text = clean_ai_response(text)
+    
     # Split by paragraphs
     parts = text.split("\n\n")
     
