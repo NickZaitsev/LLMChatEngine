@@ -13,6 +13,8 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from celery import Celery
 from celery.schedules import crontab
+import redis
+import json
 
 from config import (
     PROACTIVE_MESSAGING_ENABLED,
@@ -96,9 +98,64 @@ class ProactiveMessagingService:
         logger.info(f"  Intervals: 1H={PROACTIVE_MESSAGING_INTERVAL_1H}s, 9H={PROACTIVE_MESSAGING_INTERVAL_9H}s, 1D={PROACTIVE_MESSAGING_INTERVAL_1D}s, 1W={PROACTIVE_MESSAGING_INTERVAL_1W}s, 1MO={PROACTIVE_MESSAGING_INTERVAL_1MO}s")
         logger.info(f"  Jitter: 1H={PROACTIVE_MESSAGING_JITTER_1H}s, 9H={PROACTIVE_MESSAGING_JITTER_9H}s, 1D={PROACTIVE_MESSAGING_JITTER_1D}s, 1W={PROACTIVE_MESSAGING_JITTER_1W}s, 1MO={PROACTIVE_MESSAGING_JITTER_1MO}s")
         
-        # In-memory storage for tracking user states (in production, this should be in Redis or database)
-        self.user_states = {}
+        # Initialize Redis client
+        self.redis_client = redis.from_url(self.redis_url)
+        logger.info("Redis client initialized")
         
+    def _get_user_state(self, user_id: int) -> dict:
+        """
+        Get user state from Redis.
+        
+        Args:
+            user_id: Telegram user ID
+            
+        Returns:
+            User state dictionary
+        """
+        try:
+            state_json = self.redis_client.get(f"proactive_messaging:user:{user_id}")
+            if state_json:
+                state = json.loads(state_json)
+                # Convert datetime strings back to datetime objects
+                if 'last_proactive_message' in state and state['last_proactive_message']:
+                    try:
+                        state['last_proactive_message'] = datetime.fromisoformat(state['last_proactive_message'])
+                    except ValueError:
+                        # If parsing fails, remove the field
+                        state['last_proactive_message'] = None
+                if 'scheduled_time' in state and state['scheduled_time']:
+                    try:
+                        state['scheduled_time'] = datetime.fromisoformat(state['scheduled_time'])
+                    except ValueError:
+                        # If parsing fails, remove the field
+                        state['scheduled_time'] = None
+                return state
+            return {}
+        except Exception as e:
+            logger.error(f"Error getting user state for user {user_id} from Redis: {e}")
+            return {}
+
+    def _set_user_state(self, user_id: int, state: dict):
+        """
+        Set user state in Redis.
+        
+        Args:
+            user_id: Telegram user ID
+            state: User state dictionary
+        """
+        try:
+            # Create a copy of the state to avoid modifying the original
+            state_copy = state.copy()
+            # Convert datetime objects to ISO format strings for JSON serialization
+            if 'last_proactive_message' in state_copy and isinstance(state_copy['last_proactive_message'], datetime):
+                state_copy['last_proactive_message'] = state_copy['last_proactive_message'].isoformat()
+            if 'scheduled_time' in state_copy and isinstance(state_copy['scheduled_time'], datetime):
+                state_copy['scheduled_time'] = state_copy['scheduled_time'].isoformat()
+                
+            state_json = json.dumps(state_copy, default=str)
+            self.redis_client.set(f"proactive_messaging:user:{user_id}", state_json)
+        except Exception as e:
+            logger.error(f"Error setting user state for user {user_id} in Redis: {e}")
         logger.info("Proactive Messaging Service initialized")
     
     def parse_time(self, time_str: str) -> tuple:
@@ -222,7 +279,7 @@ class ProactiveMessagingService:
         Returns:
             True if should switch to long-term mode, False otherwise
         """
-        user_state = self.user_states.get(user_id, {})
+        user_state = self._get_user_state(user_id)
         consecutive_outreaches = user_state.get('consecutive_outreaches', 0)
         return consecutive_outreaches >= self.max_consecutive_outreaches
     
@@ -233,15 +290,14 @@ class ProactiveMessagingService:
         Args:
             user_id: Telegram user ID
         """
-        if user_id not in self.user_states:
-            self.user_states[user_id] = {}
-        
-        self.user_states[user_id].update({
+        user_state = self._get_user_state(user_id)
+        user_state.update({
             'cadence': '1h',
             'consecutive_outreaches': 0,
             'last_proactive_message': None,
             'user_replied': False
         })
+        self._set_user_state(user_id, user_state)
         
         logger.info(f"Reset cadence for user {user_id} to 1h")
     
@@ -253,10 +309,9 @@ class ProactiveMessagingService:
             user_id: Telegram user ID
             replied: Whether user replied (default True)
         """
-        if user_id not in self.user_states:
-            self.user_states[user_id] = {}
-        
-        self.user_states[user_id]['user_replied'] = replied
+        user_state = self._get_user_state(user_id)
+        user_state['user_replied'] = replied
+        self._set_user_state(user_id, user_state)
         
         if replied:
             # Reset cadence when user replies
@@ -277,11 +332,12 @@ class ProactiveMessagingService:
             return
         
         # Get user state or initialize it
-        if user_id not in self.user_states:
-            logger.debug(f"User {user_id} not found in user_states, initializing...")
+        user_state = self._get_user_state(user_id)
+        if not user_state:
+            logger.debug(f"User {user_id} not found in Redis, initializing...")
             self.reset_cadence(user_id)
+            user_state = self._get_user_state(user_id)
         
-        user_state = self.user_states[user_id]
         current_cadence = user_state.get('cadence', '1h')
         logger.debug(f"Current cadence for user {user_id}: {current_cadence}")
         
@@ -306,10 +362,11 @@ class ProactiveMessagingService:
         
         # Update user state
         user_state.update({
-            'scheduled_time': scheduled_time,
+            'scheduled_time': scheduled_time.isoformat() if scheduled_time else None,
             'cadence': current_cadence,
             'user_replied': False
         })
+        self._set_user_state(user_id, user_state)
         
         # Schedule the Celery task
         logger.debug(f"Scheduling Celery task for user {user_id} with ETA: {scheduled_time}")
@@ -331,9 +388,11 @@ class ProactiveMessagingService:
         # In a real implementation, we would revoke the Celery task
         # For now, we'll just update the user state
         
-        if user_id in self.user_states:
-            self.user_states[user_id]['scheduled_time'] = None
-            self.user_states[user_id]['user_replied'] = True
+        user_state = self._get_user_state(user_id)
+        if user_state:
+            user_state['scheduled_time'] = None
+            user_state['user_replied'] = True
+            self._set_user_state(user_id, user_state)
         
         # Reset cadence to shortest interval
         self.reset_cadence(user_id)
@@ -346,36 +405,36 @@ class ProactiveMessagingService:
 # Initialize the service
 proactive_messaging_service = ProactiveMessagingService()
 
-@celery_app.task
-def send_proactive_message(user_id: int):
+@celery_app.task(bind=True)
+def send_proactive_message(self, user_id: int):
     """
     Celery task to send a proactive message to a user.
     
     Args:
+        self: Celery task instance
         user_id: Telegram user ID
     """
-    logger.info(f"Starting Celery task send_proactive_message for user {user_id}")
+    task_id = self.request.id
+    logger.info(f"Starting Celery task send_proactive_message [{task_id}] for user {user_id}")
     
     # Get user state
-    user_state = proactive_messaging_service.user_states.get(user_id, {})
+    user_state = proactive_messaging_service._get_user_state(user_id)
     logger.debug(f"User {user_id} state: {user_state}")
     
     # Check if user has replied since scheduling
     if user_state.get('user_replied', False):
-        logger.info(f"User {user_id} has replied since scheduling, skipping proactive message")
+        logger.info(f"User {user_id} has replied since scheduling, skipping proactive message [{task_id}]")
         return
     
     # Update consecutive outreaches count
     consecutive_outreaches = user_state.get('consecutive_outreaches', 0)
     consecutive_outreaches += 1
     
-    if user_id not in proactive_messaging_service.user_states:
-        proactive_messaging_service.user_states[user_id] = {}
+    user_state['consecutive_outreaches'] = consecutive_outreaches
+    user_state['last_proactive_message'] = datetime.now().isoformat()
+    proactive_messaging_service._set_user_state(user_id, user_state)
     
-    proactive_messaging_service.user_states[user_id]['consecutive_outreaches'] = consecutive_outreaches
-    proactive_messaging_service.user_states[user_id]['last_proactive_message'] = datetime.now()
-    
-    logger.info(f"Updated user {user_id} consecutive outreaches count to {consecutive_outreaches}")
+    logger.info(f"Updated user {user_id} consecutive outreaches count to {consecutive_outreaches} [{task_id}]")
     
     # Generate and send proactive message
     try:
@@ -392,64 +451,153 @@ def send_proactive_message(user_id: int):
         async def init_storage():
             await conversation_manager.initialize()
         
-        # Run the async initialization in a new event loop
-        import asyncio
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(init_storage())
+        # Get or create event loop
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
         
-        # Get conversation history
-        conversation_history = loop.run_until_complete(conversation_manager.get_formatted_conversation_async(user_id))
+        # Run the async initialization with timeout
+        try:
+            loop.run_until_complete(run_with_timeout(init_storage(), timeout=30))
+        except asyncio.TimeoutError:
+            logger.error(f"Storage initialization timed out for user {user_id} [{task_id}]")
+            raise
+        except Exception as e:
+            logger.error(f"Error initializing storage for user {user_id} [{task_id}]: {e}")
+            raise
+        
+        # Get conversation history with timeout
+        try:
+            conversation_history = loop.run_until_complete(
+                run_with_timeout(conversation_manager.get_formatted_conversation_async(user_id), timeout=30)
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Getting conversation history timed out for user {user_id} [{task_id}]")
+            raise
+        except Exception as e:
+            logger.error(f"Error getting conversation history for user {user_id} [{task_id}]: {e}")
+            raise
         
         # Generate proactive message prompt
         proactive_prompt = PROACTIVE_MESSAGING_PROMPT
         
-        # Generate AI response using shared function
-        ai_response = loop.run_until_complete(
-            generate_ai_response(ai_handler, typing_manager, bot, user_id, proactive_prompt, conversation_history, None, "system", True)
-        )
+        # Generate AI response using shared function with timeout
+        try:
+            ai_response = loop.run_until_complete(
+                run_with_timeout(
+                    generate_ai_response(ai_handler, typing_manager, bot, user_id, proactive_prompt, conversation_history, None, "system", True),
+                    timeout=60
+                )
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"AI response generation timed out for user {user_id} [{task_id}]")
+            raise
+        except Exception as e:
+            logger.error(f"Error generating AI response for user {user_id} [{task_id}]: {e}")
+            raise
         
         if ai_response:
             # Clean the AI response
             cleaned_response = clean_ai_response(ai_response)
             
-            # Send the message
-            loop.run_until_complete(
-                send_ai_response(chat_id=user_id, text=cleaned_response, bot=bot, typing_manager=typing_manager)
-            )
-            logger.info(f"Proactive message sent to user {user_id}: {cleaned_response[:50]}...")
+            # Add the proactive message to conversation history
+            try:
+                loop.run_until_complete(
+                    run_with_timeout(
+                        conversation_manager.add_message_async(user_id, "assistant", cleaned_response),
+                        timeout=30
+                    )
+                )
+                logger.info(f"Proactive message added to history for user {user_id} [{task_id}]: {cleaned_response[:50]}...")
+            except asyncio.TimeoutError:
+                logger.error(f"Adding message to history timed out for user {user_id} [{task_id}]")
+                # Continue even if adding to history fails
+            except Exception as e:
+                logger.error(f"Error adding message to history for user {user_id} [{task_id}]: {e}")
+                # Continue even if adding to history fails
+            
+            # Send the message with timeout
+            try:
+                loop.run_until_complete(
+                    run_with_timeout(
+                        send_ai_response(chat_id=user_id, text=cleaned_response, bot=bot, typing_manager=typing_manager),
+                        timeout=30
+                    )
+                )
+                logger.info(f"Proactive message sent to user {user_id} [{task_id}]: {cleaned_response[:50]}...")
+            except asyncio.TimeoutError:
+                logger.error(f"Sending message timed out for user {user_id} [{task_id}]")
+                raise
+            except Exception as e:
+                logger.error(f"Error sending message to user {user_id} [{task_id}]: {e}")
+                raise
         else:
-            logger.error(f"Failed to generate proactive message for user {user_id}")
+            logger.error(f"Failed to generate proactive message for user {user_id} [{task_id}]")
             
     except Exception as e:
-        logger.error(f"Error sending proactive message to user {user_id}: {e}")
+        logger.error(f"Error sending proactive message to user {user_id} [{task_id}]: {e}")
+        # Retry with exponential backoff
+        try:
+            raise self.retry(exc=e, countdown=60, max_retries=3)
+        except self.MaxRetriesExceededError:
+            logger.error(f"Max retries exceeded for task {task_id} for user {user_id}")
         # Continue with state management even if message sending fails
     
     # Escalate cadence for next message
     current_cadence = user_state.get('cadence', '1h')
     next_cadence = proactive_messaging_service.get_next_interval(current_cadence)
     
-    logger.info(f"Escalating cadence for user {user_id} from {current_cadence} to {next_cadence}")
+    logger.info(f"Escalating cadence for user {user_id} from {current_cadence} to {next_cadence} [{task_id}]")
     
     # Update cadence
-    proactive_messaging_service.user_states[user_id]['cadence'] = next_cadence
+    user_state['cadence'] = next_cadence
+    proactive_messaging_service._set_user_state(user_id, user_state)
     
     # Schedule next message
     proactive_messaging_service.schedule_proactive_message(user_id)
     
-    logger.info(f"Completed Celery task send_proactive_message for user {user_id}")
+    logger.info(f"Completed Celery task send_proactive_message [{task_id}] for user {user_id}")
 
-@celery_app.task
-def schedule_next_message(user_id: int):
+
+async def run_with_timeout(coro, timeout=30):
+    """
+    Run an async coroutine with a timeout.
+    
+    Args:
+        coro: The coroutine to run
+        timeout: Timeout in seconds
+        
+    Returns:
+        The result of the coroutine
+        
+    Raises:
+        asyncio.TimeoutError: If the coroutine times out
+    """
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.error(f"Async operation timed out after {timeout} seconds")
+        raise
+
+@celery_app.task(bind=True)
+def schedule_next_message(self, user_id: int):
     """
     Celery task to schedule the next proactive message.
     
     Args:
+        self: Celery task instance
         user_id: Telegram user ID
     """
-    logger.info(f"Starting Celery task schedule_next_message for user {user_id}")
-    proactive_messaging_service.schedule_proactive_message(user_id)
-    logger.info(f"Completed Celery task schedule_next_message for user {user_id}")
+    task_id = self.request.id
+    logger.info(f"Starting Celery task schedule_next_message [{task_id}] for user {user_id}")
+    try:
+        proactive_messaging_service.schedule_proactive_message(user_id)
+        logger.info(f"Completed Celery task schedule_next_message [{task_id}] for user {user_id}")
+    except Exception as e:
+        logger.error(f"Error in schedule_next_message [{task_id}] for user {user_id}: {e}")
+        raise
 
 # Celery Beat Schedule
 celery_app.conf.beat_schedule = {

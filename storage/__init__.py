@@ -224,31 +224,6 @@ def _mask_db_url(db_url: str) -> str:
         return "***masked***"
 
 
-async def create_fallback_storage() -> Storage:
-    """
-    Create a fallback storage instance for testing or when database is unavailable.
-    
-    Returns:
-        Storage instance with in-memory repositories
-    """
-    logger.warning("Creating fallback in-memory storage - data will not be persisted!")
-    
-    # This is a minimal implementation for compatibility
-    # In practice, you might want a more complete in-memory implementation
-    
-    class FallbackStorage:
-        def __init__(self):
-            self.messages = InMemoryMessageRepo()
-            self.use_pgvector = False
-        
-        async def close(self):
-            pass
-        
-        async def health_check(self) -> bool:
-            return True
-    
-    return FallbackStorage()
-
 
 # Import token estimator for backward compatibility
 from .repos import TokenEstimator
@@ -257,7 +232,6 @@ from .repos import TokenEstimator
 __all__ = [
     'Storage',
     'create_storage', 
-    'create_fallback_storage',
     'TokenEstimator',
     'PGVECTOR_AVAILABLE'
 ]
