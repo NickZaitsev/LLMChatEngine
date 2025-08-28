@@ -18,12 +18,13 @@ logger = logging.getLogger(__name__)
 
 async def test_message_timing():
     """Test that messages are immediately available in conversation history after being added"""
-    # Initialize the conversation manager
-    conversation_manager = PostgresConversationManager(DATABASE_URL, USE_PGVECTOR)
+    # Initialize the conversation manager with file-based SQLite for testing
+    conversation_manager = PostgresConversationManager("sqlite+aiosqlite:///test_message_timing.db", False)
     await conversation_manager.initialize()
     
-    # Test user ID
-    user_id = 123456789
+    # Test user ID - use the same Telegram user ID as other tests
+    telegram_user_id = 123456789
+    user_id = telegram_user_id
     
     # Clear any existing conversation for this test user
     await conversation_manager.clear_conversation_async(user_id)

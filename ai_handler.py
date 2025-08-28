@@ -210,11 +210,8 @@ class AIHandler:
                     
                 except Exception as e:
                     logger.error("PromptAssembler failed: %s", e)
-                    # Fall back to legacy method
-                    messages = self._build_legacy_messages(user_message, conversation_history, role)
             else:
-                # Use legacy method for building messages
-                messages = self._build_legacy_messages(user_message, conversation_history, role)
+                logger.error("PromptAssembler is not available")
 
             logger.info("Sending %d messages to LLM", len(messages))
             
@@ -406,36 +403,3 @@ class AIHandler:
                 "Hello! ✨ How's your day going?",
                 "Hey! 💖 I'm here for you!"
             ])
-    
-    def generate_goodbye(self, user_name: str = None) -> str:
-        """Generate a personalized goodbye"""
-        if user_name:
-            goodbyes = [
-                f"Goodbye {user_name}! 💕 Take care and I'll be here when you want to chat again!",
-                f"See you later {user_name}! 🌸 I'll miss you!",
-                f"Bye {user_name}! ✨ Have a wonderful day!",
-                f"Take care {user_name}! 💖 I'll be thinking of you!",
-                f"Until next time {user_name}! 🌺 Stay safe and happy!"
-            ]
-            return random.choice(goodbyes)
-        else:
-            return random.choice([
-                "Goodbye! 💕 Take care and I'll be here when you want to chat again!",
-                "See you later! 🌸 I'll miss you!",
-                "Bye! ✨ Have a wonderful day!",
-                "Take care! 💖 I'll be thinking of you!"
-            ])
-
-    def _build_legacy_messages(self, user_message: str, conversation_history: List[Dict], role: str = "user") -> List[Dict]:
-        """Build messages using the legacy method (for fallback compatibility)."""
-        messages = [{"role": "system", "content": self.personality}]
-        for msg in conversation_history:
-            msg_role = msg.get("role")
-            content = msg.get("content", "")
-            if msg_role in ["user", "assistant"]:
-                messages.append({"role": msg_role, "content": content})
-        
-        # Add the current user message that we need to respond to
-        messages.append({"role": role, "content": user_message})
-        return messages
-

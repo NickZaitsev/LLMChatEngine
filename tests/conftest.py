@@ -14,7 +14,7 @@ from typing import AsyncGenerator, Generator
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from storage.models import Base
 from storage.repos import (
-    PostgresMessageRepo, PostgresMemoryRepo, PostgresConversationRepo,
+    PostgresMessageRepo, PostgresMessageHistoryRepo, PostgresMemoryRepo, PostgresConversationRepo,
     PostgresUserRepo, PostgresPersonaRepo
 )
 from storage import create_storage, Storage
@@ -83,6 +83,7 @@ async def storage(engine) -> AsyncGenerator[Storage, None]:
     
     storage = Storage(
         messages=PostgresMessageRepo(session_maker),
+        message_history=PostgresMessageHistoryRepo(session_maker),
         memories=PostgresMemoryRepo(session_maker, use_pgvector=False),
         conversations=PostgresConversationRepo(session_maker),
         users=PostgresUserRepo(session_maker),

@@ -23,12 +23,14 @@ async def test_message_history():
     """Test the message history functionality."""
     logger.info("Starting message history test")
     
-    # Create storage instance
-    storage = await create_storage(DATABASE_URL)
+    # Create storage instance with file-based SQLite for testing
+    storage = await create_storage("sqlite+aiosqlite:///test_message_history.db", use_pgvector=False)
     logger.info("Storage created successfully")
     
-    # Test user ID
-    user_id = 123456789
+    # Test user ID - convert integer to UUID for database
+    import uuid
+    telegram_user_id = 123456789
+    user_id = uuid.uuid5(uuid.NAMESPACE_OID, f"telegram_user_{telegram_user_id}")
     role = "user"
     content = "Hello, this is a test message!"
     
