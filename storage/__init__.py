@@ -224,51 +224,6 @@ def _mask_db_url(db_url: str) -> str:
         return "***masked***"
 
 
-# Legacy support - create a simple in-memory implementation for compatibility
-class InMemoryMessageRepo:
-    """Fallback in-memory message repository for compatibility"""
-    
-    def __init__(self):
-        self.messages = {}
-        self.token_estimator = TokenEstimator()
-    
-    async def append_message(self, conversation_id: str, role: str, content: str, metadata=None, token_count: int = 0):
-        """Append message to in-memory storage"""
-        from datetime import datetime
-        from uuid import uuid4
-        from .interfaces import Message
-        
-        if metadata is None:
-            metadata = {}
-        
-        if token_count == 0:
-            token_count = self.estimate_tokens(content)
-        
-        message = Message(
-            id=uuid4(),
-            conversation_id=conversation_id,
-            role=role,
-            content=content,
-            metadata=metadata,
-            token_count=token_count,
-            created_at=datetime.utcnow()
-        )
-        
-        if conversation_id not in self.messages:
-            self.messages[conversation_id] = []
-        
-        self.messages[conversation_id].append(message)
-        return message
-    
-    async def list_messages(self, conversation_id: str):
-        """List messages for a conversation"""
-        return self.messages.get(conversation_id, [])
-    
-    def estimate_tokens(self, text: str) -> int:
-        """Estimate token count"""
-        return max(1, len(text) // 4) if text else 0
-
-
 async def create_fallback_storage() -> Storage:
     """
     Create a fallback storage instance for testing or when database is unavailable.
