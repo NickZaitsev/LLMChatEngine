@@ -130,6 +130,7 @@ class ProactiveMessagingService:
                     except ValueError:
                         # If parsing fails, remove the field
                         state['scheduled_time'] = None
+                # scheduled_task_id is already a string, no conversion needed
                 return state
             return {}
         except Exception as e:
@@ -152,6 +153,7 @@ class ProactiveMessagingService:
                 state_copy['last_proactive_message'] = state_copy['last_proactive_message'].isoformat()
             if 'scheduled_time' in state_copy and isinstance(state_copy['scheduled_time'], datetime):
                 state_copy['scheduled_time'] = state_copy['scheduled_time'].isoformat()
+            # scheduled_task_id is already a string, no conversion needed
                 
             state_json = json.dumps(state_copy, default=str)
             self.redis_client.set(f"proactive_messaging:user:{user_id}", state_json)
@@ -191,6 +193,7 @@ class ProactiveMessagingService:
                             except ValueError:
                                 # If parsing fails, remove the field
                                 state['scheduled_time'] = None
+                        # scheduled_task_id is already a string, no conversion needed
                         user_states[user_id] = state
                 except Exception as e:
                     logger.error(f"Error processing key {key}: {e}")
@@ -242,15 +245,19 @@ class ProactiveMessagingService:
                     
                     logger.info(f"Rescheduling missed message for user {user_id} with delay of {delay} seconds (at {new_scheduled_time})")
                     
-                    # Update the user state with the new scheduled time
-                    state['scheduled_time'] = new_scheduled_time
-                    self._set_user_state(user_id, state)
+                    # Revoke any existing scheduled task for this user
+                    self._revoke_user_task(user_id, state)
                     
                     # Schedule the Celery task with the new time
-                    send_proactive_message.apply_async(
+                    task = send_proactive_message.apply_async(
                         args=[user_id],
                         eta=new_scheduled_time
                     )
+                    
+                    # Update the user state with the new scheduled time and task ID
+                    state['scheduled_time'] = new_scheduled_time.isoformat()
+                    state['scheduled_task_id'] = task.id
+                    self._set_user_state(user_id, state)
                     
                     rescheduled_count += 1
             except Exception as e:
@@ -259,6 +266,30 @@ class ProactiveMessagingService:
         
         logger.info(f"Rescheduled {rescheduled_count} missed proactive messages")
         logger.info("Proactive Messaging Service initialized")
+    
+    def _revoke_user_task(self, user_id: int, state: dict):
+        """
+        Revoke any existing scheduled task for a user.
+        
+        Args:
+            user_id: Telegram user ID
+            state: User state dictionary containing task information
+        """
+        try:
+            # Get the scheduled task ID from user state
+            task_id = state.get('scheduled_task_id')
+            if task_id:
+                logger.info(f"Revoking scheduled task {task_id} for user {user_id}")
+                # Revoke the Celery task
+                celery_app.control.revoke(task_id, terminate=True)
+                logger.info(f"Revoked scheduled task {task_id} for user {user_id}")
+                
+                # Clear the task ID from state
+                state['scheduled_task_id'] = None
+            else:
+                logger.debug(f"No scheduled task found for user {user_id}")
+        except Exception as e:
+            logger.error(f"Error revoking task for user {user_id}: {e}")
     
     def parse_time(self, time_str: str) -> tuple:
         """
@@ -397,6 +428,7 @@ class ProactiveMessagingService:
             'cadence': '1h',
             'consecutive_outreaches': 0,
             'last_proactive_message': None,
+            'scheduled_task_id': None,
             'user_replied': False
         })
         self._set_user_state(user_id, user_state)
@@ -413,6 +445,7 @@ class ProactiveMessagingService:
         """
         user_state = self._get_user_state(user_id)
         user_state['user_replied'] = replied
+        user_state['scheduled_task_id'] = None
         self._set_user_state(user_id, user_state)
         
         if replied:
@@ -486,13 +519,15 @@ class ProactiveMessagingService:
         Args:
             user_id: Telegram user ID
         """
-        # Cancel any scheduled proactive message for this user
-        # In a real implementation, we would revoke the Celery task
-        # For now, we'll just update the user state
-        
+        # Revoke any scheduled proactive message for this user
         user_state = self._get_user_state(user_id)
         if user_state:
+            # Revoke the scheduled task if it exists
+            self._revoke_user_task(user_id, user_state)
+            
+            # Update user state
             user_state['scheduled_time'] = None
+            user_state['scheduled_task_id'] = None
             user_state['user_replied'] = True
             self._set_user_state(user_id, user_state)
         
