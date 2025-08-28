@@ -29,8 +29,15 @@ from config import (
     PROACTIVE_MESSAGING_JITTER_1MO,
     PROACTIVE_MESSAGING_QUIET_HOURS_START,
     PROACTIVE_MESSAGING_QUIET_HOURS_END,
-    PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES
+    PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES,
+    PROACTIVE_MESSAGING_PROMPT,
+    TELEGRAM_TOKEN, DATABASE_URL, USE_PGVECTOR
 )
+
+# Import components for proactive messaging
+from ai_handler import AIHandler
+from message_manager import send_ai_response, TypingIndicatorManager, clean_ai_response
+from storage_conversation_manager import PostgresConversationManager
 
 # Import celery configuration
 import celeryconfig
@@ -256,13 +263,12 @@ class ProactiveMessagingService:
             self.reset_cadence(user_id)
             logger.info(f"User {user_id} replied, cadence reset")
     
-    def schedule_proactive_message(self, user_id: int, bot_instance=None):
+    def schedule_proactive_message(self, user_id: int):
         """
         Schedule a proactive message for a user.
         
         Args:
             user_id: Telegram user ID
-            bot_instance: Bot instance for sending messages
         """
         logger.info(f"Scheduling proactive message for user {user_id}")
         
@@ -308,19 +314,18 @@ class ProactiveMessagingService:
         # Schedule the Celery task
         logger.debug(f"Scheduling Celery task for user {user_id} with ETA: {scheduled_time}")
         send_proactive_message.apply_async(
-            args=[user_id, bot_instance],
+            args=[user_id],
             eta=scheduled_time
         )
         
         logger.info(f"Scheduled proactive message for user {user_id} at {scheduled_time} with cadence {current_cadence}")
     
-    def handle_user_message(self, user_id: int, bot_instance=None):
+    def handle_user_message(self, user_id: int):
         """
         Handle incoming user message - cancel scheduled message and reset cadence.
         
         Args:
             user_id: Telegram user ID
-            bot_instance: Bot instance for sending messages
         """
         # Cancel any scheduled proactive message for this user
         # In a real implementation, we would revoke the Celery task
@@ -334,7 +339,7 @@ class ProactiveMessagingService:
         self.reset_cadence(user_id)
         
         # Schedule new proactive message
-        self.schedule_proactive_message(user_id, bot_instance)
+        self.schedule_proactive_message(user_id)
         
         logger.info(f"Handled user message for user {user_id}, cadence reset and new message scheduled")
 
@@ -342,13 +347,12 @@ class ProactiveMessagingService:
 proactive_messaging_service = ProactiveMessagingService()
 
 @celery_app.task
-def send_proactive_message(user_id: int, bot_instance=None):
+def send_proactive_message(user_id: int):
     """
     Celery task to send a proactive message to a user.
     
     Args:
         user_id: Telegram user ID
-        bot_instance: Bot instance for sending messages
     """
     logger.info(f"Starting Celery task send_proactive_message for user {user_id}")
     
@@ -373,10 +377,53 @@ def send_proactive_message(user_id: int, bot_instance=None):
     
     logger.info(f"Updated user {user_id} consecutive outreaches count to {consecutive_outreaches}")
     
-    # In a real implementation, we would generate and send the actual message here
-    # For now, we'll just log that we would send a message
-    
-    logger.info(f"Proactive message sent to user {user_id}")
+    # Generate and send proactive message
+    try:
+        # Initialize components needed for sending messages
+        ai_handler = AIHandler()
+        typing_manager = TypingIndicatorManager()
+        conversation_manager = PostgresConversationManager(DATABASE_URL, USE_PGVECTOR)
+        
+        # Initialize the conversation manager storage
+        async def init_storage():
+            await conversation_manager.initialize()
+        
+        # Run the async initialization in a new event loop
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(init_storage())
+        
+        # Get conversation history
+        conversation_history = loop.run_until_complete(conversation_manager.get_formatted_conversation_async(user_id))
+        
+        # Generate proactive message prompt
+        proactive_prompt = PROACTIVE_MESSAGING_PROMPT
+        
+        # Generate AI response
+        ai_response = loop.run_until_complete(
+            ai_handler.generate_response(proactive_prompt, conversation_history)
+        )
+        
+        if ai_response:
+            # Clean the AI response
+            cleaned_response = clean_ai_response(ai_response)
+            
+            # Create Telegram bot instance
+            from telegram import Bot
+            bot = Bot(token=TELEGRAM_TOKEN)
+            
+            # Send the message
+            loop.run_until_complete(
+                send_ai_response(chat_id=user_id, text=cleaned_response, bot=bot, typing_manager=typing_manager)
+            )
+            logger.info(f"Proactive message sent to user {user_id}: {cleaned_response[:50]}...")
+        else:
+            logger.error(f"Failed to generate proactive message for user {user_id}")
+            
+    except Exception as e:
+        logger.error(f"Error sending proactive message to user {user_id}: {e}")
+        # Continue with state management even if message sending fails
     
     # Escalate cadence for next message
     current_cadence = user_state.get('cadence', '1h')
@@ -388,21 +435,20 @@ def send_proactive_message(user_id: int, bot_instance=None):
     proactive_messaging_service.user_states[user_id]['cadence'] = next_cadence
     
     # Schedule next message
-    proactive_messaging_service.schedule_proactive_message(user_id, bot_instance)
+    proactive_messaging_service.schedule_proactive_message(user_id)
     
     logger.info(f"Completed Celery task send_proactive_message for user {user_id}")
 
 @celery_app.task
-def schedule_next_message(user_id: int, bot_instance=None):
+def schedule_next_message(user_id: int):
     """
     Celery task to schedule the next proactive message.
     
     Args:
         user_id: Telegram user ID
-        bot_instance: Bot instance for sending messages
     """
     logger.info(f"Starting Celery task schedule_next_message for user {user_id}")
-    proactive_messaging_service.schedule_proactive_message(user_id, bot_instance)
+    proactive_messaging_service.schedule_proactive_message(user_id)
     logger.info(f"Completed Celery task schedule_next_message for user {user_id}")
 
 # Celery Beat Schedule

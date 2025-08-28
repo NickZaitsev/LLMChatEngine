@@ -575,7 +575,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         # Notify proactive messaging service about user message
         if self.proactive_messaging_service:
             try:
-                self.proactive_messaging_service.handle_user_message(user_id, self)
+                self.proactive_messaging_service.handle_user_message(user_id)
                 logger.info("Notified proactive messaging service about user message from user %s", user_id)
             except Exception as e:
                 logger.error("Failed to notify proactive messaging service: %s", e)

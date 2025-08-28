@@ -84,6 +84,8 @@ services:
       - .:/app
     networks:
       - backup_network
+    extra_hosts:
+      - "host-machine:host-gateway"
 
 volumes:
   postgres_data:
