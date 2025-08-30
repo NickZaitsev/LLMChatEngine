@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import random
+import sys
 from typing import List, Dict
 
 from config import BOT_PERSONALITY, MAX_TOKENS, TEMPERATURE
@@ -186,9 +187,11 @@ class AIHandler:
 
     async def generate_response(self, user_message: str, conversation_history: List[Dict], conversation_id: str = None, role: str = "user") -> str:
         """Generate a response using ModelClient with proper timeout handling."""
+        logger.info("generate_response called with user_message: %s, conversation_id: %s, prompt_assembler: %s",
+                   user_message[:50] if user_message else "None", conversation_id, self.prompt_assembler)
         if not self.model_client:
             logger.error("ModelClient not available; cannot generate AI response")
-            return "I'm having technical difficulties right now. Please check my configuration! 💕"
+            return "" # I'm having technical difficulties right now. Please try again later! 💕
 
         try:
             logger.info("Generating response for message (%d chars), history: %d messages",
@@ -214,18 +217,18 @@ class AIHandler:
                 except Exception as e:
                     logger.error("PromptAssembler failed: %s", e)
             else:
-                logger.error("PromptAssembler is not available")
+                logger.info("PromptAssembler not used - prompt_assembler: %s, conversation_id: %s. Using fallback method.",
+                           self.prompt_assembler, conversation_id)
                 # Fallback to creating messages from conversation history
                 messages = [
                     {"role": "system", "content": self.personality},
                     *conversation_history,
-                    {"role": role, "content": user_message}
                 ]
 
             # Check if messages were successfully created
             if messages is None:
                 logger.error("Failed to create messages for LLM")
-                return "I'm having technical difficulties right now. Please try again later! 💕"
+                return "" # I'm having technical difficulties right now. Please try again later! 💕
 
             logger.info("Sending %d messages to LLM", len(messages))
             

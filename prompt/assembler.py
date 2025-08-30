@@ -14,13 +14,11 @@ from uuid import UUID
 from storage.interfaces import MessageRepo, PersonaRepo, Message
 from memory.manager import MemoryManager, MemoryRecord
 from .templates import (
-    SYSTEM_TEMPLATE,
     format_memory_snippet_from_record,
     create_user_profile_message,
     create_memory_context_message,
 )
 import config
-
 logger = logging.getLogger(__name__)
 
 
@@ -223,12 +221,11 @@ class PromptAssembler:
 
         # 1. Add system template if enabled
         if self.include_system_template:
-            system_message = {"role": "system", "content": SYSTEM_TEMPLATE}
-            system_tokens = self.token_counter.count_tokens(SYSTEM_TEMPLATE)
+            system_message = {"role": "system", "content": config.BOT_PERSONALITY}
+            system_tokens = self.token_counter.count_tokens(config.BOT_PERSONALITY)
             messages.append(system_message)
             token_counts["system_tokens"] += system_tokens
             logger.debug(f"Added system template: {system_tokens} tokens")
-        
         # 2. Add persona configuration if available
         try:
             if self.persona_repo:
@@ -302,25 +299,9 @@ class PromptAssembler:
                 conversation_id, remaining_history_budget
             )
             
-            # Filter out the most recent user message to prevent duplication
-            # This is needed because the user message is already added to the database
-            # before calling this method, so we don't want to include it again
-            if recent_messages:
-                # Find the most recent user message
-                most_recent_user_msg = None
-                for msg in reversed(recent_messages):  # Iterate in reverse to get the most recent first
-                    if msg.role == "user":
-                        most_recent_user_msg = msg
-                        break
-                
-                # Filter out the most recent user message if it exists
-                if most_recent_user_msg:
-                    filtered_messages = [msg for msg in recent_messages if msg.id != most_recent_user_msg.id]
-                    logger.debug(f"Filtered out most recent user message to prevent duplication")
-                else:
-                    filtered_messages = recent_messages
-            else:
-                filtered_messages = recent_messages
+            # Use all recent messages as-is
+            # The current user message should be included as the last message in the prompt
+            filtered_messages = recent_messages
             
             for msg in filtered_messages:
                 # Check if message needs truncation
