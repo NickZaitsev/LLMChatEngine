@@ -302,7 +302,27 @@ class PromptAssembler:
                 conversation_id, remaining_history_budget
             )
             
-            for msg in recent_messages:
+            # Filter out the most recent user message to prevent duplication
+            # This is needed because the user message is already added to the database
+            # before calling this method, so we don't want to include it again
+            if recent_messages:
+                # Find the most recent user message
+                most_recent_user_msg = None
+                for msg in reversed(recent_messages):  # Iterate in reverse to get the most recent first
+                    if msg.role == "user":
+                        most_recent_user_msg = msg
+                        break
+                
+                # Filter out the most recent user message if it exists
+                if most_recent_user_msg:
+                    filtered_messages = [msg for msg in recent_messages if msg.id != most_recent_user_msg.id]
+                    logger.debug(f"Filtered out most recent user message to prevent duplication")
+                else:
+                    filtered_messages = recent_messages
+            else:
+                filtered_messages = recent_messages
+            
+            for msg in filtered_messages:
                 # Check if message needs truncation
                 content = msg.content
                 message_tokens = self.token_counter.count_tokens(content)
@@ -319,7 +339,7 @@ class PromptAssembler:
                 messages.append(history_message)
                 token_counts["history_tokens"] += message_tokens
             
-            logger.debug(f"Added {len(recent_messages)} history messages: {token_counts['history_tokens']} tokens")
+            logger.debug(f"Added {len(filtered_messages)} history messages: {token_counts['history_tokens']} tokens")
             
         except Exception as e:
             logger.warning(f"Failed to load conversation history: {e}")

@@ -248,16 +248,14 @@ class ProactiveMessagingService:
                     # Revoke any existing scheduled task for this user
                     self._revoke_user_task(user_id, state)
                     
-                    # Schedule the Celery task with the new time
-                    task = send_proactive_message.apply_async(
-                        args=[user_id],
-                        eta=new_scheduled_time
+                    # Schedule the next message using the Celery task
+                    schedule_next_message.apply_async(
+                        args=[user_id]
                     )
                     
-                    # Update the user state with the new scheduled time and task ID
-                    state['scheduled_time'] = new_scheduled_time.isoformat()
-                    state['scheduled_task_id'] = task.id
-                    self._set_user_state(user_id, state)
+                    # Note: The task ID is no longer directly available since we're not
+                    # calling send_proactive_message directly anymore. The state update
+                    # will be handled by the schedule_proactive_message method.
                     
                     rescheduled_count += 1
             except Exception as e:
@@ -453,12 +451,13 @@ class ProactiveMessagingService:
             self.reset_cadence(user_id)
             logger.info(f"User {user_id} replied, cadence reset")
     
-    def schedule_proactive_message(self, user_id: int):
+    def schedule_proactive_message(self, user_id: int, scheduled_time: datetime = None):
         """
         Schedule a proactive message for a user.
         
         Args:
             user_id: Telegram user ID
+            scheduled_time: Optional specific time to schedule the message (defaults to None)
         """
         logger.info(f"Scheduling proactive message for user {user_id}")
         
@@ -481,13 +480,14 @@ class ProactiveMessagingService:
             current_cadence = '1mo'
             logger.info(f"Switching user {user_id} to long-term mode")
         
-        # Calculate next interval with jitter
-        interval = self.get_interval_with_jitter(current_cadence)
-        logger.debug(f"Calculated interval for user {user_id}: {interval} seconds")
-        
-        # Schedule the message
-        scheduled_time = datetime.now() + timedelta(seconds=interval)
-        logger.debug(f"Initial scheduled time for user {user_id}: {scheduled_time}")
+        # Calculate next interval with jitter if no scheduled_time provided
+        if scheduled_time is None:
+            interval = self.get_interval_with_jitter(current_cadence)
+            logger.debug(f"Calculated interval for user {user_id}: {interval} seconds")
+            
+            # Schedule the message
+            scheduled_time = datetime.now() + timedelta(seconds=interval)
+            logger.debug(f"Initial scheduled time for user {user_id}: {scheduled_time}")
         
         # Adjust for quiet hours
         original_time = scheduled_time
@@ -692,6 +692,9 @@ def send_proactive_message(self, user_id: int):
     user_state['cadence'] = next_cadence
     proactive_messaging_service._set_user_state(user_id, user_state)
     
+    # REVOKE MESSAGES
+    proactive_messaging_service._revoke_user_task(user_id, user_state)
+
     # Schedule next message
     proactive_messaging_service.schedule_proactive_message(user_id)
     
@@ -730,7 +733,19 @@ def schedule_next_message(self, user_id: int):
     task_id = self.request.id
     logger.info(f"Starting Celery task schedule_next_message [{task_id}] for user {user_id}")
     try:
-        proactive_messaging_service.schedule_proactive_message(user_id)
+        # Get user state to check for existing scheduled tasks
+        user_state = proactive_messaging_service._get_user_state(user_id)
+        
+        # Revoke any existing scheduled task for this user
+        if user_state:
+            proactive_messaging_service._revoke_user_task(user_id, user_state)
+        
+        # Calculate the new scheduled time with delay for rescheduling missed messages
+        delay = random.randint(30, PROACTIVE_MESSAGING_RESTART_DELAY_MAX)
+        new_scheduled_time = datetime.now() + timedelta(seconds=delay)
+        
+        # Call the modified method with the scheduled time override
+        proactive_messaging_service.schedule_proactive_message(user_id, new_scheduled_time)
         logger.info(f"Completed Celery task schedule_next_message [{task_id}] for user {user_id}")
     except Exception as e:
         logger.error(f"Error in schedule_next_message [{task_id}] for user {user_id}: {e}")
