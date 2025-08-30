@@ -691,9 +691,6 @@ def send_proactive_message(self, user_id: int):
     # Update cadence
     user_state['cadence'] = next_cadence
     proactive_messaging_service._set_user_state(user_id, user_state)
-    
-    # REVOKE MESSAGES
-    proactive_messaging_service._revoke_user_task(user_id, user_state)
 
     # Schedule next message
     proactive_messaging_service.schedule_proactive_message(user_id)
