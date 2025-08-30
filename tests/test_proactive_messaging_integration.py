@@ -27,6 +27,8 @@ def bot_instance():
         with patch('bot.PostgresConversationManager') as mock_cm:
             mock_cm_instance = MagicMock()
             mock_cm_instance.initialize = AsyncMock()
+            # Mock the async method properly
+            mock_cm_instance._ensure_user_and_conversation = AsyncMock()
             mock_cm.return_value = mock_cm_instance
             
             # Mock the AI handler
