@@ -541,10 +541,14 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         await self.conversation_manager.add_message_async(user_id, "user", user_message)
         conversation_history = await self.conversation_manager.get_formatted_conversation_async(user_id)
         
+        # Get conversation ID for PromptAssembler
+        conversation = await self.conversation_manager._ensure_user_and_conversation(user_id)
+        conversation_id = str(conversation.id) if conversation else None
+        
         # Start typing indicator and get AI response
         try:
             ai_response = await generate_ai_response(
-                self.ai_handler, self.typing_manager, context.bot, chat_id, user_message, conversation_history, None, "user", True
+                self.ai_handler, self.typing_manager, context.bot, chat_id, user_message, conversation_history, conversation_id, "user", True
             )
             
             if not ai_response:
@@ -586,9 +590,6 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             except Exception as e:
                 logger.error("Failed to notify proactive messaging service: %s", e)
     
-    
-    def _get_fallback_response(self, user_message: str, user_name: str = None) -> str:
-        return f"I hear you! 💕 I'm having trouble with my AI service right now, but I'm still here listening. Can you try again in a few minutes?"
     
     async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle photo messages"""
@@ -668,6 +669,8 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
     async def _initialize_memory_components(self):
         """Initialize MemoryManager and PromptAssembler if enabled"""
         if not MEMORY_IMPORTS_AVAILABLE:
+            logger.error("Memory imports are not available. MEMORY_IMPORTS_AVAILABLE: %s, MEMORY_ENABLED: %s",
+                         MEMORY_IMPORTS_AVAILABLE, MEMORY_ENABLED)
             if MEMORY_ENABLED:
                 raise RuntimeError("Memory components are required but imports failed. Please check your installation.")
             else:
@@ -727,11 +730,12 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                 persona_repo=storage.personas,
                 config=prompt_config
             )
-            logger.info("PromptAssembler initialized successfully")
+            logger.info("PromptAssembler initialized successfully with config: %s", prompt_config)
             
             # Set PromptAssembler in AIHandler
             self.ai_handler.set_prompt_assembler(self.prompt_assembler)
-            logger.info("PromptAssembler integrated with AIHandler")
+            logger.info("PromptAssembler integrated with AIHandler. AIHandler prompt_assembler: %s",
+                       getattr(self.ai_handler, 'prompt_assembler', None))
             
             self._memory_initialized = True
             logger.info("Memory components initialization completed")
@@ -842,7 +846,6 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             # Initialize proactive messaging if available
             if self.proactive_messaging_service:
                 try:
-                    logger.info("Initializing proactive messaging service...")
                     # Schedule initial proactive messages for existing users
                     # This is a simplified approach - in a real implementation,
                     # you would query the database for all users and schedule messages for them

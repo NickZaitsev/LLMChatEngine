@@ -15,7 +15,7 @@ from typing import List, Dict, Any
 from storage.interfaces import Message, Memory
 from memory.manager import MemoryManager, MemoryRecord
 from prompt.assembler import PromptAssembler, TokenCounter, Tokenizer
-from prompt.templates import SYSTEM_TEMPLATE
+import config
 
 
 class MockTokenizer:
@@ -211,7 +211,7 @@ class TestPromptAssembler:
         assert messages[0]["role"] == "system"
         
         # Verify system template is included
-        assert SYSTEM_TEMPLATE in messages[0]["content"]
+        assert config.BOT_PERSONALITY in messages[0]["content"]
     
     @pytest.mark.asyncio
     async def test_build_prompt_and_metadata(self, prompt_assembler, sample_conversation_id,
@@ -417,7 +417,7 @@ class TestPromptAssembler:
         )
         
         # Should not include system template
-        system_messages = [msg for msg in messages if msg["role"] == "system" and SYSTEM_TEMPLATE in msg["content"]]
+        system_messages = [msg for msg in messages if msg["role"] == "system" and config.BOT_PERSONALITY in msg["content"]]
         assert len(system_messages) == 0
         assert metadata["token_counts"]["system_tokens"] == 0
     
