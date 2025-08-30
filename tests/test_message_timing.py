@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 async def test_message_timing():
     """Test that messages are immediately available in conversation history after being added"""
     # Initialize the conversation manager with file-based SQLite for testing
-    conversation_manager = PostgresConversationManager("sqlite+aiosqlite:///test_message_timing.db", False)
+    conversation_manager = PostgresConversationManager("sqlite+aiosqlite:///tests/test_message_timing.db", False)
     await conversation_manager.initialize()
     
     # Test user ID - use the same Telegram user ID as other tests
@@ -59,6 +59,14 @@ async def test_message_timing():
     
     # Close the storage connection
     await conversation_manager.close()
+    
+    # Remove the test database file
+    try:
+        if os.path.exists("tests/test_message_timing.db"):
+            os.remove("tests/test_message_timing.db")
+            logger.info("Test database file removed")
+    except Exception as e:
+        logger.warning(f"Failed to remove test database file: {e}")
 
 if __name__ == "__main__":
     asyncio.run(test_message_timing())

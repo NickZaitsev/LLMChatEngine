@@ -1,3 +1,4 @@
+
 # Python
 __pycache__/
 *.pyc
@@ -6,16 +7,41 @@ __pycache__/
 *.egg-info/
 .build/
 .dist/
+*.sqlite3
 
-# Envs and secrets
+# Virtual environment
+venv/
+env/
 .env
 .env.*
 
-# Editors/OS
+# Bytecode / caches
+*.cache
+*.log
+.pytest_cache/
+
+# Databases
+*.db
+test_*.db
+tests/*.db
+
+# Docker
+*.bak
+docker-compose.override.yml
+
+# Backup files
+backup/
+memories_embeddings.json
+
+# IDE / editor
 .vscode/
 .idea/
+*.swp
+*.swo
 .DS_Store
 Thumbs.db
 
-# Test cache
-.pytest_cache/ 
+
+# OS
+.DS_Store
+Thumbs.db
