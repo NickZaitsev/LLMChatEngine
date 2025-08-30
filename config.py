@@ -120,7 +120,7 @@ PROACTIVE_MESSAGING_RESTART_DELAY_MAX = int(os.getenv('PROACTIVE_MESSAGING_RESTA
 # Proactive message prompt
 PROACTIVE_MESSAGING_PROMPT = os.getenv('PROACTIVE_MESSAGING_PROMPT', (
     "Сгенерируй дружеское, заботливое сообщение, чтобы проверить, как у пользователя дела, на том языке, на котором ты обычно с ним разговариваешь. "
-    "Помни: ты человек, а не ИИ. Сообщение должно быть кратким и естественным. "
+    "Помни: ты человек, а не ИИ. Сообщение должно быть кратким и естественным. Не повторяйся"
 ))
 
 # Validation
