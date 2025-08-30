@@ -24,7 +24,7 @@ async def test_message_history():
     logger.info("Starting message history test")
     
     # Create storage instance with file-based SQLite for testing
-    storage = await create_storage("sqlite+aiosqlite:///test_message_history.db", use_pgvector=False)
+    storage = await create_storage("sqlite+aiosqlite:///tests/test_message_history.db", use_pgvector=False)
     logger.info("Storage created successfully")
     
     # Test user ID - convert integer to UUID for database
@@ -71,6 +71,14 @@ async def test_message_history():
         # Clean up
         await storage.close()
         logger.info("Storage closed")
+        
+        # Remove the test database file
+        try:
+            if os.path.exists("tests/test_message_history.db"):
+                os.remove("tests/test_message_history.db")
+                logger.info("Test database file removed")
+        except Exception as e:
+            logger.warning(f"Failed to remove test database file: {e}")
 
 
 if __name__ == "__main__":
