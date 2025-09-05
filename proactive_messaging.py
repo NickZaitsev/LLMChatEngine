@@ -711,15 +711,59 @@ def send_proactive_message(self, user_id: int):
         if current_dir not in sys.path:
             sys.path.insert(0, current_dir)
         from memory.manager import MemoryManager
+        
+        # Create llm_summarize function for MemoryManager when in LLM mode
+        async def llm_summarize(text: str, mode: str = "summarize") -> str:
+            """
+            LLM function for memory summarization.
+            
+            Args:
+                text: Text to summarize
+                mode: Mode of operation ("summarize" or "merge")
+                
+            Returns:
+                Summarized text
+            """
+            try:
+                # Create a minimal AIHandler for summarization
+                from ai_handler import AIHandler
+                ai_handler = AIHandler()
+                
+                if not ai_handler.is_available():
+                    raise Exception("AI handler not available for summarization")
+                
+                # For summarization, we just need to send the text as a user message
+                messages = [{"role": "user", "content": text}]
+                
+                # Make the AI request directly
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    None,
+                    ai_handler.model_client.ask,
+                    messages
+                )
+                
+                return response
+            except Exception as e:
+                logger.error(f"LLM summarization failed: {e}")
+                raise
+        
+        # Prepare memory manager configuration
+        memory_config = {
+            "embed_model": MEMORY_EMBED_MODEL,
+            "summarizer_mode": MEMORY_SUMMARIZER_MODE,
+            "chunk_overlap": MEMORY_CHUNK_OVERLAP
+        }
+        
+        # Add llm_summarize function if in LLM mode
+        if MEMORY_SUMMARIZER_MODE == "llm":
+            memory_config["llm_summarize"] = llm_summarize
+        
         memory_manager = MemoryManager(
             message_repo=conversation_manager.storage.messages,
             memory_repo=conversation_manager.storage.memories,
             conversation_repo=conversation_manager.storage.conversations,
-            config={
-                "embed_model": MEMORY_EMBED_MODEL,
-                "summarizer_mode": MEMORY_SUMMARIZER_MODE,
-                "chunk_overlap": MEMORY_CHUNK_OVERLAP
-            }
+            config=memory_config
         )
         
         # Create PromptAssembler with required components
