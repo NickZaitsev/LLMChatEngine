@@ -715,7 +715,6 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             )
             logger.info("MemoryManager initialized successfully")
             
-            # Initialize PromptAssembler - now required
             # PromptAssembler configuration
             prompt_config = {
                 "max_memory_items": PROMPT_MAX_MEMORY_ITEMS,

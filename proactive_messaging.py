@@ -9,6 +9,7 @@ import asyncio
 import logging
 import random
 import re
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from celery import Celery
@@ -34,7 +35,11 @@ from config import (
     PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES,
     PROACTIVE_MESSAGING_PROMPT,
     PROACTIVE_MESSAGING_RESTART_DELAY_MAX,
-    TELEGRAM_TOKEN, DATABASE_URL, USE_PGVECTOR
+    TELEGRAM_TOKEN, DATABASE_URL, USE_PGVECTOR,
+    MEMORY_EMBED_MODEL, MEMORY_SUMMARIZER_MODE, MEMORY_CHUNK_OVERLAP,
+    PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
+    PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
+    PROMPT_HISTORY_BUDGET, PROMPT_REPLY_TOKEN_BUDGET
 )
 
 # Import components for proactive messaging
@@ -675,9 +680,67 @@ def send_proactive_message(self, user_id: int):
     # Generate and send proactive message
     try:
         # Initialize components needed for sending messages
-        ai_handler = AIHandler()
-        typing_manager = TypingIndicatorManager()
         conversation_manager = PostgresConversationManager(DATABASE_URL, USE_PGVECTOR)
+        
+        # Initialize the conversation manager storage
+        async def init_storage():
+            await conversation_manager.initialize()
+        
+        # Get or create event loop
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        # Run the async initialization with timeout
+        try:
+            loop.run_until_complete(run_with_timeout(init_storage(), timeout=30))
+        except asyncio.TimeoutError:
+            logger.error(f"Storage initialization timed out for user {user_id} [{task_id}]")
+            raise
+        except Exception as e:
+            logger.error(f"Error initializing storage for user {user_id} [{task_id}]: {e}")
+            raise
+        
+        # Create MemoryManager with required repositories
+        # Add current directory to Python path to ensure local modules are found
+        import sys
+        import os
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        if current_dir not in sys.path:
+            sys.path.insert(0, current_dir)
+        from memory.manager import MemoryManager
+        memory_manager = MemoryManager(
+            message_repo=conversation_manager.storage.messages,
+            memory_repo=conversation_manager.storage.memories,
+            conversation_repo=conversation_manager.storage.conversations,
+            config={
+                "embed_model": MEMORY_EMBED_MODEL,
+                "summarizer_mode": MEMORY_SUMMARIZER_MODE,
+                "chunk_overlap": MEMORY_CHUNK_OVERLAP
+            }
+        )
+        
+        # Create PromptAssembler with required components
+        from prompt.assembler import PromptAssembler
+        prompt_assembler = PromptAssembler(
+            message_repo=conversation_manager.storage.messages,
+            memory_manager=memory_manager,
+            persona_repo=conversation_manager.storage.personas,
+            config={
+                "max_memory_items": PROMPT_MAX_MEMORY_ITEMS,
+                "memory_token_budget_ratio": PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
+                "truncation_length": PROMPT_TRUNCATION_LENGTH,
+                "include_system_template": PROMPT_INCLUDE_SYSTEM_TEMPLATE
+            }
+        )
+        
+        # Create AIHandler with PromptAssembler
+        ai_handler = AIHandler(prompt_assembler=prompt_assembler)
+        logger.debug(f"AIHandler created with prompt_assembler: {ai_handler.prompt_assembler is not None}")
+        
+        typing_manager = TypingIndicatorManager()
         
         # Create Telegram bot instance
         from telegram import Bot
@@ -719,11 +782,21 @@ def send_proactive_message(self, user_id: int):
         # Generate proactive message prompt
         proactive_prompt = PROACTIVE_MESSAGING_PROMPT
         
+        # Get conversation ID for PromptAssembler
+        conversation = loop.run_until_complete(
+            run_with_timeout(
+                conversation_manager._ensure_user_and_conversation(user_id),
+                timeout=30
+            )
+        )
+        conversation_id = str(conversation.id) if conversation else None
+        
         # Generate AI response using shared function with timeout
+        logger.debug(f"Calling generate_ai_response with conversation_id: {conversation_id}, user_id: {user_id}")
         try:
             ai_response = loop.run_until_complete(
                 run_with_timeout(
-                    generate_ai_response(ai_handler, typing_manager, bot, user_id, proactive_prompt, conversation_history, None, "user", True),
+                    generate_ai_response(ai_handler, typing_manager, bot, user_id, proactive_prompt, conversation_history, conversation_id, "user", True),
                     timeout=60
                 )
             )

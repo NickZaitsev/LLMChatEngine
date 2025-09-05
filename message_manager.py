@@ -188,7 +188,7 @@ async def generate_ai_response(
     typing_manager,
     bot,
     chat_id: int,
-    prompt: str,
+    additional_prompt: str,
     conversation_history: list,
     conversation_id: str = None,
     role: str = "user",
@@ -202,7 +202,7 @@ async def generate_ai_response(
         typing_manager: TypingIndicatorManager instance
         bot: Telegram bot instance
         chat_id: Chat ID
-        prompt: Prompt to send to AI
+        additional_prompt: Prompt to send to AI
         conversation_history: Conversation history
         conversation_id: Conversation ID for PromptAssembler
         role: Role for the prompt ("user" or "system")
@@ -222,7 +222,7 @@ async def generate_ai_response(
         from config import REQUEST_TIMEOUT
         logger.info("Generating AI response for chat %s", chat_id)
         ai_response = await asyncio.wait_for(
-            ai_handler.generate_response(prompt, conversation_history, conversation_id, role),
+            ai_handler.generate_response(additional_prompt, conversation_history, conversation_id, role),
             timeout=REQUEST_TIMEOUT
         )
         
