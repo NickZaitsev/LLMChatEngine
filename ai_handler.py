@@ -212,6 +212,29 @@ class AIHandler:
                         history_budget=PROMPT_HISTORY_BUDGET
                     )
                     
+                    # Handle the user_message based on role and context:
+                    # 1. For proactive messages (role="user" but not in history): Add it to the prompt
+                    # 2. For regular messages (role="user" and already in history): Skip to avoid doubling
+                    # 3. For system messages: Always add them
+                    if user_message:
+                        should_add_message = False
+                        
+                        if role == "system":
+                            # Always add system messages
+                            should_add_message = True
+                        elif role == "user":
+                            # For user messages, check if it's already the last message in the prompt
+                            if messages and messages[-1].get("role") == "user" and messages[-1].get("content") == user_message:
+                                # Message is already in history/prompt - skip to avoid doubling
+                                logger.debug("User message already in prompt history, skipping addition")
+                            else:
+                                # Message is not in prompt - this is likely a proactive message
+                                should_add_message = True
+                        
+                        if should_add_message:
+                            messages.append({"role": role, "content": user_message})
+                            logger.debug("Added %s message to prompt: %s", role, user_message[:50] + "..." if len(user_message) > 50 else user_message)
+                    
                     logger.info("PromptAssembler built %d messages for LLM", len(messages))
                     
                 except Exception as e:
