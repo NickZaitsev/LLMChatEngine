@@ -602,6 +602,9 @@ class ProactiveMessagingService:
         })
         self._set_user_state(user_id, user_state)
         
+        # Revoke any existing scheduled tasks for this user before scheduling a new one
+        self._revoke_user_tasks(user_id, user_state, message_type)
+        
         # Schedule the Celery task
         logger.debug(f"Scheduling Celery task for user {user_id} with ETA: {scheduled_time}")
         task = send_proactive_message.apply_async(
