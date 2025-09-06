@@ -307,7 +307,12 @@ class ProactiveMessagingService:
             
             revoked_count = 0
             for task_id_bytes in task_ids:
-                task_id = task_id_bytes.decode('utf-8') if isinstance(task_id_bytes, bytes) else task_id_bytes
+                # Handle None values and convert bytes to string
+                if task_id_bytes is None:
+                    continue  # Skip None values
+                task_id = task_id_bytes.decode('utf-8') if isinstance(task_id_bytes, bytes) else str(task_id_bytes)
+                if not task_id:  # Skip empty task IDs
+                    continue
                 logger.info(f"Revoking scheduled task {task_id} for user {user_id} of type {message_type}")
                 # Revoke the Celery task
                 celery_app.control.revoke(task_id, terminate=True)
@@ -322,6 +327,8 @@ class ProactiveMessagingService:
                 logger.debug(f"No scheduled {message_type} tasks found for user {user_id}")
         except Exception as e:
             logger.error(f"Error revoking {message_type} tasks for user {user_id}: {e}")
+            # Re-raise the exception so callers can handle it if needed
+            raise
 
     
     def _revoke_all_user_tasks(self, user_id: int, state: dict):
@@ -855,37 +862,41 @@ def send_proactive_message(self, user_id: int):
             # Clean the AI response
             cleaned_response = clean_ai_response(ai_response)
             
-            # Add the proactive message to conversation history
-            try:
-                loop.run_until_complete(
-                    run_with_timeout(
-                        conversation_manager.add_message_async(user_id, "assistant", cleaned_response),
-                        timeout=30
+            # Only add to history and send if the cleaned response is not empty
+            if cleaned_response:
+                # Add the proactive message to conversation history
+                try:
+                    loop.run_until_complete(
+                        run_with_timeout(
+                            conversation_manager.add_message_async(user_id, "assistant", cleaned_response),
+                            timeout=30
+                        )
                     )
-                )
-                logger.info(f"Proactive message added to history for user {user_id} [{task_id}]: {cleaned_response[:50]}...")
-            except asyncio.TimeoutError:
-                logger.error(f"Adding message to history timed out for user {user_id} [{task_id}]")
-                # Continue even if adding to history fails
-            except Exception as e:
-                logger.error(f"Error adding message to history for user {user_id} [{task_id}]: {e}")
-                # Continue even if adding to history fails
-            
-            # Send the message with timeout
-            try:
-                loop.run_until_complete(
-                    run_with_timeout(
-                        send_ai_response(chat_id=user_id, text=cleaned_response, bot=bot, typing_manager=typing_manager),
-                        timeout=30
+                    logger.info(f"Proactive message added to history for user {user_id} [{task_id}]: {cleaned_response[:50]}...")
+                except asyncio.TimeoutError:
+                    logger.error(f"Adding message to history timed out for user {user_id} [{task_id}]")
+                    # Continue even if adding to history fails
+                except Exception as e:
+                    logger.error(f"Error adding message to history for user {user_id} [{task_id}]: {e}")
+                    # Continue even if adding to history fails
+                
+                # Send the message with timeout
+                try:
+                    loop.run_until_complete(
+                        run_with_timeout(
+                            send_ai_response(chat_id=user_id, text=cleaned_response, bot=bot, typing_manager=typing_manager),
+                            timeout=30
+                        )
                     )
-                )
-                logger.info(f"Proactive message sent to user {user_id} [{task_id}]: {cleaned_response[:50]}...")
-            except asyncio.TimeoutError:
-                logger.error(f"Sending message timed out for user {user_id} [{task_id}]")
-                raise
-            except Exception as e:
-                logger.error(f"Error sending message to user {user_id} [{task_id}]: {e}")
-                raise
+                    logger.info(f"Proactive message sent to user {user_id} [{task_id}]: {cleaned_response[:50]}...")
+                except asyncio.TimeoutError:
+                    logger.error(f"Sending message timed out for user {user_id} [{task_id}]")
+                    raise
+                except Exception as e:
+                    logger.error(f"Error sending message to user {user_id} [{task_id}]: {e}")
+                    raise
+            else:
+                logger.info(f"Proactive message for user {user_id} [{task_id}] was empty after cleaning, not adding to history or sending")
         else:
             logger.error(f"Failed to generate proactive message for user {user_id} [{task_id}]")
             
