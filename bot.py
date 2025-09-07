@@ -545,6 +545,14 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         conversation = await self.conversation_manager._ensure_user_and_conversation(user_id)
         conversation_id = str(conversation.id) if conversation else None
         
+        # Notify proactive messaging service about user message BEFORE sending response
+        if self.proactive_messaging_service:
+            try:
+                self.proactive_messaging_service.handle_user_message(user_id)
+                logger.info("Notified proactive messaging service about user message from user %s", user_id)
+            except Exception as e:
+                logger.error("Failed to notify proactive messaging service: %s", e)
+
         # Start typing indicator and get AI response
         try:
             ai_response = await generate_ai_response(
@@ -570,7 +578,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             # Ensure typing is stopped even on errors
             await self.typing_manager.stop_typing(chat_id)
         
-
+    
         # Send final response to user
         try:
             # Make sure cleaned_ai_response is defined
@@ -581,14 +589,6 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                 logger.error("No response to send to user %s", user_id)
         except Exception as e:
             logger.error("Failed to send response to user %s: %s", user_id, e)
-        
-        # Notify proactive messaging service about user message
-        if self.proactive_messaging_service:
-            try:
-                self.proactive_messaging_service.handle_user_message(user_id)
-                logger.info("Notified proactive messaging service about user message from user %s", user_id)
-            except Exception as e:
-                logger.error("Failed to notify proactive messaging service: %s", e)
     
     
     async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -281,11 +281,6 @@ class ProactiveMessagingService:
                     
                     
                     rescheduled_count += 1
-                else:
-                    # Even if scheduled_time is not in the past, check if there are tasks
-                    # that might have been missed due to worker downtime
-                    missed_tasks_count = self._check_for_missed_tasks(user_id, state, scheduled_time)
-                    rescheduled_count += missed_tasks_count
                     
             except Exception as e:
                 logger.error(f"Error rescheduling message for user {user_id}: {e}")
@@ -293,59 +288,6 @@ class ProactiveMessagingService:
         
         logger.info(f"Rescheduled {rescheduled_count} missed proactive messages")
         logger.info("Proactive Messaging Service initialized")
-    
-    def _check_for_missed_tasks(self, user_id: int, state: dict, scheduled_time) -> int:
-        """
-        Check for tasks that might have been missed due to worker downtime.
-        
-        Args:
-            user_id: Telegram user ID
-            state: User state dictionary
-            scheduled_time: The scheduled time for the user's next message
-            
-        Returns:
-            Number of tasks that were rescheduled
-        """
-        try:
-            # Get all task IDs for the user from Redis for the specific message type
-            task_key = f"proactive_messaging:user:{user_id}:tasks:RegularReachout"
-            task_ids = self.redis_client.smembers(task_key)
-            
-            rescheduled_count = 0
-            
-            for task_id_bytes in task_ids:
-                # Handle None values and convert bytes to string
-                if task_id_bytes is None:
-                    continue  # Skip None values
-                task_id = task_id_bytes.decode('utf-8') if isinstance(task_id_bytes, bytes) else str(task_id_bytes)
-                if not task_id:  # Skip empty task IDs
-                    continue
-                    
-                # If we have a scheduled_time and it's relatively close to now,
-                # but we still have tasks in Redis, it might indicate the tasks
-                # were not executed when they should have been
-                if scheduled_time:
-                    time_diff = abs((scheduled_time - datetime.now()).total_seconds())
-                    # If the scheduled time is within the last hour and we still have tasks,
-                    # it might indicate the tasks were missed
-                    if time_diff <= 3600:  # 1 hour
-                        logger.info(f"Found potentially missed task {task_id} for user {user_id}, scheduled at {scheduled_time}")
-                        
-                        # Revoke the task and reschedule
-                        celery_app.control.revoke(task_id, terminate=True)
-                        self._add_revoked_task(user_id, task_id, "RegularReachout")
-                        
-                        rescheduled_count += 1
-            
-            # Clear all task IDs from Redis for this message type if we rescheduled any
-            if rescheduled_count > 0:
-                self.redis_client.delete(task_key)
-                logger.info(f"Cleared {rescheduled_count} potentially missed tasks for user {user_id}")
-                
-            return rescheduled_count
-        except Exception as e:
-            logger.error(f"Error checking for missed tasks for user {user_id}: {e}")
-            return 0
     
     def _revoke_user_tasks(self, user_id: int, state: dict, message_type: str = "RegularReachout"):
         """
