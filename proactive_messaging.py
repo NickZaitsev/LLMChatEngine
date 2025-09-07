@@ -279,17 +279,73 @@ class ProactiveMessagingService:
                         args=[user_id]
                     )
                     
-                    # Note: The task ID is no longer directly available since we're not
-                    # calling send_proactive_message directly anymore. The state update
-                    # will be handled by the schedule_proactive_message method.
                     
                     rescheduled_count += 1
+                else:
+                    # Even if scheduled_time is not in the past, check if there are tasks
+                    # that might have been missed due to worker downtime
+                    missed_tasks_count = self._check_for_missed_tasks(user_id, state, scheduled_time)
+                    rescheduled_count += missed_tasks_count
+                    
             except Exception as e:
                 logger.error(f"Error rescheduling message for user {user_id}: {e}")
                 continue
         
         logger.info(f"Rescheduled {rescheduled_count} missed proactive messages")
         logger.info("Proactive Messaging Service initialized")
+    
+    def _check_for_missed_tasks(self, user_id: int, state: dict, scheduled_time) -> int:
+        """
+        Check for tasks that might have been missed due to worker downtime.
+        
+        Args:
+            user_id: Telegram user ID
+            state: User state dictionary
+            scheduled_time: The scheduled time for the user's next message
+            
+        Returns:
+            Number of tasks that were rescheduled
+        """
+        try:
+            # Get all task IDs for the user from Redis for the specific message type
+            task_key = f"proactive_messaging:user:{user_id}:tasks:RegularReachout"
+            task_ids = self.redis_client.smembers(task_key)
+            
+            rescheduled_count = 0
+            
+            for task_id_bytes in task_ids:
+                # Handle None values and convert bytes to string
+                if task_id_bytes is None:
+                    continue  # Skip None values
+                task_id = task_id_bytes.decode('utf-8') if isinstance(task_id_bytes, bytes) else str(task_id_bytes)
+                if not task_id:  # Skip empty task IDs
+                    continue
+                    
+                # If we have a scheduled_time and it's relatively close to now,
+                # but we still have tasks in Redis, it might indicate the tasks
+                # were not executed when they should have been
+                if scheduled_time:
+                    time_diff = abs((scheduled_time - datetime.now()).total_seconds())
+                    # If the scheduled time is within the last hour and we still have tasks,
+                    # it might indicate the tasks were missed
+                    if time_diff <= 3600:  # 1 hour
+                        logger.info(f"Found potentially missed task {task_id} for user {user_id}, scheduled at {scheduled_time}")
+                        
+                        # Revoke the task and reschedule
+                        celery_app.control.revoke(task_id, terminate=True)
+                        self._add_revoked_task(user_id, task_id, "RegularReachout")
+                        
+                        rescheduled_count += 1
+            
+            # Clear all task IDs from Redis for this message type if we rescheduled any
+            if rescheduled_count > 0:
+                self.redis_client.delete(task_key)
+                logger.info(f"Cleared {rescheduled_count} potentially missed tasks for user {user_id}")
+                
+            return rescheduled_count
+        except Exception as e:
+            logger.error(f"Error checking for missed tasks for user {user_id}: {e}")
+            return 0
     
     def _revoke_user_tasks(self, user_id: int, state: dict, message_type: str = "RegularReachout"):
         """
@@ -316,6 +372,8 @@ class ProactiveMessagingService:
                 logger.info(f"Revoking scheduled task {task_id} for user {user_id} of type {message_type}")
                 # Revoke the Celery task
                 celery_app.control.revoke(task_id, terminate=True)
+                # Track the revoked task in Redis
+                self._add_revoked_task(user_id, task_id, message_type)
                 revoked_count += 1
                 logger.info(f"Revoked scheduled task {task_id} for user {user_id} of type {message_type}")
             
@@ -356,6 +414,8 @@ class ProactiveMessagingService:
                     logger.info(f"Revoking scheduled task {task_id} for user {user_id} of type {message_type}")
                     # Revoke the Celery task
                     celery_app.control.revoke(task_id, terminate=True)
+                    # Track the revoked task in Redis
+                    self._add_revoked_task(user_id, task_id, message_type)
                     revoked_count += 1
                     logger.info(f"Revoked scheduled task {task_id} for user {user_id} of type {message_type}")
                 
@@ -386,6 +446,43 @@ class ProactiveMessagingService:
             logger.debug(f"Added task {task_id} of type {message_type} to user {user_id}'s task list")
         except Exception as e:
             logger.error(f"Error adding task ID for user {user_id} of type {message_type}: {e}")
+    def _add_revoked_task(self, user_id: int, task_id: str, message_type: str = "RegularReachout"):
+        """
+        Add a revoked task ID to a set in Redis to track revoked tasks.
+        
+        Args:
+            user_id: Telegram user ID
+            task_id: Celery task ID
+            message_type: Type of message (default: "RegularReachout")
+        """
+        try:
+            revoked_key = f"proactive_messaging:user:{user_id}:revoked_tasks:{message_type}"
+            self.redis_client.sadd(revoked_key, task_id)
+            logger.debug(f"Added revoked task {task_id} of type {message_type} for user {user_id}")
+            
+            # Set expiration for the revoked tasks set (24 hours)
+            self.redis_client.expire(revoked_key, 86400)
+        except Exception as e:
+            logger.error(f"Error adding revoked task ID for user {user_id} of type {message_type}: {e}")
+    
+    def _is_task_revoked(self, user_id: int, task_id: str, message_type: str = "RegularReachout") -> bool:
+        """
+        Check if a task has been revoked.
+        
+        Args:
+            user_id: Telegram user ID
+            task_id: Celery task ID
+            message_type: Type of message (default: "RegularReachout")
+            
+        Returns:
+            True if task has been revoked, False otherwise
+        """
+        try:
+            revoked_key = f"proactive_messaging:user:{user_id}:revoked_tasks:{message_type}"
+            return self.redis_client.sismember(revoked_key, task_id)
+        except Exception as e:
+            logger.error(f"Error checking if task {task_id} is revoked for user {user_id} of type {message_type}: {e}")
+            return False
     
     def parse_time(self, time_str: str) -> tuple:
         """
@@ -604,6 +701,7 @@ class ProactiveMessagingService:
         
         # Revoke any existing scheduled tasks for this user before scheduling a new one
         self._revoke_user_tasks(user_id, user_state, message_type)
+        logger.debug(f"Other user tasks of type {message_type} revoked for user {user_id}")
         
         # Schedule the Celery task
         logger.debug(f"Scheduling Celery task for user {user_id} with ETA: {scheduled_time}")
@@ -676,7 +774,21 @@ def send_proactive_message(self, user_id: int):
             logger.error(f"Error removing task ID for user {user_id}: {e}")
         
         return
-    
+
+    # Check if this task has been revoked
+    if proactive_messaging_service._is_task_revoked(user_id, task_id, "RegularReachout"):
+        logger.info(f"Task {task_id} for user {user_id} has been revoked, skipping execution")
+        
+        # Remove task ID from Redis
+        try:
+            task_key = f"proactive_messaging:user:{user_id}:tasks:RegularReachout"
+            proactive_messaging_service.redis_client.srem(task_key, task_id)
+            logger.debug(f"Removed task {task_id} from user {user_id}'s task list (revoked)")
+        except Exception as e:
+            logger.error(f"Error removing task ID for user {user_id}: {e}")
+        
+        return
+
     # Update consecutive outreaches count
     consecutive_outreaches = user_state.get('consecutive_outreaches', 0)
     consecutive_outreaches += 1
@@ -922,16 +1034,16 @@ def send_proactive_message(self, user_id: int):
     user_state['cadence'] = next_cadence
     proactive_messaging_service._set_user_state(user_id, user_state)
 
-    # Schedule next message
-    proactive_messaging_service.schedule_proactive_message(user_id)
-    
-    # Remove task ID from Redis
+    # Remove task ID from Redis before scheduling next message to prevent self-revocation
     try:
         task_key = f"proactive_messaging:user:{user_id}:tasks:RegularReachout"
         proactive_messaging_service.redis_client.srem(task_key, task_id)
         logger.debug(f"Removed task {task_id} from user {user_id}'s task list (completed)")
     except Exception as e:
         logger.error(f"Error removing task ID for user {user_id}: {e}")
+    
+    # Schedule next message
+    proactive_messaging_service.schedule_proactive_message(user_id)
     
     logger.info(f"Completed Celery task send_proactive_message [{task_id}] for user {user_id}")
 
