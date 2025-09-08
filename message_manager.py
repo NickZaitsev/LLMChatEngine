@@ -221,13 +221,19 @@ async def generate_ai_response(
         # Make the actual AI request with timeout from config
         from config import REQUEST_TIMEOUT
         logger.info("Generating AI response for chat %s", chat_id)
-        ai_response = await asyncio.wait_for(
-            ai_handler.generate_response(additional_prompt, conversation_history, conversation_id, role),
-            timeout=REQUEST_TIMEOUT
-        )
-        
-        logger.info("AI response received for chat %s (%d chars)", chat_id, len(ai_response))
-        return ai_response
+        try:
+            ai_response = await asyncio.wait_for(
+                ai_handler.generate_response(additional_prompt, conversation_history, conversation_id, role),
+                timeout=REQUEST_TIMEOUT
+            )
+            logger.info("AI response received for chat %s (%d chars)", chat_id, len(ai_response))
+            return ai_response
+        except asyncio.TimeoutError:
+            logger.warning("AI request timeout for chat %s", chat_id)
+            return None
+        except Exception as e:
+            logger.error("AI request failed for chat %s: %s", chat_id, e)
+            return None
         
     except asyncio.TimeoutError:
         logger.warning("AI request timeout for chat %s", chat_id)

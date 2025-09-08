@@ -150,3 +150,19 @@ PROACTIVE_MESSAGING_RESTART_DELAY_MAX=300
 
 # Proactive messaging prompt
 PROACTIVE_MESSAGING_PROMPT=Сгенерируй дружеское, заботливое сообщение, чтобы проверить, как у пользователя дела, на том языке, на котором ты обычно с ним разговариваешь. Помни: ты человек, а не ИИ. Сообщение должно быть кратким и естественным.
+
+# Buffer Manager Configuration
+# Timeout for short messages in seconds
+BUFFER_SHORT_MESSAGE_TIMEOUT=3.5
+
+# Timeout for long messages in seconds
+BUFFER_LONG_MESSAGE_TIMEOUT=0.1
+
+# Maximum number of messages to buffer
+BUFFER_MAX_MESSAGES=10
+
+# Threshold for determining short vs long messages (in words)
+BUFFER_WORD_COUNT_THRESHOLD=10
+
+# Interval for cleaning up inactive buffers in seconds
+BUFFER_CLEANUP_INTERVAL=300

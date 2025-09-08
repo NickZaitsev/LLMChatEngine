@@ -91,6 +91,10 @@ async def test_handle_message_triggers_proactive_messaging(bot_instance):
         if bot_instance.proactive_messaging_service:
             bot_instance.proactive_messaging_service.handle_user_message = MagicMock()
         
+        # Mock buffer manager dispatch method to simulate immediate dispatch
+        original_dispatch = bot_instance.buffer_manager.dispatch_buffer
+        bot_instance.buffer_manager.dispatch_buffer = AsyncMock(return_value="Hello bot!")
+        
         # Call handle_message
         await bot_instance.handle_message(mock_update, mock_context)
         
@@ -99,6 +103,9 @@ async def test_handle_message_triggers_proactive_messaging(bot_instance):
             bot_instance.proactive_messaging_service.handle_user_message.assert_called_once_with(
                 12345
             )
+        
+        # Restore original dispatch method
+        bot_instance.buffer_manager.dispatch_buffer = original_dispatch
 
 
 @pytest.mark.asyncio
@@ -133,12 +140,19 @@ async def test_handle_message_proactive_messaging_failure(bot_instance):
                 side_effect=Exception("Proactive messaging error")
             )
         
+        # Mock buffer manager dispatch method to simulate immediate dispatch
+        original_dispatch = bot_instance.buffer_manager.dispatch_buffer
+        bot_instance.buffer_manager.dispatch_buffer = AsyncMock(return_value="Hello bot!")
+        
         # Call handle_message - should not raise an exception
         try:
             await bot_instance.handle_message(mock_update, mock_context)
             success = True
         except Exception:
             success = False
+        finally:
+            # Restore original dispatch method
+            bot_instance.buffer_manager.dispatch_buffer = original_dispatch
         
         assert success  # Should not raise an exception
 
