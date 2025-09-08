@@ -13,7 +13,6 @@ DEFAULT_TEMPERATURE = 0.8
 DEFAULT_MAX_CONTEXT_TOKENS = 8000
 DEFAULT_RESERVED_TOKENS = 500
 # Bot Constants
-RATE_LIMIT_DURATION = 60
 REQUEST_TIMEOUT = 80.0
 MESSAGE_PREVIEW_LENGTH = 50
 SHORT_MESSAGE_THRESHOLD = 10
@@ -220,6 +219,27 @@ def _validate_config():
         # Validate proactive messaging prompt
         if not PROACTIVE_MESSAGING_PROMPT:
             warnings.warn("PROACTIVE_MESSAGING_PROMPT should not be empty")
+
+    # Buffer Manager validation
+    if BUFFER_SHORT_MESSAGE_TIMEOUT <= 0:
+        warnings.warn("BUFFER_SHORT_MESSAGE_TIMEOUT should be positive")
+    if BUFFER_LONG_MESSAGE_TIMEOUT <= 0:
+        warnings.warn("BUFFER_LONG_MESSAGE_TIMEOUT should be positive")
+    if BUFFER_MAX_MESSAGES <= 0:
+        warnings.warn("BUFFER_MAX_MESSAGES should be positive")
+    if BUFFER_WORD_COUNT_THRESHOLD <= 0:
+        warnings.warn("BUFFER_WORD_COUNT_THRESHOLD should be positive")
+    if BUFFER_LONG_MESSAGE_TIMEOUT >= BUFFER_SHORT_MESSAGE_TIMEOUT:
+        warnings.warn("BUFFER_LONG_MESSAGE_TIMEOUT should be less than BUFFER_SHORT_MESSAGE_TIMEOUT for effective buffering")
+    if BUFFER_CLEANUP_INTERVAL <= 0:
+        warnings.warn("BUFFER_CLEANUP_INTERVAL should be positive")
+
+# Buffer Manager Configuration
+BUFFER_SHORT_MESSAGE_TIMEOUT = float(os.getenv('BUFFER_SHORT_MESSAGE_TIMEOUT', '6'))  # seconds
+BUFFER_LONG_MESSAGE_TIMEOUT = float(os.getenv('BUFFER_LONG_MESSAGE_TIMEOUT', '0.1'))   # seconds
+BUFFER_MAX_MESSAGES = int(os.getenv('BUFFER_MAX_MESSAGES', '8'))
+BUFFER_WORD_COUNT_THRESHOLD = int(os.getenv('BUFFER_WORD_COUNT_THRESHOLD', '30'))
+BUFFER_CLEANUP_INTERVAL = int(os.getenv('BUFFER_CLEANUP_INTERVAL', '300'))  # seconds
 
 # Perform validation
 _validate_config()

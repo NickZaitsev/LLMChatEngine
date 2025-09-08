@@ -12,11 +12,19 @@ from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                    PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
                    PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
                    MEMORY_EMBED_MODEL, MEMORY_SUMMARIZER_MODE, MEMORY_CHUNK_OVERLAP,
-                   RATE_LIMIT_DURATION, REQUEST_TIMEOUT, MESSAGE_PREVIEW_LENGTH, SHORT_MESSAGE_THRESHOLD,
+                   MESSAGE_PREVIEW_LENGTH,
                    POLLING_INTERVAL)
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
 from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response
+from buffer_manager import BufferManager
+
+# Set up logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # Proactive messaging import (conditional)
 try:
@@ -37,13 +45,6 @@ if MEMORY_ENABLED:
         MEMORY_IMPORTS_AVAILABLE = False
 else:
     MEMORY_IMPORTS_AVAILABLE = False
-
-# Set up logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
 
 
 class AIGirlfriendBot:
@@ -75,8 +76,6 @@ class AIGirlfriendBot:
         self.ai_handler = AIHandler()
         self.typing_manager = TypingIndicatorManager()
         self.application = None
-        self.rate_limit_cooldown = {}
-        self.rate_limit_duration = RATE_LIMIT_DURATION
         self.pending_clear_confirmation = set()
         self._storage_initialized = False
         
@@ -95,25 +94,14 @@ class AIGirlfriendBot:
                 logger.info("Proactive messaging service initialized successfully")
             except Exception as e:
                 logger.error("Failed to initialize proactive messaging service: %s", e)
+        
+        # Initialize buffer manager
+        self.buffer_manager = BufferManager()
+        self.buffer_manager.set_typing_manager(self.typing_manager)
+        
+        # Store chat context for buffered messages
+        self.user_chat_context = {}  # Maps user_id to (chat_id, bot)
     
-    def _is_user_rate_limited(self, user_id: int) -> bool:
-        """Check if a user is currently rate limited"""
-        if user_id in self.rate_limit_cooldown:
-            cooldown_until = self.rate_limit_cooldown[user_id]
-            if time.time() < cooldown_until:
-                remaining = int(cooldown_until - time.time())
-                logger.info("User %s rate limited for %d seconds", user_id, remaining)
-                return True
-            else:
-                del self.rate_limit_cooldown[user_id]
-        return False
-    
-    def _set_user_rate_limit(self, user_id: int, duration: int = None):
-        """Set a rate limit cooldown for a user"""
-        duration = duration or self.rate_limit_duration
-        cooldown_until = time.time() + duration
-        self.rate_limit_cooldown[user_id] = cooldown_until
-        logger.info("Rate limit set for user %s, duration: %d seconds", user_id, duration)
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
@@ -291,12 +279,6 @@ My responses: {stats['bot_messages']}
         
         stats = await self.conversation_manager.get_user_stats_async(user_id)
         
-        rate_limit_info = ""
-        if self._is_user_rate_limited(user_id):
-            remaining = int(self.rate_limit_cooldown[user_id] - time.time())
-            rate_limit_info = f"🚫 **Rate Limited:** {remaining} seconds remaining"
-        else:
-            rate_limit_info = "✅ **Rate Limit:** Not limited"
         
         # Check memory components status
         memory_status = "❌ Not Available"
@@ -321,7 +303,6 @@ My responses: {stats['bot_messages']}
 💾 **Storage:** {storage_status}
 🧠 **Memory Manager:** {memory_status}
 🔧 **Prompt Assembler:** {prompt_status}
-{rate_limit_info}
 
 💬 **Your Chat Stats:**
          • Total messages: {stats['total_messages']}
@@ -376,12 +357,6 @@ Use /help to see all available commands!"""
         
         logger.info("Reset command from user %s", user_id)
         
-        rate_limit_cleared = ""
-        if user_id in self.rate_limit_cooldown:
-            del self.rate_limit_cooldown[user_id]
-            logger.info("Cleared rate limit for user %s", user_id)
-            rate_limit_cleared = "✅ Rate limit cleared!\n"
-        
         conversation_cleared = ""
         existing_conversation = await self.conversation_manager.get_conversation_async(user_id)
         if existing_conversation:
@@ -391,7 +366,7 @@ Use /help to see all available commands!"""
         
         reset_text = f"""🔄 **Reset Complete!** 🔄
 
-{rate_limit_cleared}{conversation_cleared}✨ You're all set {user_name}! Everything has been reset and you can start fresh! 💕
+{conversation_cleared}✨ You're all set {user_name}! Everything has been reset and you can start fresh! 💕
 
 Use /start to begin a new conversation!"""
         
@@ -519,22 +494,44 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             logger.error("Error in _monitor_pending_clear: %s", e)
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle incoming text messages with proper timeout and fallback handling"""
+        """Handle incoming text messages with buffering mechanism"""
         user = update.effective_user
         user_id = user.id
         user_message = update.message.text
-        user_name = user.first_name or user.username or "there"
         chat_id = update.effective_chat.id
         
         message_preview = (user_message[:MESSAGE_PREVIEW_LENGTH] + "..."
                           if len(user_message) > MESSAGE_PREVIEW_LENGTH else user_message)
         logger.info("Message from user %s: '%s' (%d chars)", user_id, message_preview, len(user_message))
         
-        if self._is_user_rate_limited(user_id):
-            remaining = int(self.rate_limit_cooldown[user_id] - time.time())
-            await update.message.reply_text(
-                f"😔 I'm a bit overwhelmed right now! Please wait {remaining} seconds before sending another message. 💕"
-            )
+        # Store chat context for buffered dispatch
+        self.user_chat_context[user_id] = (chat_id, context.bot)
+        
+        # Set user context in buffer manager for typing indicators
+        self.buffer_manager.set_user_context(user_id, context.bot, chat_id)
+        
+        # Add message to buffer instead of processing directly
+        await self.buffer_manager.add_message(user_id, user_message)
+        
+        # Schedule dispatch based on adaptive timeout
+        await self.buffer_manager.schedule_dispatch(user_id, self._dispatch_buffered_message)
+        
+    async def _dispatch_buffered_message(self, user_id: int) -> None:
+        """Dispatch buffered messages for a user"""
+        logger.info("Dispatching buffered messages for user %s", user_id)
+        
+        # Get chat context
+        if user_id not in self.user_chat_context:
+            logger.error("No chat context found for user %s", user_id)
+            return
+            
+        chat_id, bot = self.user_chat_context[user_id]
+        
+        # Get concatenated message from buffer
+        user_message = await self.buffer_manager.dispatch_buffer(user_id)
+        
+        if not user_message:
+            logger.debug("No buffered messages to dispatch for user %s", user_id)
             return
         
         # Add user message to conversation history and then get the updated history
@@ -552,11 +549,11 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                 logger.info("Notified proactive messaging service about user message from user %s", user_id)
             except Exception as e:
                 logger.error("Failed to notify proactive messaging service: %s", e)
-
+        
         # Start typing indicator and get AI response
         try:
             ai_response = await generate_ai_response(
-                self.ai_handler, self.typing_manager, context.bot, chat_id, user_message, conversation_history, conversation_id, "user", True
+                self.ai_handler, self.typing_manager, bot, chat_id, user_message, conversation_history, conversation_id, "user", True
             )
             
             if not ai_response:
@@ -578,18 +575,16 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             # Ensure typing is stopped even on errors
             await self.typing_manager.stop_typing(chat_id)
         
-    
         # Send final response to user
         try:
             # Make sure cleaned_ai_response is defined
             if 'cleaned_ai_response' in locals():
-                await send_ai_response(chat_id=chat_id, text=cleaned_ai_response, bot=context.bot, typing_manager=self.typing_manager)
+                await send_ai_response(chat_id=chat_id, text=cleaned_ai_response, bot=bot, typing_manager=self.typing_manager)
                 logger.info("Response sent to user %s", user_id)
             else:
                 logger.error("No response to send to user %s", user_id)
         except Exception as e:
             logger.error("Failed to send response to user %s: %s", user_id, e)
-    
     
     async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle photo messages"""
@@ -641,17 +636,20 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                 logger.error("Failed to stop typing indicator on error: %s", typing_error)
         
         if update and hasattr(update, 'message') and update.message:
-            try:
-                user = update.effective_user
-                user_name = user.first_name or user.username or "there" if user else "there"
+            logger.error("Failed to send response after exception: %s", context.error)
+
+        # if update and hasattr(update, 'message') and update.message:
+        #     try:
+                # user = update.effective_user
+                # user_name = user.first_name or user.username or "there" if user else "there"
                 
-                error_response = f"😔 Oh no {user_name}! Something went wrong on my end. I'm still here though! 💕 Please try again in a moment."
-                await update.message.reply_text(error_response)
-                logger.info("Sent error response to user after exception")
-            except Exception as send_error:
-                logger.error("Failed to send error response after exception: %s", send_error)
+                # error_response = f"😔 Oh no {user_name}! Something went wrong on my end. I'm still here though! 💕 Please try again in a moment."
+            #     await update.message.reply_text(error_response)
+            #     logger.info("Sent error response to user after exception")
+            # except Exception as send_error:
+            #     logger.error("Failed to send error response after exception: %s", send_error)
         
-        logger.info("Continuing operation after handling exception")
+        # logger.info("Continuing operation after handling exception")
     
     async def _initialize_storage(self):
         """Initialize PostgreSQL storage if needed"""
