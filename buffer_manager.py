@@ -75,8 +75,10 @@ class UserBuffer:
             if not self.messages:
                 return ""
             
-            # Join messages with a newline, preserving order
-            concatenated = "\n".join(entry.message for entry in self.messages)
+            # Filter out completely empty messages, preserving whitespace-only messages
+            non_empty_messages = [entry.message for entry in self.messages if entry.message != ""]
+            # Join with single space between messages
+            concatenated = " ".join(non_empty_messages)
             logger.debug(f"Concatenated {len(self.messages)} messages for user {self.user_id}")
             return concatenated
     
@@ -84,7 +86,8 @@ class UserBuffer:
         """Check if messages should be dispatched immediately based on content or buffer size"""
         async with self._lock:
             # Dispatch immediately if we have too many messages
-            if len(self.messages) >= BUFFER_MAX_MESSAGES:
+            # Note: We dispatch immediately when we exceed the max, not when we reach it
+            if len(self.messages) > BUFFER_MAX_MESSAGES:
                 logger.debug(f"Buffer full for user {self.user_id}, should dispatch immediately")
                 return True
             
@@ -228,6 +231,9 @@ class BufferManager:
                     await dispatch_func(user_id)
                 else:
                     dispatch_func(user_id)
+                # Automatically clear the buffer after dispatch
+                buffer = self.get_user_buffer(user_id)
+                await buffer.clear()
             except Exception as e:
                 logger.error(f"Error in dispatch task for user {user_id}: {e}")
         

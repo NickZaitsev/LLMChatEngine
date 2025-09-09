@@ -88,6 +88,13 @@ RANDOM_OFFSET_MAX = float(os.getenv('RANDOM_OFFSET_MAX', '0.5'))  # maximum rand
 PROACTIVE_MESSAGING_ENABLED = os.getenv('PROACTIVE_MESSAGING_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
 PROACTIVE_MESSAGING_REDIS_URL = os.getenv('PROACTIVE_MESSAGING_REDIS_URL', 'redis://redis:6379/0')
 
+# Message Queue Configuration
+MESSAGE_QUEUE_REDIS_URL = os.getenv('MESSAGE_QUEUE_REDIS_URL', 'redis://redis:6379/0')
+MESSAGE_QUEUE_MAX_RETRIES = int(os.getenv('MESSAGE_QUEUE_MAX_RETRIES', '3'))
+MESSAGE_QUEUE_LOCK_TIMEOUT = int(os.getenv('MESSAGE_QUEUE_LOCK_TIMEOUT', '30'))
+MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL = int(os.getenv('MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL', '10'))
+MESSAGE_QUEUE_DISPATCHER_INTERVAL = float(os.getenv('MESSAGE_QUEUE_DISPATCHER_INTERVAL', '0.1'))
+
 # Proactive messaging intervals (in seconds)
 PROACTIVE_MESSAGING_INTERVAL_1H = int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1H', '3600'))  # 1 hour
 PROACTIVE_MESSAGING_INTERVAL_9H = int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_9H', '32400'))  # 9 hours
@@ -235,7 +242,7 @@ def _validate_config():
         warnings.warn("BUFFER_CLEANUP_INTERVAL should be positive")
 
 # Buffer Manager Configuration
-BUFFER_SHORT_MESSAGE_TIMEOUT = float(os.getenv('BUFFER_SHORT_MESSAGE_TIMEOUT', '6'))  # seconds
+BUFFER_SHORT_MESSAGE_TIMEOUT = float(os.getenv('BUFFER_SHORT_MESSAGE_TIMEOUT', '4'))  # seconds
 BUFFER_LONG_MESSAGE_TIMEOUT = float(os.getenv('BUFFER_LONG_MESSAGE_TIMEOUT', '0.1'))   # seconds
 BUFFER_MAX_MESSAGES = int(os.getenv('BUFFER_MAX_MESSAGES', '8'))
 BUFFER_WORD_COUNT_THRESHOLD = int(os.getenv('BUFFER_WORD_COUNT_THRESHOLD', '30'))

@@ -105,7 +105,7 @@ class TestUserBuffer:
         
         # Get concatenated message
         result = await user_buffer.get_concatenated_message()
-        assert result == "Hello\nworld\n!"
+        assert result == "Hello world !"
 
     @pytest.mark.asyncio
     async def test_should_dispatch_immediately_max_messages(self, user_buffer):
@@ -271,7 +271,7 @@ class TestBufferManager:
         
         # Dispatch buffer
         result = await buffer_manager.dispatch_buffer(user_id)
-        assert result == "Hello\nworld"
+        assert result == "Hello world"
         
         # Check that buffer is now empty
         buffer = buffer_manager.get_user_buffer(user_id)

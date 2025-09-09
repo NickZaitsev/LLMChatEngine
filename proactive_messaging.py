@@ -47,6 +47,10 @@ from ai_handler import AIHandler
 from message_manager import send_ai_response, TypingIndicatorManager, clean_ai_response, generate_ai_response
 from storage_conversation_manager import PostgresConversationManager
 
+# Import message queue manager
+from message_manager import MessageQueueManager
+from config import MESSAGE_QUEUE_REDIS_URL
+
 # Import celery configuration
 import celeryconfig
 
@@ -107,6 +111,14 @@ class ProactiveMessagingService:
         # Initialize Redis client
         self.redis_client = redis.from_url(self.redis_url)
         logger.info("Redis client initialized")
+        
+        # Initialize message queue manager
+        try:
+            self.message_queue_manager = MessageQueueManager(MESSAGE_QUEUE_REDIS_URL)
+            logger.info("Message queue manager initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize message queue manager: {e}")
+            self.message_queue_manager = None
         
     def _get_user_state(self, user_id: int) -> dict:
         """
@@ -939,18 +951,36 @@ def send_proactive_message(self, user_id: int):
                 
                 # Send the message with timeout
                 try:
-                    loop.run_until_complete(
-                        run_with_timeout(
-                            send_ai_response(chat_id=user_id, text=cleaned_response, bot=bot, typing_manager=typing_manager),
-                            timeout=30
+                    # Enqueue message instead of sending directly
+                    if proactive_messaging_service.message_queue_manager:
+                        loop.run_until_complete(
+                            run_with_timeout(
+                                proactive_messaging_service.message_queue_manager.enqueue_message(
+                                    user_id=user_id,
+                                    chat_id=user_id, # For proactive messages, chat_id is typically the same as user_id
+                                    text=cleaned_response,
+                                    message_type="proactive",
+                                    bot=bot,  # For backward compatibility
+                                    typing_manager=typing_manager # For backward compatibility
+                                ),
+                                timeout=30
+                            )
                         )
-                    )
-                    logger.info(f"Proactive message sent to user {user_id} [{task_id}]: {cleaned_response[:50]}...")
+                        logger.info(f"Proactive message enqueued for user {user_id} [{task_id}]: {cleaned_response[:50]}...")
+                    else:
+                        # Fallback to direct sending if queue manager is not available
+                        loop.run_until_complete(
+                            run_with_timeout(
+                                send_ai_response(chat_id=user_id, text=cleaned_response, bot=bot, typing_manager=typing_manager),
+                                timeout=30
+                            )
+                        )
+                        logger.info(f"Proactive message sent directly to user {user_id} [{task_id}]: {cleaned_response[:50]}...")
                 except asyncio.TimeoutError:
-                    logger.error(f"Sending message timed out for user {user_id} [{task_id}]")
+                    logger.error(f"Sending/enqueueing message timed out for user {user_id} [{task_id}]")
                     raise
                 except Exception as e:
-                    logger.error(f"Error sending message to user {user_id} [{task_id}]: {e}")
+                    logger.error(f"Error sending/enqueueing message to user {user_id} [{task_id}]: {e}")
                     raise
             else:
                 logger.info(f"Proactive message for user {user_id} [{task_id}] was empty after cleaning, not adding to history or sending")

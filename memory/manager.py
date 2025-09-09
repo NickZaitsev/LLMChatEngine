@@ -530,7 +530,7 @@ class MemoryManager:
             # Format: "Role: Content"
             text_parts.append(f"{message.role}: {message.content}")
         
-        return "\n".join(text_parts)
+        return " \n ".join(text_parts)
 
 
 # Export public API

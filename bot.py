@@ -13,10 +13,13 @@ from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                    PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
                    MEMORY_EMBED_MODEL, MEMORY_SUMMARIZER_MODE, MEMORY_CHUNK_OVERLAP,
                    MESSAGE_PREVIEW_LENGTH,
-                   POLLING_INTERVAL)
+                   POLLING_INTERVAL,
+                   MESSAGE_QUEUE_REDIS_URL,
+                   MESSAGE_QUEUE_MAX_RETRIES,
+                   MESSAGE_QUEUE_LOCK_TIMEOUT)
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
-from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response
+from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response, MessageQueueManager, MessageDispatcher
 from buffer_manager import BufferManager
 
 # Set up logging
@@ -95,9 +98,29 @@ class AIGirlfriendBot:
             except Exception as e:
                 logger.error("Failed to initialize proactive messaging service: %s", e)
         
+        # Initialize message queue manager
+        try:
+            self.message_queue_manager = MessageQueueManager(MESSAGE_QUEUE_REDIS_URL)
+            logger.info("Message queue manager initialized successfully")
+        except Exception as e:
+            logger.error("Failed to initialize message queue manager: %s", e)
+            self.message_queue_manager = None
+        
         # Initialize buffer manager
         self.buffer_manager = BufferManager()
         self.buffer_manager.set_typing_manager(self.typing_manager)
+        
+        # Initialize message dispatcher
+        try:
+            self.message_dispatcher = MessageDispatcher(
+                MESSAGE_QUEUE_REDIS_URL,
+                MESSAGE_QUEUE_MAX_RETRIES,
+                MESSAGE_QUEUE_LOCK_TIMEOUT
+            )
+            logger.info("Message dispatcher initialized successfully")
+        except Exception as e:
+            logger.error("Failed to initialize message dispatcher: %s", e)
+            self.message_dispatcher = None
         
         # Store chat context for buffered messages
         self.user_chat_context = {}  # Maps user_id to (chat_id, bot)
@@ -579,12 +602,25 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         try:
             # Make sure cleaned_ai_response is defined
             if 'cleaned_ai_response' in locals():
-                await send_ai_response(chat_id=chat_id, text=cleaned_ai_response, bot=bot, typing_manager=self.typing_manager)
-                logger.info("Response sent to user %s", user_id)
+                # Enqueue message instead of sending directly
+                if self.message_queue_manager:
+                    await self.message_queue_manager.enqueue_message(
+                        user_id=user_id,
+                        chat_id=chat_id,
+                        text=cleaned_ai_response,
+                        message_type="regular",
+                        bot=bot,  # For backward compatibility
+                        typing_manager=self.typing_manager  # For backward compatibility
+                    )
+                    logger.info("Response enqueued for user %s", user_id)
+                else:
+                    # Fallback to direct sending if queue manager is not available
+                    await send_ai_response(chat_id=chat_id, text=cleaned_ai_response, bot=bot, typing_manager=self.typing_manager)
+                    logger.info("Response sent directly to user %s (queue manager not available)", user_id)
             else:
                 logger.error("No response to send to user %s", user_id)
         except Exception as e:
-            logger.error("Failed to send response to user %s: %s", user_id, e)
+            logger.error("Failed to enqueue/send response to user %s: %s", user_id, e)
     
     async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle photo messages"""
@@ -812,6 +848,25 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
     async def cleanup(self):
         """Cleanup resources when shutting down"""
         logger.info("Cleaning up bot resources...")
+        
+        # Stop message dispatcher
+        if hasattr(self, 'message_dispatcher') and self.message_dispatcher:
+            try:
+                await self.message_dispatcher.stop_dispatching()
+                logger.info("Message dispatcher stopped successfully")
+            except Exception as e:
+                logger.error("Error stopping message dispatcher: %s", e)
+        
+        # Clean up dispatcher task
+        if hasattr(self, 'dispatcher_task') and self.dispatcher_task:
+            try:
+                if not self.dispatcher_task.done():
+                    self.dispatcher_task.cancel()
+                    await self.dispatcher_task
+                logger.info("Dispatcher task cleaned up successfully")
+            except Exception as e:
+                logger.error("Error during dispatcher task cleanup: %s", e)
+        
         try:
             await self.typing_manager.cleanup()
             logger.info("Typing manager cleaned up successfully")
@@ -855,6 +910,16 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         try:
             loop = asyncio.get_event_loop()
             loop.run_until_complete(initialize_bot())
+            
+            # Start message dispatcher in background task after initialization
+            if self.message_dispatcher:
+                try:
+                    # Create the task within the existing event loop
+                    loop = asyncio.get_event_loop()
+                    self.dispatcher_task = loop.create_task(self.message_dispatcher.start_dispatching())
+                    logger.info("Message dispatcher started successfully")
+                except Exception as e:
+                    logger.error("Failed to start message dispatcher: %s", e)
         except Exception as e:
             logger.error("CRITICAL: Failed to initialize bot: %s", e)
             logger.error("Bot startup failed due to PostgreSQL configuration issues")
