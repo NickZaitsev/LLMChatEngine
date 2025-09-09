@@ -98,6 +98,9 @@ async def test_handle_message_triggers_proactive_messaging(bot_instance):
         # Call handle_message
         await bot_instance.handle_message(mock_update, mock_context)
         
+        # Manually trigger the dispatch since handle_message only adds to buffer
+        await bot_instance._dispatch_buffered_message(12345)
+        
         # Check that proactive messaging service was called
         if bot_instance.proactive_messaging_service:
             bot_instance.proactive_messaging_service.handle_user_message.assert_called_once_with(
@@ -147,6 +150,8 @@ async def test_handle_message_proactive_messaging_failure(bot_instance):
         # Call handle_message - should not raise an exception
         try:
             await bot_instance.handle_message(mock_update, mock_context)
+            # Manually trigger the dispatch since handle_message only adds to buffer
+            await bot_instance._dispatch_buffered_message(12345)
             success = True
         except Exception:
             success = False
@@ -164,4 +169,4 @@ def test_bot_initialization_with_proactive_messaging(bot_instance):
     
     # Check that it's the correct type
     if bot_instance.proactive_messaging_service is not None:
-        assert isinstance(bot_instance.proactive_messaging_service, ProactiveMessagingService)
+        assert isinstance(bot_instance.proactive_messaging_service, ProactiveMessagingService)

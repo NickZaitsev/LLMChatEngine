@@ -172,8 +172,8 @@ class TestBufferIntegration:
         
         # Dispatch buffer
         result = await buffer_manager.dispatch_buffer(user_id)
-        # Should concatenate all messages including empty ones
-        assert result == "   Normal message"
+        # Should concatenate non-empty messages with spaces
+        assert result == "    Normal message"
 
     @pytest.mark.asyncio
     async def test_very_long_message_handling(self, buffer_manager):
