@@ -53,3 +53,5 @@ Thumbs.db
 # MDs
 MDs/
 
+# Kilocode
+.kilocode/
