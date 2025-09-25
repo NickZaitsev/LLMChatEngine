@@ -30,7 +30,6 @@ tests/*.db
 docker-compose.override.yml
 
 # Backup files
-backup/
 memories_embeddings.json
 
 # IDE / editor
@@ -45,4 +44,12 @@ Thumbs.db
 # OS
 .DS_Store
 Thumbs.db
+
+# Scripts
+!clearRedis.bat
+!pytests.bat
+!startDocker.bat
+
+# MDs
+MDs/
 
