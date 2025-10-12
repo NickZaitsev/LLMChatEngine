@@ -615,7 +615,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                     logger.info("Response enqueued for user %s", user_id)
                 else:
                     # Fallback to direct sending if queue manager is not available
-                    await send_ai_response(chat_id=chat_id, text=cleaned_ai_response, bot=bot, typing_manager=self.typing_manager)
+                    await send_ai_response(chat_id=chat_id, text=cleaned_ai_response, bot=bot, typing_manager=self.typing_manager, is_first_message=True)
                     logger.info("Response sent directly to user %s (queue manager not available)", user_id)
             else:
                 logger.error("No response to send to user %s", user_id)
