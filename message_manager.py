@@ -147,9 +147,34 @@ class MessageQueueManager:
             logger.error("Failed to initialize MessageQueueManager with Redis URL %s: %s", redis_url, e)
             raise
     
+    def _split_message(self, text: str) -> list:
+        """
+        Split a message into safe parts before queuing to maintain order.
+        
+        Args:
+            text: Message text to split
+            
+        Returns:
+            List of message parts
+        """
+        # Clean the text before processing
+        text = clean_ai_response(text)
+        
+        # Split by paragraphs
+        parts = text.split("\n\n")
+        
+        # Chunk long parts
+        safe_parts = []
+        for part in parts:
+            chunks = textwrap.wrap(part, width=4000, break_long_words=False, break_on_hyphens=False)
+            safe_parts.extend(chunks)
+        
+        return safe_parts
+    
     async def enqueue_message(self, user_id: int, chat_id: int, text: str, message_type: str = "regular", bot=None, typing_manager=None):
         """
-        Enqueue a message for a user in their Redis list.
+        Enqueue a message for a user in their Redis list. If the message needs to be split,
+        split it first and enqueue each part as a separate message to maintain order.
         
         Args:
             user_id: User ID
@@ -173,30 +198,43 @@ class MessageQueueManager:
             if message_type not in ["regular", "proactive"]:
                 raise ValueError("message_type must be 'regular' or 'proactive'")
             
-            # Create message payload
-            message_data = {
-                "user_id": user_id,
-                "chat_id": chat_id,
-                "text": text,
-                "timestamp": datetime.utcnow().isoformat(),
-                "message_type": message_type,
-                "retry_count": 0
-            }
+            # Split the message before queuing to maintain order
+            message_parts = self._split_message(text)
             
-            # Serialize message data
-            message_json = json.dumps(message_data, ensure_ascii=False)
+            # If there are no parts to send, return early
+            if not message_parts:
+                logger.warning("No message parts to enqueue for user %s", user_id)
+                return
             
-            # Redis key for user's queue
-            queue_key = f"queue:{user_id}"
-            
-            # Add message to user's Redis list using RPUSH
-            result = self.redis_client.rpush(queue_key, message_json)
-            
-            # Add user to active users set
+            # Add user to active users set first
             self.redis_client.sadd("dispatcher:active_users", user_id)
             
-            logger.info("Enqueued message for user %s (chat %s) of type %s. Queue position: %s",
-                       user_id, chat_id, message_type, result)
+            # Enqueue each part as a separate message
+            total_parts = len(message_parts)
+            for i, part_text in enumerate(message_parts):
+                # Create message payload for this part
+                message_data = {
+                    "user_id": user_id,
+                    "chat_id": chat_id,
+                    "text": part_text,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "message_type": message_type,
+                    "retry_count": 0,
+                    "part_index": i,
+                    "total_parts": total_parts
+                }
+                
+                # Serialize message data
+                message_json = json.dumps(message_data, ensure_ascii=False)
+                
+                # Redis key for user's queue
+                queue_key = f"queue:{user_id}"
+                
+                # Add message to user's Redis list using RPUSH
+                result = self.redis_client.rpush(queue_key, message_json)
+                
+                logger.info("Enqueued message part %d/%d for user %s (chat %s) of type %s. Queue position: %s",
+                           i + 1, total_parts, user_id, chat_id, message_type, result)
             
             # For backward compatibility, if bot and typing_manager are provided, we can still call send_ai_response directly
             # This allows for a gradual migration
@@ -644,7 +682,7 @@ class MessageDispatcher:
     
     async def process_message(self, message: Dict[str, Any]) -> bool:
         """
-        Process a single message.
+        Process a single message part.
         
         Args:
             message: Message data dictionary
@@ -665,6 +703,8 @@ class MessageDispatcher:
             text = message["text"]
             message_type = message["message_type"]
             retry_count = message.get("retry_count", 0)
+            part_index = message.get("part_index", 0)
+            total_parts = message.get("total_parts", 1)
             
             # Validate field types
             if not isinstance(user_id, int) or user_id <= 0:
@@ -683,17 +723,20 @@ class MessageDispatcher:
                 logger.error("Invalid message_type in message: %s", message_type)
                 return False
             
-            logger.info("Processing message for user %s (chat %s) of type %s, retry count: %s",
-                       user_id, chat_id, message_type, retry_count)
+            logger.info("Processing message part %d/%d for user %s (chat %s) of type %s, retry count: %s",
+                       part_index + 1, total_parts, user_id, chat_id, message_type, retry_count)
             
-            # Send the message
+            # Determine if this is the first message part in a sequence (no delay before first)
+            is_first_message = (part_index == 0)
+            
+            # Send the message part
             try:
-                await send_ai_response(chat_id=chat_id, text=text, bot=self.bot, typing_manager=self.typing_manager)
+                await send_ai_response(chat_id=chat_id, text=text, bot=self.bot, typing_manager=self.typing_manager, is_first_message=is_first_message)
             except Exception as e:
-                logger.error("Error sending message for user %s: %s", user_id, e)
+                logger.error("Error sending message part %d/%d for user %s: %s", part_index + 1, total_parts, user_id, e)
                 return False
             
-            logger.info("Successfully processed message for user %s", user_id)
+            logger.info("Successfully processed message part %d/%d for user %s", part_index + 1, total_parts, user_id)
             return True
             
         except Exception as e:
@@ -729,64 +772,55 @@ class MessageDispatcher:
             logger.error("Error handling failed message for user %s: %s", message.get("user_id", "unknown"), e)
 
 
-async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'TypingIndicatorManager' = None):
+async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'TypingIndicatorManager' = None, is_first_message: bool = True):
     """
-    Splits AI response into safe message chunks and sends them sequentially with intelligent delays.
+    Sends a single message part with intelligent delays if it's not the first part in a sequence.
+    Note: The message is already pre-split when using the queue system.
     
     :param chat_id: Telegram chat ID
-    :param text: Raw AI model response (string)
+    :param text: Pre-split message text (string)
     :param bot: Telegram bot instance
     :param typing_manager: TypingIndicatorManager instance (optional)
+    :param is_first_message: Whether this is the first message in a sequence (no delay before first)
     """
     # Clean the text before processing
     text = clean_ai_response(text)
     
-    # Split by paragraphs
-    parts = text.split("\n\n")
-    
-    # Chunk long parts
-    safe_parts = []
-    for part in parts:
-        chunks = textwrap.wrap(part, width=4000, break_long_words=False, break_on_hyphens=False)
-        safe_parts.extend(chunks)
-    
-    # Send each processed part as an individual sendMessage call to Telegram in sequence
-    for i, part in enumerate(safe_parts):
-        # Add delay between messages (but not before the first message)
-        if i > 0:
-            # Calculate delay based on message length and random variation
-            message_length = len(part)
-            
-            # Select a random typing speed between min and max
-            typing_speed = random.randint(MIN_TYPING_SPEED, MAX_TYPING_SPEED)
-            
-            # Calculate base delay
-            base_delay = message_length / typing_speed
-            
-            # Add random offset
-            random_offset = random.uniform(RANDOM_OFFSET_MIN, RANDOM_OFFSET_MAX)
-            
-            # Calculate total delay
-            delay = base_delay + random_offset
-            
-            # Ensure delay doesn't exceed maximum
-            delay = min(delay, MAX_DELAY)
-            
-            # Start typing indicator if manager is provided and wait for the delay concurrently
-            if typing_manager and delay > 0.7:
-                # Start typing indicator
-                await typing_manager.start_typing(bot, chat_id)
-                
-                # Wait for the calculated delay
-                await asyncio.sleep(delay)
-                
-                # Stop typing indicator
-                await typing_manager.stop_typing(chat_id)
-            else:
-                # Wait for the calculated delay without typing indicator
-                await asyncio.sleep(delay)
+    # Add delay before sending (but not before the first message in a sequence)
+    if not is_first_message:
+        # Calculate delay based on message length and random variation
+        message_length = len(text)
         
-        await bot.send_message(chat_id=chat_id, text=part)
+        # Select a random typing speed between min and max
+        typing_speed = random.randint(MIN_TYPING_SPEED, MAX_TYPING_SPEED)
+        
+        # Calculate base delay
+        base_delay = message_length / typing_speed
+        
+        # Add random offset
+        random_offset = random.uniform(RANDOM_OFFSET_MIN, RANDOM_OFFSET_MAX)
+        
+        # Calculate total delay
+        delay = base_delay + random_offset
+        
+        # Ensure delay doesn't exceed maximum
+        delay = min(delay, MAX_DELAY)
+        
+        # Start typing indicator if manager is provided and wait for the delay concurrently
+        if typing_manager and delay > 0.7:
+            # Start typing indicator
+            await typing_manager.start_typing(bot, chat_id)
+            
+            # Wait for the calculated delay
+            await asyncio.sleep(delay)
+            
+            # Stop typing indicator
+            await typing_manager.stop_typing(chat_id)
+        else:
+            # Wait for the calculated delay without typing indicator
+            await asyncio.sleep(delay)
+
+    await bot.send_message(chat_id=chat_id, text=text)
 
 
 async def generate_ai_response(
