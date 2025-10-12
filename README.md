@@ -97,6 +97,8 @@ LLMChatEngine provides a modular architecture that can be adapted for various ch
 - **Buffer Manager**: Buffers user input for coherent processing
 - **Storage Layer**: PostgreSQL with pgvector for persistent data management
 
+![Architecture Diagram](docs/architecture.png)
+
 ## API Integration
 
 The engine can be integrated with various chat platforms through its modular interface design. Current implementation includes Telegram bot support, with extensible architecture for additional platforms.
