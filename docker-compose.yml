@@ -87,10 +87,30 @@ services:
     extra_hosts:
       - "host-machine:host-gateway"
 
+  celery-beat:
+    build: .
+    container_name: ai-girlfriend-celery-beat
+    restart: unless-stopped
+    command: celery -A proactive_messaging.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler -s /app/celerybeat-schedule/schedule
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:-ai_bot_pass}@postgres:5432/ai_bot
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - .:/app
+      - celery_beat_schedule:/app/celerybeat-schedule
+    networks:
+      - backup_network
+    extra_hosts:
+      - "host-machine:host-gateway"
+
 volumes:
   postgres_data:
   backups:
   redis_data:
+  celery_beat_schedule:
 
 networks:
   backup_network:
