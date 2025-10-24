@@ -73,15 +73,23 @@ services:
     build: .
     container_name: ai-girlfriend-celery-worker
     restart: unless-stopped
-    command: celery -A proactive_messaging.celery_app worker --loglevel=info
+    command: celery -A proactive_messaging worker --loglevel=info --statedb=/app/celery_worker_state.db -Q proactive_messaging
     environment:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:-ai_bot_pass}@postgres:5432/ai_bot
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - AZURE_API_KEY=${AZURE_API_KEY}
+      - AZURE_MODEL=${AZURE_MODEL:-deepseek/DeepSeek-V3-0324}
+      - BOT_NAME=${BOT_NAME:-Luna}
+      - PROVIDER=${PROVIDER:-lmstudio}
+      - LMSTUDIO_MODEL=${LMSTUDIO_MODEL:-openai/gpt-oss-20b}
+      - LMSTUDIO_BASE_URL=http://host-machine:1234/v1
     depends_on:
       - redis
       - postgres
     volumes:
       - .:/app
+      - celery_worker_state:/app/celery_worker_state
     networks:
       - backup_network
     extra_hosts:
@@ -91,10 +99,17 @@ services:
     build: .
     container_name: ai-girlfriend-celery-beat
     restart: unless-stopped
-    command: celery -A proactive_messaging.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler -s /app/celerybeat-schedule/schedule
+    command: celery -A proactive_messaging beat --loglevel=info --scheduler celery.beat.PersistentScheduler -s /app/celerybeat-schedule/schedule
     environment:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:-ai_bot_pass}@postgres:5432/ai_bot
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - AZURE_API_KEY=${AZURE_API_KEY}
+      - AZURE_MODEL=${AZURE_MODEL:-deepseek/DeepSeek-V3-0324}
+      - BOT_NAME=${BOT_NAME:-Luna}
+      - PROVIDER=${PROVIDER:-lmstudio}
+      - LMSTUDIO_MODEL=${LMSTUDIO_MODEL:-openai/gpt-oss-20b}
+      - LMSTUDIO_BASE_URL=http://host-machine:1234/v1
     depends_on:
       - redis
       - postgres
@@ -111,6 +126,7 @@ volumes:
   backups:
   redis_data:
   celery_beat_schedule:
+  celery_worker_state:
 
 networks:
   backup_network:

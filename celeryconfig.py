@@ -21,22 +21,21 @@ enable_utc = True
 task_acks_late = True
 worker_prefetch_multiplier = 1
 
+# Persistent Revokes
+worker_persistent_revokes = True
+
 # Task Result Expiration
 result_expires = 3600  # 1 hour
 
 # Task Routing
 task_routes = {
     'proactive_messaging.send_proactive_message': {'queue': 'proactive_messaging'},
-    'proactive_messaging.schedule_next_message': {'queue': 'proactive_messaging'},
+    'proactive_messaging.manage_proactive_messages': {'queue': 'proactive_messaging'},
 }
 
 # Task Queues
-task_default_queue = 'default'
+task_default_queue = 'proactive_messaging'
 task_queues = {
-    'default': {
-        'exchange': 'default',
-        'routing_key': 'default',
-    },
     'proactive_messaging': {
         'exchange': 'proactive_messaging',
         'routing_key': 'proactive_messaging',
