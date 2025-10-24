@@ -7,10 +7,11 @@ A powerful, production-ready LLM chat engine with advanced memory management, se
 - **Multi-LLM Provider Support**: Clean integration with Azure OpenAI, LM Studio, and other LLM providers
 - **Advanced Memory Management**: Episodic memory creation with semantic search via pgvector
 - **PostgreSQL Storage**: Scalable database backend with async SQLAlchemy 2.x
-- **Production Ready**: Docker support, database migrations, comprehensive logging
+- **Production Ready**: Multi-stage Docker build, database migrations, comprehensive logging
 - **Modular Architecture**: Extensible design for different chat platforms and interfaces
 - **Message Buffering**: Intelligent message buffering to capture complete user thoughts
-- **Proactive Features**: Scheduled messaging and automated conversation management
+- **Proactive Features**: Scheduled messaging with Celery Beat and automated conversation management
+- **Centralized App Context**: Singleton pattern for shared service initialization and management
 
 ## Quick Start with Docker
 
@@ -90,12 +91,14 @@ docker-compose down
 
 LLMChatEngine provides a modular architecture that can be adapted for various chat platforms:
 
+- **App Context**: Singleton pattern for centralized service initialization and management
 - **AI Handler**: Orchestrates LLM interactions across multiple providers
 - **Memory Manager**: Creates and manages episodic memories with semantic search
 - **Prompt Assembler**: Constructs contextual prompts with conversation history
 - **Message Manager**: Handles message queuing and ordered delivery
 - **Buffer Manager**: Buffers user input for coherent processing
 - **Storage Layer**: PostgreSQL with pgvector for persistent data management
+- **Proactive Messaging**: Celery Beat-based system for scheduled user engagement
 
 ![Architecture Diagram](docs/architecture.png)
 
