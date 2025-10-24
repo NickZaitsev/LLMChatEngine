@@ -254,14 +254,15 @@ class ProactiveMessagingService:
         return scheduled_time < datetime.now()
 
     
-    def _revoke_user_tasks(self, user_id: int, state: dict, message_type: str = "RegularReachout"):
+    def _revoke_user_tasks(self, user_id: int, state: dict, message_type: str = "RegularReachout", exclude_task_id: str = None):
         """
         Revoke all existing scheduled tasks for a user of a specific message type.
-        
+
         Args:
             user_id: Telegram user ID
             state: User state dictionary containing task information
             message_type: Type of message tasks to revoke (default: "RegularReachout")
+            exclude_task_id: Task ID to exclude from revocation (default: None)
         """
         try:
             # Get all task IDs for the user from Redis for the specific message type
@@ -275,6 +276,9 @@ class ProactiveMessagingService:
                     continue  # Skip None values
                 task_id = task_id_bytes.decode('utf-8') if isinstance(task_id_bytes, bytes) else str(task_id_bytes)
                 if not task_id:  # Skip empty task IDs
+                    continue
+                if exclude_task_id and task_id == exclude_task_id:
+                    logger.debug(f"Skipping revocation of current task {task_id} for user {user_id}")
                     continue
                 logger.info(f"Revoking scheduled task {task_id} for user {user_id} of type {message_type}")
                 # Revoke the Celery task
@@ -553,14 +557,15 @@ class ProactiveMessagingService:
             self.reset_cadence(user_id)
             logger.info(f"User {user_id} replied, cadence reset")
     
-    def schedule_proactive_message(self, user_id: int, scheduled_time: datetime = None, message_type: str = "RegularReachout"):
+    def schedule_proactive_message(self, user_id: int, scheduled_time: datetime = None, message_type: str = "RegularReachout", exclude_task_id: str = None):
         """
         Schedule a proactive message for a user.
-        
+
         Args:
             user_id: Telegram user ID
             scheduled_time: Optional specific time to schedule the message (defaults to None)
             message_type: Type of message to schedule (default: "RegularReachout")
+            exclude_task_id: Task ID to exclude from revocation (default: None)
         """
         logger.info(f"Scheduling proactive message for user {user_id} of type {message_type}")
         
@@ -607,7 +612,7 @@ class ProactiveMessagingService:
         self._set_user_state(user_id, user_state)
         
         # Revoke any existing scheduled tasks for this user before scheduling a new one
-        self._revoke_user_tasks(user_id, user_state, message_type)
+        self._revoke_user_tasks(user_id, user_state, message_type, exclude_task_id)
         logger.debug(f"Other user tasks of type {message_type} revoked for user {user_id}")
         
         # Schedule the Celery task
@@ -680,8 +685,7 @@ async def send_proactive_message_async(task, user_id: int):
     Async implementation of the proactive message sending logic.
     """
     task_id = task.request.id
-    app_context = await get_app_context()
-    
+
     # Get user state
     user_state = proactive_messaging_service._get_user_state(user_id)
     logger.debug(f"User {user_id} state: {user_state}")
@@ -695,6 +699,9 @@ async def send_proactive_message_async(task, user_id: int):
     if proactive_messaging_service._is_task_revoked(user_id, task_id, "RegularReachout"):
         logger.info(f"Task {task_id} for user {user_id} has been revoked, skipping.")
         return
+
+
+    app_context = await get_app_context()
 
     # Update consecutive outreaches
     consecutive_outreaches = user_state.get('consecutive_outreaches', 0) + 1
@@ -755,7 +762,7 @@ async def send_proactive_message_async(task, user_id: int):
     logger.info(f"Escalating cadence for user {user_id} from {current_cadence} to {next_cadence}")
     user_state['cadence'] = next_cadence
     proactive_messaging_service._set_user_state(user_id, user_state)
-    proactive_messaging_service.schedule_proactive_message(user_id)
+    proactive_messaging_service.schedule_proactive_message(user_id, exclude_task_id=task_id)
 
 
 @celery_app.task(bind=True)
@@ -795,10 +802,13 @@ async def manage_proactive_messages_async(task):
 
             if scheduled_time and scheduled_time < now:
                 logger.info(f"User {user_id} is due for a proactive message. Triggering.")
-                
+
                 # Prevent re-triggering by updating scheduled_time
                 state['scheduled_time'] = (now + timedelta(days=365)).isoformat()
                 proactive_messaging_service._set_user_state(user_id, state)
+
+                # Revoke any existing tasks for this user before scheduling new one
+                proactive_messaging_service._revoke_user_tasks(user_id, state, "RegularReachout")
 
                 send_proactive_message.apply_async(args=[user_id])
                 
