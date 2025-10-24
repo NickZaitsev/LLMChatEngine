@@ -35,21 +35,16 @@ from config import (
     PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES,
     PROACTIVE_MESSAGING_PROMPT,
     PROACTIVE_MESSAGING_RESTART_DELAY_MAX,
-    TELEGRAM_TOKEN, DATABASE_URL, USE_PGVECTOR,
-    MEMORY_EMBED_MODEL, MEMORY_SUMMARIZER_MODE, MEMORY_CHUNK_OVERLAP,
-    PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
-    PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
-    PROMPT_HISTORY_BUDGET, PROMPT_REPLY_TOKEN_BUDGET
 )
 
-# Import components for proactive messaging
-from ai_handler import AIHandler
-from message_manager import send_ai_response, TypingIndicatorManager, clean_ai_response, generate_ai_response
-from storage_conversation_manager import PostgresConversationManager
+# Import AppContext for shared services
+from app_context import get_app_context, AppContext
 
-# Import message queue manager
-from message_manager import MessageQueueManager
-from config import MESSAGE_QUEUE_REDIS_URL
+# Import message queue manager and related functions
+from message_manager import clean_ai_response, generate_ai_response
+
+# Import memory manager
+from memory.manager import MemoryManager
 
 # Import celery configuration
 import celeryconfig
@@ -112,13 +107,15 @@ class ProactiveMessagingService:
         self.redis_client = redis.from_url(self.redis_url)
         logger.info("Redis client initialized")
         
-        # Initialize message queue manager
-        try:
-            self.message_queue_manager = MessageQueueManager(MESSAGE_QUEUE_REDIS_URL)
-            logger.info("Message queue manager initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize message queue manager: {e}")
-            self.message_queue_manager = None
+        # Message queue manager is now retrieved from AppContext, not initialized here
+        self.message_queue_manager = None
+
+    async def _get_app_context(self) -> AppContext:
+        """Helper to get initialized app context."""
+        app_context = await get_app_context()
+        if self.message_queue_manager is None:
+            self.message_queue_manager = app_context.message_queue_manager
+        return app_context
         
     def _get_user_state(self, user_id: int) -> dict:
         """
@@ -256,50 +253,6 @@ class ProactiveMessagingService:
             return False
         return scheduled_time < datetime.now()
 
-    def _reschedule_missed_messages(self):
-        """
-        Reschedule missed messages with a random delay.
-        """
-        logger.info("Checking for missed proactive messages to reschedule...")
-        
-        # Get all user states
-        user_states = self._get_all_user_states()
-        
-        rescheduled_count = 0
-        for user_id, state in user_states.items():
-            try:
-                # Check if there's a scheduled time
-                scheduled_time = state.get('scheduled_time')
-                if not scheduled_time:
-                    continue
-                
-                # Check if scheduled time is in the past
-                if self._is_scheduled_time_in_past(scheduled_time):
-                    logger.info(f"Found missed proactive message for user {user_id}, scheduled at {scheduled_time}")
-                    
-                    # Generate a random delay (up to PROACTIVE_MESSAGING_RESTART_DELAY_MAX seconds)
-                    delay = random.randint(30, PROACTIVE_MESSAGING_RESTART_DELAY_MAX)
-                    new_scheduled_time = datetime.now() + timedelta(seconds=delay)
-                    
-                    logger.info(f"Rescheduling missed message for user {user_id} with delay of {delay} seconds (at {new_scheduled_time})")
-                    
-                    # Revoke any existing scheduled task for this user
-                    self._revoke_user_tasks(user_id, state, "RegularReachout")
-                    
-                    # Schedule the next message using the Celery task
-                    schedule_next_message.apply_async(
-                        args=[user_id]
-                    )
-                    
-                    
-                    rescheduled_count += 1
-                    
-            except Exception as e:
-                logger.error(f"Error rescheduling message for user {user_id}: {e}")
-                continue
-        
-        logger.info(f"Rescheduled {rescheduled_count} missed proactive messages")
-        logger.info("Proactive Messaging Service initialized")
     
     def _revoke_user_tasks(self, user_id: int, state: dict, message_type: str = "RegularReachout"):
         """
@@ -703,13 +656,31 @@ proactive_messaging_service = ProactiveMessagingService()
 def send_proactive_message(self, user_id: int):
     """
     Celery task to send a proactive message to a user.
-    
-    Args:
-        self: Celery task instance
-        user_id: Telegram user ID
+    This task is now lightweight and uses the shared AppContext.
     """
     task_id = self.request.id
     logger.info(f"Starting Celery task send_proactive_message [{task_id}] for user {user_id}")
+
+    try:
+        # Run the async part of the task
+        asyncio.run(send_proactive_message_async(self, user_id))
+    except Exception as e:
+        logger.error(f"Error in send_proactive_message task for user {user_id} [{task_id}]: {e}")
+        # Retry with exponential backoff
+        try:
+            raise self.retry(exc=e, countdown=60, max_retries=3)
+        except self.MaxRetriesExceededError:
+            logger.error(f"Max retries exceeded for task {task_id} for user {user_id}")
+    
+    logger.info(f"Completed Celery task send_proactive_message [{task_id}] for user {user_id}")
+
+
+async def send_proactive_message_async(task, user_id: int):
+    """
+    Async implementation of the proactive message sending logic.
+    """
+    task_id = task.request.id
+    app_context = await get_app_context()
     
     # Get user state
     user_state = proactive_messaging_service._get_user_state(user_id)
@@ -717,385 +688,131 @@ def send_proactive_message(self, user_id: int):
     
     # Check if user has replied since scheduling
     if user_state.get('user_replied', False):
-        logger.info(f"User {user_id} has replied since scheduling, skipping proactive message [{task_id}]")
-        
-        # Remove task ID from Redis
-        try:
-            task_key = f"proactive_messaging:user:{user_id}:tasks:RegularReachout"
-            proactive_messaging_service.redis_client.srem(task_key, task_id)
-            logger.debug(f"Removed task {task_id} from user {user_id}'s task list (skipped)")
-        except Exception as e:
-            logger.error(f"Error removing task ID for user {user_id}: {e}")
-        
+        logger.info(f"User {user_id} has replied, skipping proactive message [{task_id}]")
         return
 
     # Check if this task has been revoked
     if proactive_messaging_service._is_task_revoked(user_id, task_id, "RegularReachout"):
-        logger.info(f"Task {task_id} for user {user_id} has been revoked, skipping execution")
-        
-        # Remove task ID from Redis
-        try:
-            task_key = f"proactive_messaging:user:{user_id}:tasks:RegularReachout"
-            proactive_messaging_service.redis_client.srem(task_key, task_id)
-            logger.debug(f"Removed task {task_id} from user {user_id}'s task list (revoked)")
-        except Exception as e:
-            logger.error(f"Error removing task ID for user {user_id}: {e}")
-        
+        logger.info(f"Task {task_id} for user {user_id} has been revoked, skipping.")
         return
 
-    # Update consecutive outreaches count
-    consecutive_outreaches = user_state.get('consecutive_outreaches', 0)
-    consecutive_outreaches += 1
-    
+    # Update consecutive outreaches
+    consecutive_outreaches = user_state.get('consecutive_outreaches', 0) + 1
     user_state['consecutive_outreaches'] = consecutive_outreaches
     user_state['last_proactive_message'] = datetime.now().isoformat()
     proactive_messaging_service._set_user_state(user_id, user_state)
+    logger.info(f"User {user_id} consecutive outreaches: {consecutive_outreaches} [{task_id}]")
     
-    logger.info(f"Updated user {user_id} consecutive outreaches count to {consecutive_outreaches} [{task_id}]")
-    
-    # Generate and send proactive message
     try:
-        # Initialize components needed for sending messages
-        conversation_manager = PostgresConversationManager(DATABASE_URL, USE_PGVECTOR)
+        # Get conversation history
+        conversation_history = await app_context.conversation_manager.get_formatted_conversation_async(user_id)
         
-        # Initialize the conversation manager storage
-        async def init_storage():
-            await conversation_manager.initialize()
-        
-        # Get or create event loop
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        # Run the async initialization with timeout
-        try:
-            loop.run_until_complete(run_with_timeout(init_storage(), timeout=30))
-        except asyncio.TimeoutError:
-            logger.error(f"Storage initialization timed out for user {user_id} [{task_id}]")
-            raise
-        except Exception as e:
-            logger.error(f"Error initializing storage for user {user_id} [{task_id}]: {e}")
-            raise
-        
-        # Create MemoryManager with required repositories
-        # Add current directory to Python path to ensure local modules are found
-        import sys
-        import os
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        if current_dir not in sys.path:
-            sys.path.insert(0, current_dir)
-        from memory.manager import MemoryManager
-        
-        # Create llm_summarize function for MemoryManager when in LLM mode
-        async def llm_summarize(text: str, mode: str = "summarize") -> str:
-            """
-            LLM function for memory summarization.
-            
-            Args:
-                text: Text to summarize
-                mode: Mode of operation ("summarize" or "merge")
-                
-            Returns:
-                Summarized text
-            """
-            try:
-                # Create a minimal AIHandler for summarization
-                from ai_handler import AIHandler
-                ai_handler = AIHandler()
-                
-                if not ai_handler.is_available():
-                    raise Exception("AI handler not available for summarization")
-                
-                # For summarization, we just need to send the text as a user message
-                messages = [{"role": "user", "content": text}]
-                
-                # Make the AI request directly
-                loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(
-                    None,
-                    ai_handler.model_client.ask,
-                    messages
-                )
-                
-                return response
-            except Exception as e:
-                logger.error(f"LLM summarization failed: {e}")
-                raise
-        
-        # Prepare memory manager configuration
-        memory_config = {
-            "embed_model": MEMORY_EMBED_MODEL,
-            "summarizer_mode": MEMORY_SUMMARIZER_MODE,
-            "chunk_overlap": MEMORY_CHUNK_OVERLAP
-        }
-        
-        # Add llm_summarize function if in LLM mode
-        if MEMORY_SUMMARIZER_MODE == "llm":
-            memory_config["llm_summarize"] = llm_summarize
-        
-        memory_manager = MemoryManager(
-            message_repo=conversation_manager.storage.messages,
-            memory_repo=conversation_manager.storage.memories,
-            conversation_repo=conversation_manager.storage.conversations,
-            config=memory_config
-        )
-        
-        # Create PromptAssembler with required components
-        from prompt.assembler import PromptAssembler
-        prompt_assembler = PromptAssembler(
-            message_repo=conversation_manager.storage.messages,
-            memory_manager=memory_manager,
-            persona_repo=conversation_manager.storage.personas,
-            config={
-                "max_memory_items": PROMPT_MAX_MEMORY_ITEMS,
-                "memory_token_budget_ratio": PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
-                "truncation_length": PROMPT_TRUNCATION_LENGTH,
-                "include_system_template": PROMPT_INCLUDE_SYSTEM_TEMPLATE
-            }
-        )
-        
-        # Create AIHandler with PromptAssembler
-        ai_handler = AIHandler(prompt_assembler=prompt_assembler)
-        logger.debug(f"AIHandler created with prompt_assembler: {ai_handler.prompt_assembler is not None}")
-        
-        typing_manager = TypingIndicatorManager()
-        
-        # Create Telegram bot instance
-        from telegram import Bot
-        bot = Bot(token=TELEGRAM_TOKEN)
-        
-        # Initialize the conversation manager storage
-        async def init_storage():
-            await conversation_manager.initialize()
-        
-        # Get or create event loop
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        # Run the async initialization with timeout
-        try:
-            loop.run_until_complete(run_with_timeout(init_storage(), timeout=30))
-        except asyncio.TimeoutError:
-            logger.error(f"Storage initialization timed out for user {user_id} [{task_id}]")
-            raise
-        except Exception as e:
-            logger.error(f"Error initializing storage for user {user_id} [{task_id}]: {e}")
-            raise
-        
-        # Get conversation history with timeout
-        try:
-            conversation_history = loop.run_until_complete(
-                run_with_timeout(conversation_manager.get_formatted_conversation_async(user_id), timeout=30)
-            )
-        except asyncio.TimeoutError:
-            logger.error(f"Getting conversation history timed out for user {user_id} [{task_id}]")
-            raise
-        except Exception as e:
-            logger.error(f"Error getting conversation history for user {user_id} [{task_id}]: {e}")
-            raise
-        
-        # Generate proactive message prompt
-        proactive_prompt = PROACTIVE_MESSAGING_PROMPT
-        
-        # Get conversation ID for PromptAssembler
-        conversation = loop.run_until_complete(
-            run_with_timeout(
-                conversation_manager._ensure_user_and_conversation(user_id),
-                timeout=30
-            )
-        )
+        # Get conversation ID
+        conversation = await app_context.conversation_manager._ensure_user_and_conversation(user_id)
         conversation_id = str(conversation.id) if conversation else None
         
-        # Generate AI response using shared function with timeout
-        logger.debug(f"Calling generate_ai_response with conversation_id: {conversation_id}, user_id: {user_id}")
-        try:
-            ai_response = loop.run_until_complete(
-                run_with_timeout(
-                    generate_ai_response(ai_handler, typing_manager, bot, user_id, proactive_prompt, conversation_history, conversation_id, "user", True),
-                    timeout=60
-                )
-            )
-        except asyncio.TimeoutError:
-            logger.error(f"AI response generation timed out for user {user_id} [{task_id}]")
-            raise
-        except Exception as e:
-            logger.error(f"Error generating AI response for user {user_id} [{task_id}]: {e}")
-            raise
+        # Generate AI response
+        ai_response = await generate_ai_response(
+            ai_handler=app_context.ai_handler,
+            typing_manager=app_context.typing_manager,
+            bot=app_context.bot,
+            chat_id=user_id,
+            additional_prompt=PROACTIVE_MESSAGING_PROMPT,
+            conversation_history=conversation_history,
+            conversation_id=conversation_id,
+            role="user",
+            show_typing=True
+        )
         
         if ai_response:
-            # Clean the AI response
             cleaned_response = clean_ai_response(ai_response)
-            
-            # Only add to history and send if the cleaned response is not empty
             if cleaned_response:
-                # Add the proactive message to conversation history
-                try:
-                    loop.run_until_complete(
-                        run_with_timeout(
-                            conversation_manager.add_message_async(user_id, "assistant", cleaned_response),
-                            timeout=30
-                        )
-                    )
-                    logger.info(f"Proactive message added to history for user {user_id} [{task_id}]: {cleaned_response[:50]}...")
-                except asyncio.TimeoutError:
-                    logger.error(f"Adding message to history timed out for user {user_id} [{task_id}]")
-                    # Continue even if adding to history fails
-                except Exception as e:
-                    logger.error(f"Error adding message to history for user {user_id} [{task_id}]: {e}")
-                    # Continue even if adding to history fails
+                # Add message to history
+                await app_context.conversation_manager.add_message_async(user_id, "assistant", cleaned_response)
+                logger.info(f"Proactive message added to history for user {user_id} [{task_id}]")
                 
-                # Send the message with timeout
-                try:
-                    # Enqueue message instead of sending directly
-                    if proactive_messaging_service.message_queue_manager:
-                        loop.run_until_complete(
-                            run_with_timeout(
-                                proactive_messaging_service.message_queue_manager.enqueue_message(
-                                    user_id=user_id,
-                                    chat_id=user_id, # For proactive messages, chat_id is typically the same as user_id
-                                    text=cleaned_response,
-                                    message_type="proactive",
-                                    bot=bot,  # For backward compatibility
-                                    typing_manager=typing_manager # For backward compatibility
-                                ),
-                                timeout=30
-                            )
-                        )
-                        logger.info(f"Proactive message enqueued for user {user_id} [{task_id}]: {cleaned_response[:50]}...")
-                    else:
-                        # Fallback to direct sending if queue manager is not available
-                        loop.run_until_complete(
-                            run_with_timeout(
-                                send_ai_response(chat_id=user_id, text=cleaned_response, bot=bot, typing_manager=typing_manager),
-                                timeout=30
-                            )
-                        )
-                        logger.info(f"Proactive message sent directly to user {user_id} [{task_id}]: {cleaned_response[:50]}...")
-                except asyncio.TimeoutError:
-                    logger.error(f"Sending/enqueueing message timed out for user {user_id} [{task_id}]")
-                    raise
-                except Exception as e:
-                    logger.error(f"Error sending/enqueueing message to user {user_id} [{task_id}]: {e}")
-                    raise
+                # Enqueue message for sending
+                await app_context.message_queue_manager.enqueue_message(
+                    user_id=user_id,
+                    chat_id=user_id,
+                    text=cleaned_response,
+                    message_type="proactive",
+                )
+                logger.info(f"Proactive message enqueued for user {user_id} [{task_id}]")
             else:
-                logger.info(f"Proactive message for user {user_id} [{task_id}] was empty after cleaning, not adding to history or sending")
+                logger.info(f"Cleaned proactive message for user {user_id} was empty.")
         else:
             logger.error(f"Failed to generate proactive message for user {user_id} [{task_id}]")
-            
+
     except Exception as e:
-        logger.error(f"Error sending proactive message to user {user_id} [{task_id}]: {e}")
-        # Retry with exponential backoff
-        try:
-            raise self.retry(exc=e, countdown=60, max_retries=3)
-        except self.MaxRetriesExceededError:
-            logger.error(f"Max retries exceeded for task {task_id} for user {user_id}")
-        # Continue with state management even if message sending fails
-    
-    # Escalate cadence for next message
+        logger.error(f"Error during async proactive message generation for user {user_id} [{task_id}]: {e}")
+        # The main sync task will handle retry logic
+        raise
+
+    # Escalate and schedule the next message
     current_cadence = user_state.get('cadence', '1h')
     next_cadence = proactive_messaging_service.get_next_interval(current_cadence)
-    
-    logger.info(f"Escalating cadence for user {user_id} from {current_cadence} to {next_cadence} [{task_id}]")
-    
-    # Update cadence
+    logger.info(f"Escalating cadence for user {user_id} from {current_cadence} to {next_cadence}")
     user_state['cadence'] = next_cadence
     proactive_messaging_service._set_user_state(user_id, user_state)
-
-    # Remove task ID from Redis before scheduling next message to prevent self-revocation
-    try:
-        task_key = f"proactive_messaging:user:{user_id}:tasks:RegularReachout"
-        proactive_messaging_service.redis_client.srem(task_key, task_id)
-        logger.debug(f"Removed task {task_id} from user {user_id}'s task list (completed)")
-    except Exception as e:
-        logger.error(f"Error removing task ID for user {user_id}: {e}")
-    
-    # Schedule next message
     proactive_messaging_service.schedule_proactive_message(user_id)
-    
-    logger.info(f"Completed Celery task send_proactive_message [{task_id}] for user {user_id}")
 
-
-async def run_with_timeout(coro, timeout=30):
-    """
-    Run an async coroutine with a timeout.
-    
-    Args:
-        coro: The coroutine to run
-        timeout: Timeout in seconds
-        
-    Returns:
-        The result of the coroutine
-        
-    Raises:
-        asyncio.TimeoutError: If the coroutine times out
-    """
-    try:
-        return await asyncio.wait_for(coro, timeout=timeout)
-    except asyncio.TimeoutError:
-        logger.error(f"Async operation timed out after {timeout} seconds")
-        raise
 
 @celery_app.task(bind=True)
-def schedule_next_message(self, user_id: int):
+def manage_proactive_messages(self):
     """
-    Celery task to schedule the next proactive message.
-    
-    Args:
-        self: Celery task instance
-        user_id: Telegram user ID
+    Celery Beat task to manage and schedule proactive messages.
+    This task is now a lightweight sync wrapper for the async implementation.
     """
     task_id = self.request.id
-    logger.info(f"Starting Celery task schedule_next_message [{task_id}] for user {user_id}")
+    logger.info(f"Starting Celery Beat task manage_proactive_messages [{task_id}]")
     try:
-        # Get user state to check for existing scheduled tasks
-        user_state = proactive_messaging_service._get_user_state(user_id)
-        
-        # Revoke any existing scheduled task for this user
-        if user_state:
-            proactive_messaging_service._revoke_user_tasks(user_id, user_state, "RegularReachout")
-        
-        # Calculate the new scheduled time with delay for rescheduling missed messages
-        delay = random.randint(30, PROACTIVE_MESSAGING_RESTART_DELAY_MAX)
-        new_scheduled_time = datetime.now() + timedelta(seconds=delay)
-        
-        # Call the modified method with the scheduled time override
-        proactive_messaging_service.schedule_proactive_message(user_id, new_scheduled_time, "RegularReachout")
-        logger.info(f"Completed Celery task schedule_next_message [{task_id}] for user {user_id}")
+        asyncio.run(manage_proactive_messages_async(self))
     except Exception as e:
-        logger.error(f"Error in schedule_next_message [{task_id}] for user {user_id}: {e}")
-        raise
+        logger.error(f"Error in manage_proactive_messages task [{task_id}]: {e}")
+
+
+async def manage_proactive_messages_async(task):
+    """
+    Async implementation of the proactive message management logic.
+    """
+    task_id = task.request.id
+    logger.info(f"Running async logic for manage_proactive_messages [{task_id}]")
+    
+    try:
+        user_states = proactive_messaging_service._get_all_user_states()
+        now = datetime.now()
+        
+        for user_id, state in user_states.items():
+            scheduled_time = state.get('scheduled_time')
+            
+            if isinstance(scheduled_time, str):
+                try:
+                    scheduled_time = datetime.fromisoformat(scheduled_time)
+                except (ValueError, TypeError):
+                    logger.error(f"Invalid scheduled_time format for user {user_id}: {scheduled_time}")
+                    continue
+
+            if scheduled_time and scheduled_time < now:
+                logger.info(f"User {user_id} is due for a proactive message. Triggering.")
+                
+                # Prevent re-triggering by updating scheduled_time
+                state['scheduled_time'] = (now + timedelta(days=365)).isoformat()
+                proactive_messaging_service._set_user_state(user_id, state)
+
+                send_proactive_message.apply_async(args=[user_id])
+                
+    except Exception as e:
+        logger.error(f"Async error in manage_proactive_messages_async [{task_id}]: {e}")
+
 
 # Celery Beat Schedule
 celery_app.conf.beat_schedule = {
-    'check-proactive-messaging': {
-        'task': 'proactive_messaging.send_proactive_message',
-        'schedule': crontab(minute='*/30'),  # Run every 30 minutes
+    'manage-proactive-messages': {
+        'task': 'proactive_messaging.manage_proactive_messages',
+        'schedule': crontab(minute='*/1'),  # Run every 1 minute
     },
 }
 
 # Default queue
 celery_app.conf.task_default_queue = 'proactive_messaging'
-
-# Import Celery signals
-from celery.signals import worker_ready
-
-@worker_ready.connect
-def startup_proactive_messaging(sender=None, **kwargs):
-    """
-    Function to run when Celery worker is ready.
-    Checks for and reschedules any missed proactive messages.
-    """
-    logger.info("Celery worker is ready, checking for missed proactive messages...")
-    try:
-        # Ensure the proactive messaging service is initialized
-        if proactive_messaging_service is not None:
-            proactive_messaging_service._reschedule_missed_messages()
-        else:
-            logger.error("Proactive messaging service is not initialized")
-    except Exception as e:
-        logger.error(f"Error during startup proactive message rescheduling: {e}")

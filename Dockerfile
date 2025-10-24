@@ -1,26 +1,52 @@
-FROM python:3.9-slim
+# ---- Builder Stage ----
+# This stage installs dependencies and creates a virtual environment.
+# It includes build tools that are not needed in the final image.
+FROM python:3.9-slim AS builder
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install system dependencies needed for building some Python packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
+# Create a virtual environment
+RUN python -m venv /opt/venv
+
+# Activate the virtual environment for subsequent commands
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy only the requirements file to leverage Docker's layer caching
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install Python dependencies into the virtual environment
+# Using --no-cache-dir is a good practice for keeping image layers small
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+
+# ---- Final Stage ----
+# This stage creates the lean, production-ready image.
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Create a non-root user for better security
+RUN useradd --create-home --shell /bin/bash bot
+
+# Copy the virtual environment from the builder stage
+COPY --from=builder /opt/venv /opt/venv
+
+# Copy the application code
 COPY . .
 
-# Create non-root user for security
-RUN useradd --create-home --shell /bin/bash bot && \
-    chown -R bot:bot /app
+# Set the PATH to use the virtual environment's Python and packages
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Change ownership of the app directory to the non-root user
+RUN chown -R bot:bot /app
+
+# Switch to the non-root user
 USER bot
 
-# Run the bot
-CMD ["python", "bot.py"] 
+# Set the command to run the bot
+CMD ["python", "bot.py"]
