@@ -110,6 +110,7 @@ PROACTIVE_MESSAGING_JITTER_1W = int(os.getenv('PROACTIVE_MESSAGING_JITTER_1W', '
 PROACTIVE_MESSAGING_JITTER_1MO = int(os.getenv('PROACTIVE_MESSAGING_JITTER_1MO', '86400'))  # 1 day
 
 # Quiet hours (in 24-hour format)
+PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED = os.getenv('PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
 PROACTIVE_MESSAGING_QUIET_HOURS_START = os.getenv('PROACTIVE_MESSAGING_QUIET_HOURS_START', '02:30')
 PROACTIVE_MESSAGING_QUIET_HOURS_END = os.getenv('PROACTIVE_MESSAGING_QUIET_HOURS_END', '08:00')
 
@@ -202,12 +203,13 @@ def _validate_config():
             if value < 0:
                 warnings.warn(f"{name} should be non-negative")
         
-        # Validate quiet hours format
-        time_pattern = re.compile(r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$')
-        if not time_pattern.match(PROACTIVE_MESSAGING_QUIET_HOURS_START):
-            warnings.warn("PROACTIVE_MESSAGING_QUIET_HOURS_START should be in HH:MM format (24-hour)")
-        if not time_pattern.match(PROACTIVE_MESSAGING_QUIET_HOURS_END):
-            warnings.warn("PROACTIVE_MESSAGING_QUIET_HOURS_END should be in HH:MM format (24-hour)")
+        # Validate quiet hours format (only if enabled)
+        if PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED:
+            time_pattern = re.compile(r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$')
+            if not time_pattern.match(PROACTIVE_MESSAGING_QUIET_HOURS_START):
+                warnings.warn("PROACTIVE_MESSAGING_QUIET_HOURS_START should be in HH:MM format (24-hour)")
+            if not time_pattern.match(PROACTIVE_MESSAGING_QUIET_HOURS_END):
+                warnings.warn("PROACTIVE_MESSAGING_QUIET_HOURS_END should be in HH:MM format (24-hour)")
         
         # Validate consecutive outreach limit
         if PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES <= 0:
