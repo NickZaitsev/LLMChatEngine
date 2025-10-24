@@ -30,6 +30,7 @@ from config import (
     PROACTIVE_MESSAGING_JITTER_1D,
     PROACTIVE_MESSAGING_JITTER_1W,
     PROACTIVE_MESSAGING_JITTER_1MO,
+    PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED,
     PROACTIVE_MESSAGING_QUIET_HOURS_START,
     PROACTIVE_MESSAGING_QUIET_HOURS_END,
     PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES,
@@ -90,6 +91,7 @@ class ProactiveMessagingService:
         """Initialize the proactive messaging service."""
         self.enabled = PROACTIVE_MESSAGING_ENABLED
         self.redis_url = PROACTIVE_MESSAGING_REDIS_URL
+        self.quiet_hours_enabled = PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED
         self.quiet_hours_start = PROACTIVE_MESSAGING_QUIET_HOURS_START
         self.quiet_hours_end = PROACTIVE_MESSAGING_QUIET_HOURS_END
         self.max_consecutive_outreaches = PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES
@@ -98,6 +100,7 @@ class ProactiveMessagingService:
         logger.info(f"Proactive Messaging Service Configuration:")
         logger.info(f"  Enabled: {self.enabled}")
         logger.info(f"  Redis URL: {self.redis_url}")
+        logger.info(f"  Quiet Hours Enabled: {self.quiet_hours_enabled}")
         logger.info(f"  Quiet Hours: {self.quiet_hours_start} - {self.quiet_hours_end}")
         logger.info(f"  Max Consecutive Outreaches: {self.max_consecutive_outreaches}")
         logger.info(f"  Intervals: 1H={PROACTIVE_MESSAGING_INTERVAL_1H}s, 9H={PROACTIVE_MESSAGING_INTERVAL_9H}s, 1D={PROACTIVE_MESSAGING_INTERVAL_1D}s, 1W={PROACTIVE_MESSAGING_INTERVAL_1W}s, 1MO={PROACTIVE_MESSAGING_INTERVAL_1MO}s")
@@ -415,22 +418,25 @@ class ProactiveMessagingService:
     def is_within_quiet_hours(self, check_time: datetime = None) -> bool:
         """
         Check if the given time is within quiet hours.
-        
+
         Args:
             check_time: Time to check (defaults to current time)
-            
+
         Returns:
             True if within quiet hours, False otherwise
         """
+        if not self.quiet_hours_enabled:
+            return False
+
         if not check_time:
             check_time = datetime.now()
-        
+
         start_hours, start_minutes = self.parse_time(self.quiet_hours_start)
         end_hours, end_minutes = self.parse_time(self.quiet_hours_end)
-        
+
         start_time = check_time.replace(hour=start_hours, minute=start_minutes, second=0, microsecond=0)
         end_time = check_time.replace(hour=end_hours, minute=end_minutes, second=0, microsecond=0)
-        
+
         # Handle case where quiet hours cross midnight
         if end_time <= start_time:
             return check_time >= start_time or check_time <= end_time
