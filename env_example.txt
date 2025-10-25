@@ -6,8 +6,6 @@ DATABASE_URL=postgresql+asyncpg://ai_bot:your_secure_password@localhost:5432/ai_
 DB_PASSWORD=your_secure_password_here
 USE_PGVECTOR=true
 
-# Tokenizers Configuration
-TOKENIZERS_PARALLELISM=false
 
 # LLM Provider Configuration (REQUIRED for AI responses)
 PROVIDER=azure                                    # Options: "azure" or "lmstudio"
@@ -29,7 +27,6 @@ BOT_PERSONALITY=You are {BOT_NAME}, a caring and affectionate AI girlfriend. You
 
 # Conversation Settings - OPTIMIZED FOR MAXIMUM MEMORY
 MAX_CONVERSATION_HISTORY=100          # Much higher message limit
-MAX_TOKENS=3000                       # Use your full 4000 output capacity
 TEMPERATURE=0.8
 
 # Context Management - USING YOUR FULL 8000/4000 TOKEN LIMITS

@@ -4,7 +4,7 @@ import random
 import sys
 from typing import List, Dict
 
-from config import BOT_PERSONALITY, MAX_TOKENS, TEMPERATURE
+from config import BOT_PERSONALITY, PROMPT_REPLY_TOKEN_BUDGET, TEMPERATURE
 
 # Import OpenAI clients (v1+)
 try:
@@ -161,7 +161,7 @@ class ModelClient:
 class AIHandler:
     def __init__(self, prompt_assembler=None):
         self.personality = BOT_PERSONALITY
-        self.max_tokens = MAX_TOKENS
+        self.max_tokens = PROMPT_REPLY_TOKEN_BUDGET
         self.temperature = TEMPERATURE
         self.prompt_assembler = prompt_assembler
         

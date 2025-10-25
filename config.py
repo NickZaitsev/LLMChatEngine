@@ -57,7 +57,6 @@ BOT_PERSONALITY = os.getenv('BOT_PERSONALITY', DEFAULT_BOT_PERSONALITY)
 
 # Conversation Settings - Optimized for 8000/4000 token limits
 MAX_CONVERSATION_HISTORY = int(os.getenv('MAX_CONVERSATION_HISTORY', str(DEFAULT_MAX_CONVERSATION_HISTORY)))
-MAX_TOKENS = int(os.getenv('MAX_TOKENS', str(DEFAULT_MAX_TOKENS)))
 TEMPERATURE = float(os.getenv('TEMPERATURE', str(DEFAULT_TEMPERATURE)))
 
 # Context Management - Using full 8000 input token capacity
