@@ -12,7 +12,7 @@ import uuid
 from typing import List, Dict, Optional
 from uuid import UUID
 
-from config import MAX_CONVERSATION_HISTORY, MAX_TOKENS, MAX_CONTEXT_TOKENS, RESERVED_TOKENS, AVAILABLE_HISTORY_TOKENS
+from config import MAX_CONVERSATION_HISTORY, PROMPT_REPLY_TOKEN_BUDGET, MAX_CONTEXT_TOKENS, RESERVED_TOKENS, AVAILABLE_HISTORY_TOKENS
 from storage import create_storage, Storage
 from storage.interfaces import Message, Conversation, User, Persona, MessageLog, MessageUser
 
