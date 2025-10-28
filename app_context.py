@@ -13,12 +13,15 @@ from typing import Optional
 
 from ai_handler import AIHandler
 from config import (
-    DATABASE_URL, USE_PGVECTOR, MEMORY_EMBED_MODEL, MEMORY_SUMMARIZER_MODE,
-    MEMORY_CHUNK_OVERLAP, PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
+    DATABASE_URL, USE_PGVECTOR, PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
     PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE, MESSAGE_QUEUE_REDIS_URL,
-    TELEGRAM_TOKEN
+    TELEGRAM_TOKEN, MEMORY_ENABLED, EMBEDDING_MODEL_ID, SUMMARIZATION_LLM_ID,
+    SUMMARIZATION_PROMPT_TEMPLATE, VECTOR_STORE_TABLE_NAME
 )
-from memory.manager import MemoryManager
+from memory.manager import LlamaIndexMemoryManager
+from memory.llamaindex.vector_store import PgVectorStore
+from memory.llamaindex.embedding import HuggingFaceEmbeddingModel
+from memory.llamaindex.summarizer import LlamaIndexSummarizer
 from message_manager import MessageQueueManager, TypingIndicatorManager
 from prompt.assembler import PromptAssembler
 from storage_conversation_manager import PostgresConversationManager
@@ -41,7 +44,7 @@ class AppContext:
             return
         
         self.conversation_manager: Optional[PostgresConversationManager] = None
-        self.memory_manager: Optional[MemoryManager] = None
+        self.memory_manager: Optional[LlamaIndexMemoryManager] = None
         self.prompt_assembler: Optional[PromptAssembler] = None
         self.ai_handler: Optional[AIHandler] = None
         self.message_queue_manager: Optional[MessageQueueManager] = None
@@ -70,25 +73,53 @@ class AppContext:
             logger.error(f"Failed to initialize PostgresConversationManager: {e}")
             raise
 
-        # 2. Initialize Memory Manager
+        # 2. Initialize AI Handler (partially, to break dependency cycle)
         try:
-            memory_config = {
-                "embed_model": MEMORY_EMBED_MODEL,
-                "summarizer_mode": MEMORY_SUMMARIZER_MODE,
-                "chunk_overlap": MEMORY_CHUNK_OVERLAP
-            }
-            self.memory_manager = MemoryManager(
-                message_repo=self.conversation_manager.storage.messages,
-                memory_repo=self.conversation_manager.storage.memories,
-                conversation_repo=self.conversation_manager.storage.conversations,
-                config=memory_config
-            )
-            logger.info("MemoryManager initialized.")
+            self.ai_handler = AIHandler()
+            logger.info("AIHandler initialized (pre-prompt assembler).")
         except Exception as e:
-            logger.error(f"Failed to initialize MemoryManager: {e}")
+            logger.error(f"Failed to initialize AIHandler: {e}")
             raise
 
-        # 3. Initialize Prompt Assembler
+        # 3. Initialize Memory Manager (LlamaIndex stack)
+        try:
+            if MEMORY_ENABLED:
+                embedding_model = HuggingFaceEmbeddingModel(model_name=EMBEDDING_MODEL_ID)
+                
+                # Dynamically get embed_dim from the model
+                embed_dim = 384  # Replace with actual dynamic retrieval if possible
+                try:
+                    # This is a placeholder for getting the dimension
+                    # In a real scenario, the model would expose this
+                    if hasattr(embedding_model._model, 'get_sentence_embedding_dimension'):
+                         embed_dim = embedding_model._model.get_sentence_embedding_dimension()
+                except Exception:
+                    logger.warning(f"Could not dynamically get embedding dimension. Falling back to {embed_dim}.")
+
+                vector_store = PgVectorStore(
+                    db_url=DATABASE_URL,
+                    table_name=VECTOR_STORE_TABLE_NAME,
+                    embed_dim=embed_dim
+                )
+
+                summarization_model = LlamaIndexSummarizer(ai_handler=self.ai_handler)
+
+                self.memory_manager = LlamaIndexMemoryManager(
+                    vector_store=vector_store,
+                    embedding_model=embedding_model,
+                    summarization_model=summarization_model,
+                    message_repo=self.conversation_manager.storage.messages
+                )
+                logger.info("LlamaIndexMemoryManager initialized.")
+            else:
+                self.memory_manager = None
+                logger.info("Memory is disabled. Skipping MemoryManager initialization.")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize LlamaIndexMemoryManager: {e}")
+            raise
+
+        # 4. Initialize Prompt Assembler
         try:
             prompt_config = {
                 "max_memory_items": PROMPT_MAX_MEMORY_ITEMS,
@@ -106,16 +137,13 @@ class AppContext:
         except Exception as e:
             logger.error(f"Failed to initialize PromptAssembler: {e}")
             raise
+            
+        # 5. Set Prompt Assembler in AI Handler
+        if self.ai_handler and self.prompt_assembler:
+            self.ai_handler.prompt_assembler = self.prompt_assembler
+            logger.info("Prompt assembler set in AIHandler.")
 
-        # 4. Initialize AI Handler
-        try:
-            self.ai_handler = AIHandler(prompt_assembler=self.prompt_assembler)
-            logger.info("AIHandler initialized.")
-        except Exception as e:
-            logger.error(f"Failed to initialize AIHandler: {e}")
-            raise
-
-        # 5. Initialize Message Queue Manager
+        # 6. Initialize Message Queue Manager
         try:
             self.message_queue_manager = MessageQueueManager(MESSAGE_QUEUE_REDIS_URL)
             logger.info("MessageQueueManager initialized.")

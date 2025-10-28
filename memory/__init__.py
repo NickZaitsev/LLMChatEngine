@@ -5,17 +5,12 @@ This package provides episodic memory creation, summarization, embedding,
 and semantic retrieval capabilities.
 """
 
-from .manager import MemoryManager
-from .embedding import embed_texts
-from .summarizer import summarize_chunk, merge_summaries, SummarizerOutput, MergeOutput
+from .manager import LlamaIndexMemoryManager
+from .llamaindex.summarizer import LlamaIndexSummarizer
 
 __all__ = [
-    'MemoryManager',
-    'embed_texts', 
-    'summarize_chunk',
-    'merge_summaries',
-    'SummarizerOutput',
-    'MergeOutput'
+    'LlamaIndexMemoryManager',
+    'LlamaIndexSummarizer'
 ]
 
 __version__ = '1.0.0'

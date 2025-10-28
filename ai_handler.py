@@ -181,9 +181,14 @@ class AIHandler:
             self.model_client = None
     
     def set_prompt_assembler(self, prompt_assembler):
-        """Set the PromptAssembler instance for advanced prompt building."""
+        """Set the prompt assembler for the AI handler."""
         self.prompt_assembler = prompt_assembler
-        logger.info("PromptAssembler set for AIHandler")
+        logger.info("Prompt assembler has been set for AIHandler.")
+
+    async def get_response(self, prompt: str) -> str:
+        """Get a direct response from the LLM for a given prompt."""
+        messages = [{"role": "user", "content": prompt}]
+        return await self._make_ai_request(messages)
 
     async def generate_response(self, user_message: str, conversation_history: List[Dict], conversation_id: str = None, role: str = "user") -> str:
         """Generate a response using ModelClient with proper timeout handling."""

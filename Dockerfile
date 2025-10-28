@@ -1,7 +1,7 @@
 # ---- Builder Stage ----
 # This stage installs dependencies and creates a virtual environment.
 # It includes build tools that are not needed in the final image.
-FROM python:3.9-slim AS builder
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
@@ -20,13 +20,15 @@ ENV PATH="/opt/venv/bin:$PATH"
 COPY requirements.txt .
 
 # Install Python dependencies into the virtual environment
-# Using --no-cache-dir is a good practice for keeping image layers small
-RUN pip install --no-cache-dir -r requirements.txt
+# Use a cache mount to speed up dependency installation in subsequent builds.
+# This requires BuildKit to be enabled (which is the default in modern Docker).
+# The cache is persisted by Docker and reused, avoiding re-downloads.
+RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
 
 
 # ---- Final Stage ----
 # This stage creates the lean, production-ready image.
-FROM python:3.9-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
