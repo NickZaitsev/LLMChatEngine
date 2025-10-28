@@ -44,8 +44,6 @@ from app_context import get_app_context, AppContext
 # Import message queue manager and related functions
 from message_manager import clean_ai_response, generate_ai_response
 
-# Import memory manager
-from memory.manager import MemoryManager
 
 # Import celery configuration
 import celeryconfig

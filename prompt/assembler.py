@@ -12,10 +12,8 @@ from typing import Dict, List, Any, Optional, Mapping, Tuple, Protocol
 from uuid import UUID
 
 from storage.interfaces import MessageRepo, PersonaRepo, Message
-from memory.manager import MemoryManager, MemoryRecord
+from memory.manager import LlamaIndexMemoryManager
 from .templates import (
-    format_memory_snippet_from_record,
-    create_user_profile_message,
     create_memory_context_message,
 )
 import config
@@ -105,7 +103,7 @@ class PromptAssembler:
     def __init__(
         self,
         message_repo: MessageRepo,
-        memory_manager: MemoryManager,
+        memory_manager: LlamaIndexMemoryManager,
         persona_repo: Optional[PersonaRepo] = None,
         tokenizer: Optional[Tokenizer] = None,
         config: Mapping[str, Any] = None
@@ -203,10 +201,11 @@ class PromptAssembler:
         logger.info(f"Building prompt for conversation {conversation_id[:8]}...")
         
         # Validate conversation_id format
-        try:
-            UUID(conversation_id)
-        except ValueError as e:
-            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+        # The conversation_id is now a string from the database, not a UUID.
+        # try:
+        #     UUID(conversation_id)
+        # except ValueError as e:
+        #     raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
         
         # Initialize tracking variables
         messages = []
@@ -236,60 +235,31 @@ class PromptAssembler:
         except Exception as e:
             logger.warning(f"Failed to load persona configuration: {e}")
         
-        # 3. Fetch and add user profile (rolling summary)
-        try:
-            summary_memories = await self.memory_manager.memory_repo.list_memories(
-                conversation_id, memory_type="summary"
-            )
-            
-            if summary_memories:
-                # Use the most recent summary
-                latest_summary = max(summary_memories, key=lambda m: m.created_at)
-                
-                # Extract profile text from structured memory
-                profile_text = self._extract_summary_text(latest_summary.text)
-                
-                if profile_text:
-                    profile_message = create_user_profile_message(profile_text)
-                    profile_tokens = self.token_counter.count_tokens(profile_message["content"])
-                    messages.append(profile_message)
-                    token_counts["system_tokens"] += profile_tokens
-                    logger.debug(f"Added user profile: {profile_tokens} tokens")
-            
-        except Exception as e:
-            logger.warning(f"Failed to load user profile: {e}")
-        
-        # 4. Calculate memory token budget
+        # 3. Calculate memory token budget
         memory_budget = int(history_budget * self.memory_token_budget_ratio)
         remaining_history_budget = history_budget - memory_budget
-        
-        # 5. Retrieve and add relevant memories
+
+        # 4. Retrieve and add relevant memories
         try:
-            # We don't have a current user message to use for relevance search anymore
-            # So we'll get all memories and filter by budget
-            all_memories = await self.memory_manager.memory_repo.list_memories(conversation_id)
-            
-            memory_snippets = []
-            memory_tokens_used = 0
-            
-            for memory in all_memories[:self.max_memory_items]:
-                snippet = format_memory_snippet_from_record(memory)
-                snippet_tokens = self.token_counter.count_tokens(snippet)
-                
-                if memory_tokens_used + snippet_tokens <= memory_budget:
-                    memory_snippets.append(snippet)
-                    memory_tokens_used += snippet_tokens
-                    included_memory_ids.append(str(memory.id))
-                else:
-                    break
-            
-            if memory_snippets:
-                memory_message = create_memory_context_message(memory_snippets)
-                memory_message_tokens = self.token_counter.count_tokens(memory_message["content"])
-                messages.append(memory_message)
-                token_counts["memory_tokens"] = memory_message_tokens
-                logger.debug(f"Added {len(memory_snippets)} memories: {memory_message_tokens} tokens")
-            
+            # Get the last user message to use as a query
+            last_user_message = await self.message_repo.get_last_user_message(conversation_id)
+            if last_user_message:
+                context = await self.memory_manager.get_context(
+                    user_id=str(conversation_id),
+                    query=last_user_message.content,
+                    top_k=self.max_memory_items
+                )
+                if context:
+                    # The new get_context returns a string, not a list of records
+                    memory_content = f"### Memory Context\n{context}"
+                    memory_message = {"role": "system", "content": memory_content}
+                    memory_message_tokens = self.token_counter.count_tokens(memory_content)
+                    
+                    if memory_message_tokens <= memory_budget:
+                        messages.append(memory_message)
+                        token_counts["memory_tokens"] = memory_message_tokens
+                        remaining_history_budget -= memory_message_tokens
+                        logger.debug(f"Added memories: {memory_message_tokens} tokens")
         except Exception as e:
             logger.warning(f"Failed to retrieve memories: {e}")
         

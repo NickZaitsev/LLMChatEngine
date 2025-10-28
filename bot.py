@@ -11,7 +11,7 @@ from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                    PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED,
                    PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
                    PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
-                   MEMORY_EMBED_MODEL, MEMORY_SUMMARIZER_MODE, MEMORY_CHUNK_OVERLAP,
+                   MEMORY_EMBED_MODEL, MEMORY_SUMMARIZER_MODE, MEMORY_CHUNK_OVERLAP, VECTOR_STORE_TABLE_NAME,
                    MESSAGE_PREVIEW_LENGTH,
                    POLLING_INTERVAL,
                    MESSAGE_QUEUE_REDIS_URL,
@@ -40,7 +40,10 @@ except ImportError as e:
 # PromptAssembler and Memory Manager imports (conditional)
 if MEMORY_ENABLED:
     try:
-        from memory.manager import MemoryManager
+        from memory.manager import LlamaIndexMemoryManager
+        from memory.llamaindex.vector_store import PgVectorStore
+        from memory.llamaindex.embedding import HuggingFaceEmbeddingModel
+        from memory.llamaindex.summarizer import LlamaIndexSummarizer
         from prompt.assembler import PromptAssembler
         MEMORY_IMPORTS_AVAILABLE = True
     except ImportError as e:
@@ -227,6 +230,8 @@ You can also just send me messages and I'll respond naturally!
             if existing_conversation:
                 logger.info("Clearing conversation for user %s (%d messages)", user_id, len(existing_conversation))
                 await self.conversation_manager.clear_conversation_async(user_id)
+                if self.memory_manager:
+                    await self.memory_manager.clear_memories(str(user_id))
                 await update.message.reply_text("✨ Our conversation history has been permanently deleted. 💕")
             else:
                 await update.message.reply_text("💭 There's no conversation history to clear. We're already starting fresh! 💕")
@@ -707,49 +712,39 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                          MEMORY_IMPORTS_AVAILABLE, MEMORY_ENABLED)
             if MEMORY_ENABLED:
                 raise RuntimeError("Memory components are required but imports failed. Please check your installation.")
-            else:
-                raise RuntimeError("Memory components are required but not enabled. Please enable MEMORY_ENABLED in config.")
-        
+            return
+
         if not hasattr(self.conversation_manager, 'storage') or not self.conversation_manager.storage:
             raise RuntimeError("PostgreSQL storage not available for memory components. Ensure PostgreSQL is properly initialized.")
-        
+
         try:
             storage = self.conversation_manager.storage
             
-            # Initialize MemoryManager - now required
-            # Create LLM summarize function that uses our AI handler
-            async def llm_summarize_func(text: str, instruction: str = None) -> str:
-                """Summarization function using the bot's AI handler"""
-                try:
-                    prompt = f"Please summarize the following conversation text:\n\n{text}"
-                    if instruction:
-                        prompt = f"{instruction}\n\n{text}"
-                    
-                    # Use a simple conversation history for summarization
-                    simple_history = [{"role": "user", "content": prompt}]
-                    response = await self.ai_handler.generate_response(prompt, [], None)  # No conversation_id for summarization
-                    return response
-                except Exception as e:
-                    logger.error("LLM summarization failed: %s", e)
-                    return f"Summary unavailable due to error: {str(e)[:100]}"
-            
-            # Memory manager configuration
-            memory_config = {
-                "embed_model": MEMORY_EMBED_MODEL,
-                "summarizer_mode": MEMORY_SUMMARIZER_MODE,
-                "llm_summarize": llm_summarize_func,
-                "chunk_overlap": MEMORY_CHUNK_OVERLAP
-            }
-            
-            self.memory_manager = MemoryManager(
-                message_repo=storage.messages,
-                memory_repo=storage.memories,
-                conversation_repo=storage.conversations,
-                config=memory_config
+            # 1. Initialize VectorStore
+            vector_store = PgVectorStore(
+                db_url=DATABASE_URL,
+                table_name=VECTOR_STORE_TABLE_NAME,
+                embed_dim=384  # Placeholder, will be dynamic later
             )
-            logger.info("MemoryManager initialized successfully")
             
-            # PromptAssembler configuration
+            # 2. Initialize EmbeddingModel
+            embedding_model = HuggingFaceEmbeddingModel(model_name=MEMORY_EMBED_MODEL)
+
+            # 3. Initialize SummarizationModel
+            summarizer = LlamaIndexSummarizer(
+                ai_handler=self.ai_handler
+            )
+
+            # 4. Initialize LlamaIndexMemoryManager
+            self.memory_manager = LlamaIndexMemoryManager(
+                vector_store=vector_store,
+                embedding_model=embedding_model,
+                summarization_model=summarizer,
+                message_repo=storage.messages
+            )
+            logger.info("LlamaIndexMemoryManager initialized successfully")
+
+            # 5. Initialize PromptAssembler
             prompt_config = {
                 "max_memory_items": PROMPT_MAX_MEMORY_ITEMS,
                 "memory_token_budget_ratio": PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
@@ -764,17 +759,17 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                 config=prompt_config
             )
             logger.info("PromptAssembler initialized successfully with config: %s", prompt_config)
-            
-            # Set PromptAssembler in AIHandler
+
+            # 6. Set PromptAssembler in AIHandler
             self.ai_handler.set_prompt_assembler(self.prompt_assembler)
-            logger.info("PromptAssembler integrated with AIHandler. AIHandler prompt_assembler: %s",
-                       getattr(self.ai_handler, 'prompt_assembler', None))
-            
+            logger.info("PromptAssembler integrated with AIHandler.")
+
             self._memory_initialized = True
             logger.info("Memory components initialization completed")
-            
+
         except Exception as e:
             logger.error("Failed to initialize memory components: %s", e)
+            logger.error(traceback.format_exc())
             raise RuntimeError(f"Memory components are required but failed to initialize: {e}") from e
     
     async def _initialize_lmstudio_model(self):

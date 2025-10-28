@@ -9,7 +9,6 @@ import json
 from datetime import datetime
 from typing import Dict, Any, Optional
 from storage.interfaces import Memory
-from memory.manager import MemoryRecord
 
 
 
@@ -64,31 +63,31 @@ def format_memory_snippet(memory: Memory) -> str:
     return f"MEMORY [{short_id} | {date_str} | {memory_type}]: {summary}"
 
 
-def format_memory_snippet_from_record(memory_record: MemoryRecord) -> str:
+def format_memory_snippet_from_record(memory_record: Memory) -> str:
     """
     Format a MemoryRecord into a concise snippet for inclusion in prompts.
-    
+
     Args:
-        memory_record: MemoryRecord object to format
-        
+        memory_record: Memory object to format
+
     Returns:
         Formatted memory snippet as "MEMORY [id | date | type]: <short_summary>"
     """
     # Extract short ID (first 6 chars of UUID)
     short_id = str(memory_record.id)[:6] if memory_record.id else "unknown"
-    
+
     # Format date
     if memory_record.created_at:
         date_str = memory_record.created_at.strftime("%Y-%m-%d")
     else:
         date_str = "unknown"
-    
+
     # Get memory type
     memory_type = memory_record.memory_type or "unknown"
-    
+
     # Extract summary from memory text
     summary = _extract_memory_summary(memory_record.text)
-    
+
     return f"MEMORY [{short_id} | {date_str} | {memory_type}]: {summary}"
 
 

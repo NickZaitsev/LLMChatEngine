@@ -5,7 +5,7 @@ A powerful, production-ready LLM chat engine with advanced memory management, se
 ## Features
 
 - **Multi-LLM Provider Support**: Clean integration with Azure OpenAI, LM Studio, and other LLM providers
-- **Advanced Memory Management**: Episodic memory creation with semantic search via pgvector
+- **Advanced Memory Management**: LlamaIndex-based memory system with semantic search via pgvector.
 - **PostgreSQL Storage**: Scalable database backend with async SQLAlchemy 2.x
 - **Production Ready**: Multi-stage Docker build, database migrations, comprehensive logging
 - **Modular Architecture**: Extensible design for different chat platforms and interfaces
@@ -93,7 +93,7 @@ LLMChatEngine provides a modular architecture that can be adapted for various ch
 
 - **App Context**: Singleton pattern for centralized service initialization and management
 - **AI Handler**: Orchestrates LLM interactions across multiple providers
-- **Memory Manager**: Creates and manages episodic memories with semantic search
+- **Memory Manager**: LlamaIndex-based system for creating and managing memories.
 - **Prompt Assembler**: Constructs contextual prompts with conversation history
 - **Message Manager**: Handles message queuing and ordered delivery
 - **Buffer Manager**: Buffers user input for coherent processing

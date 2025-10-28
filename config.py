@@ -72,11 +72,18 @@ PROMPT_INCLUDE_SYSTEM_TEMPLATE = os.getenv('PROMPT_INCLUDE_SYSTEM_TEMPLATE', 'tr
 PROMPT_HISTORY_BUDGET = int(os.getenv('PROMPT_HISTORY_BUDGET', str(AVAILABLE_HISTORY_TOKENS)))
 PROMPT_REPLY_TOKEN_BUDGET = int(os.getenv('PROMPT_REPLY_TOKEN_BUDGET', str(RESERVED_TOKENS)))
 
-# Memory Manager Configuration
-MEMORY_EMBED_MODEL = os.getenv('MEMORY_EMBED_MODEL', 'sentence-transformers/all-MiniLM-L6-v2')
-MEMORY_SUMMARIZER_MODE = os.getenv('MEMORY_SUMMARIZER_MODE', 'llm')  # 'llm' or 'local'
-MEMORY_CHUNK_OVERLAP = int(os.getenv('MEMORY_CHUNK_OVERLAP', '2'))
+# LlamaIndex Configuration
 MEMORY_ENABLED = os.getenv('MEMORY_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
+MEMORY_SUMMARIZER_MODE = os.getenv('MEMORY_SUMMARIZER_MODE', 'local')
+# FIXME: Hardcoded to a known public model to prevent startup errors.
+# The value from the environment ('google/embedding-gemma-2b') may be incorrect or require authentication.
+EMBEDDING_MODEL_ID = 'BAAI/bge-small-en-v1.5'
+SUMMARIZATION_LLM_ID = os.getenv('SUMMARIZATION_LLM_ID')  # Optional
+SUMMARIZATION_PROMPT_TEMPLATE = os.getenv('SUMMARIZATION_PROMPT_TEMPLATE', "Please summarize the following conversation chunk concisely: {text}")
+VECTOR_STORE_TABLE_NAME = os.getenv('VECTOR_STORE_TABLE_NAME', 'llama_pg_vector_store')
+MEMORY_EMBED_MODEL = EMBEDDING_MODEL_ID
+MEMORY_CHUNK_OVERLAP = int(os.getenv('MEMORY_CHUNK_OVERLAP', '20'))
+
 # Typing Simulation Configuration
 MIN_TYPING_SPEED = int(os.getenv('MIN_TYPING_SPEED', '10'))  # characters per second
 MAX_TYPING_SPEED = int(os.getenv('MAX_TYPING_SPEED', '30'))  # characters per second
