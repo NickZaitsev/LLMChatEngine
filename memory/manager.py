@@ -9,7 +9,7 @@ model, and summarization model.
 from typing import List, Any, Dict
 from llama_index.core.schema import TextNode
 from core.abstractions import VectorStore, EmbeddingModel, SummarizationModel
-from storage.interfaces import MessageRepo
+from storage.interfaces import MessageRepo, ConversationRepo
 
 class LlamaIndexMemoryManager:
     """
@@ -22,6 +22,7 @@ class LlamaIndexMemoryManager:
         embedding_model: EmbeddingModel,
         summarization_model: SummarizationModel,
         message_repo: MessageRepo,
+        conversation_repo: ConversationRepo,
     ):
         """
         Initialize the LlamaIndexMemoryManager.
@@ -31,11 +32,13 @@ class LlamaIndexMemoryManager:
             embedding_model: The embedding model to use.
             summarization_model: The summarization model to use.
             message_repo: The message repository.
+            conversation_repo: The conversation repository.
         """
         self._vector_store = vector_store
         self._embedding_model = embedding_model
         self._summarization_model = summarization_model
         self._message_repo = message_repo
+        self._conversation_repo = conversation_repo
 
     async def add_message(self, user_id: str, message: str) -> None:
         """
@@ -66,7 +69,7 @@ class LlamaIndexMemoryManager:
             The context for the query.
         """
         query_embedding = await self._embedding_model.get_embedding(query)
-        nodes = await self._vector_store.query(query_embedding, top_k)
+        nodes = await self._vector_store.query(query_embedding, top_k, user_id)
         return "\n".join([node.get_content() for node in nodes])
 
     async def trigger_summarization(self, user_id: str, prompt_template: str) -> None:
@@ -77,7 +80,12 @@ class LlamaIndexMemoryManager:
             user_id: The ID of the user.
             prompt_template: The prompt template to use for summarization.
         """
-        messages = await self._message_repo.list_messages(user_id)
+        conversations = await self._conversation_repo.list_conversations(user_id)
+        if not conversations:
+            return
+
+        conversation_id = str(conversations[0].id)
+        messages = await self._message_repo.list_messages(conversation_id)
         text_to_summarize = "\n".join([msg.content for msg in messages])
         summary = await self._summarization_model.summarize(
             text_to_summarize, prompt_template
