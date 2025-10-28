@@ -316,6 +316,45 @@ class PostgresMessageRepo:
             # logger.info("Deleted %d messages for conversation %s", deleted_count, conversation_id)
             return deleted_count
 
+    async def get_last_user_message(self, conversation_id: str) -> Optional[Message]:
+        """
+        Get the last user message for a conversation.
+        
+        Args:
+            conversation_id: UUID string of the conversation
+            
+        Returns:
+            The last user Message object if found, None otherwise
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+        
+        async with self.session_maker() as session:
+            stmt = select(MessageModel).where(
+                and_(
+                    MessageModel.conversation_id == conversation_uuid,
+                    MessageModel.role == 'user'
+                )
+            ).order_by(desc(MessageModel.created_at)).limit(1)
+            
+            result = await session.execute(stmt)
+            message = result.scalar_one_or_none()
+            
+            if not message:
+                return None
+                
+            return Message(
+                id=message.id,
+                conversation_id=message.conversation_id,
+                role=message.role,
+                content=message.content,
+                extra_data=message.extra_data,
+                token_count=message.token_count,
+                created_at=message.created_at
+            )
+
     def estimate_tokens(self, text: str) -> int:
         """
         Estimate token count for given text.

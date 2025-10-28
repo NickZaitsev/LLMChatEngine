@@ -817,29 +817,6 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                 logger.error("Error during LM Studio model initialization: %s", e)
                 logger.warning("Bot will continue startup, but LM Studio model may not be loaded")
     
-    async def _initialize_embedding_model(self):
-            """Initialize the sentence-transformers embedding model for memory functionality"""
-            # Only initialize the sentence-transformers model when MEMORY_SUMMARIZER_MODE is 'local'
-            if MEMORY_ENABLED and self.memory_manager and MEMORY_SUMMARIZER_MODE == 'local':
-                try:
-                    logger.info("Initializing embedding model: %s", MEMORY_EMBED_MODEL)
-                        
-                    # Import the embedding module
-                    from memory.embedding import _load_model
-                        
-                    # Preload the embedding model
-                    _load_model(MEMORY_EMBED_MODEL)
-                        
-                    logger.info("✅ Embedding model %s loaded and ready", MEMORY_EMBED_MODEL)
-                except ImportError as e:
-                    logger.error("Failed to import embedding module: %s", e)
-                    logger.warning("Embedding functionality may not work properly")
-                except Exception as e:
-                    logger.error("Error during embedding model initialization: %s", e)
-                    logger.warning("Bot will continue startup, but embedding model may not be loaded")
-            elif MEMORY_ENABLED and self.memory_manager and MEMORY_SUMMARIZER_MODE != 'local':
-                logger.info("Skipping embedding model initialization - MEMORY_SUMMARIZER_MODE is not 'local'")
-    
     async def cleanup(self):
         """Cleanup resources when shutting down"""
         logger.info("Cleaning up bot resources...")
@@ -888,7 +865,6 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             await self._initialize_storage()
             await self._initialize_memory_components()
             await self._initialize_lmstudio_model()
-            await self._initialize_embedding_model()
             
             # Initialize proactive messaging if available
             if self.proactive_messaging_service:
