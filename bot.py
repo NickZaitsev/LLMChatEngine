@@ -740,7 +740,8 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                 vector_store=vector_store,
                 embedding_model=embedding_model,
                 summarization_model=summarizer,
-                message_repo=storage.messages
+                message_repo=storage.messages,
+                conversation_repo=storage.conversations
             )
             logger.info("LlamaIndexMemoryManager initialized successfully")
 

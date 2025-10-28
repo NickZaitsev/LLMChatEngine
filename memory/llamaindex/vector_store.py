@@ -10,6 +10,7 @@ for upserting, querying, and clearing vector data.
 from typing import List, Any
 import sqlalchemy
 from llama_index.vector_stores.postgres import PGVectorStore
+from llama_index.core.vector_stores import VectorStoreQuery, MetadataFilters
 from core.abstractions import VectorStore as VectorStoreAbstraction
 import config
 
@@ -42,18 +43,26 @@ class PgVectorStore(VectorStoreAbstraction):
         """
         self._store.add(nodes)
 
-    async def query(self, query_embedding: List[float], top_k: int) -> List[Any]:
+    async def query(
+        self, query_embedding: List[float], top_k: int, user_id: str
+    ) -> List[Any]:
         """
         Query the vector store for similar nodes.
 
         Args:
             query_embedding: The query embedding.
             top_k: The number of top results to return.
+            user_id: The ID of the user to filter memories for.
 
         Returns:
             A list of similar nodes.
         """
-        return self._store.query(query_embedding, top_k)
+        filters = MetadataFilters.from_dict({"user_id": user_id})
+        query_obj = VectorStoreQuery(
+            query_embedding=query_embedding, similarity_top_k=top_k, filters=filters
+        )
+        result = self._store.query(query_obj)
+        return result.nodes
 
     async def clear(self, user_id: str) -> None:
         """
