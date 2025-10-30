@@ -1002,6 +1002,9 @@ class PostgresUserRepo:
         Returns:
             User object if found, None otherwise
         """
+        if not username:
+            return None
+            
         async with self.session_maker() as session:
             stmt = select(UserModel).where(UserModel.username == username)
             result = await session.execute(stmt)

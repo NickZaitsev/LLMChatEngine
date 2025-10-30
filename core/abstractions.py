@@ -89,13 +89,14 @@ class SummarizationModel(ABC):
     """
 
     @abstractmethod
-    async def summarize(self, text: str, prompt_template: str) -> str:
+    async def summarize(self, text: str, prompt_template: str, user_id: Optional[str] = None) -> str:
         """
         Summarize a piece of text.
 
         Args:
             text: The text to summarize.
             prompt_template: The prompt template to use for summarization.
+            user_id: The optional ID of the user.
 
         Returns:
             The summarized text.

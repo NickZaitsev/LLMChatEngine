@@ -5,6 +5,7 @@ This module provides the `LlamaIndexSummarizer` class, which implements the
 `SummarizationModel` abstraction using the `AIHandler` to generate summaries.
 """
 
+from typing import Optional
 from core.abstractions import SummarizationModel as SummarizationModelAbstraction
 from ai_handler import AIHandler
 
@@ -22,16 +23,18 @@ class LlamaIndexSummarizer(SummarizationModelAbstraction):
         """
         self._ai_handler = ai_handler
 
-    async def summarize(self, text: str, prompt_template: str) -> str:
+    async def summarize(self, text: str, prompt_template: str, user_id: Optional[str] = None) -> str:
         """
         Summarize a piece of text.
 
         Args:
             text: The text to summarize.
             prompt_template: The prompt template to use for summarization.
+            user_id: The optional ID of the user.
 
         Returns:
             The summarized text.
         """
         prompt = prompt_template.format(text=text)
-        return await self._ai_handler.get_response(prompt)
+        # Use direct AI request without conversation context for summarization
+        return await self._ai_handler._make_ai_request([{"role": "user", "content": prompt}])

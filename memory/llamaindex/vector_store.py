@@ -11,6 +11,7 @@ from typing import List, Any
 import sqlalchemy
 from llama_index.vector_stores.postgres import PGVectorStore
 from llama_index.core.vector_stores import VectorStoreQuery, MetadataFilters
+from sqlalchemy.engine.url import make_url
 from core.abstractions import VectorStore as VectorStoreAbstraction
 import config
 
@@ -28,8 +29,15 @@ class PgVectorStore(VectorStoreAbstraction):
             table_name: The name of the table to use for the vector store.
             embed_dim: The embedding dimension.
         """
+        url = make_url(db_url)
+        
+        # PGVectorStore requires separate connection parameters, so we parse them from the URL
         self._store = PGVectorStore.from_params(
-            database=db_url,
+            host=url.host,
+            port=str(url.port),
+            database=url.database,
+            user=url.username,
+            password=url.password,
             table_name=table_name,
             embed_dim=embed_dim,
         )
@@ -57,12 +65,22 @@ class PgVectorStore(VectorStoreAbstraction):
         Returns:
             A list of similar nodes.
         """
-        filters = MetadataFilters.from_dict({"user_id": user_id})
-        query_obj = VectorStoreQuery(
-            query_embedding=query_embedding, similarity_top_k=top_k, filters=filters
-        )
-        result = self._store.query(query_obj)
-        return result.nodes
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Vector store query: user_id={user_id}, top_k={top_k}, embedding_length={len(query_embedding)}")
+        try:
+            filters = MetadataFilters.from_dict({"user_id": user_id})
+            logger.debug(f"Created filters: {filters}")
+            query_obj = VectorStoreQuery(
+                query_embedding=query_embedding, similarity_top_k=top_k, filters=filters
+            )
+            logger.debug(f"Created query object: similarity_top_k={query_obj.similarity_top_k}")
+            result = self._store.query(query_obj)
+            logger.debug(f"Query result: {len(result.nodes)} nodes returned")
+            return result.nodes
+        except Exception as e:
+            logger.error(f"Error in vector store query: {e}", exc_info=True)
+            raise
 
     async def clear(self, user_id: str) -> None:
         """

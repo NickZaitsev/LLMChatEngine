@@ -185,9 +185,15 @@ class AIHandler:
         self.prompt_assembler = prompt_assembler
         logger.info("Prompt assembler has been set for AIHandler.")
 
-    async def get_response(self, prompt: str) -> str:
+    async def get_response(self, prompt: str, user_id: str = None) -> str:
         """Get a direct response from the LLM for a given prompt."""
-        messages = [{"role": "user", "content": prompt}]
+        if self.prompt_assembler and user_id:
+            messages = await self.prompt_assembler.build_prompt(
+                conversation_id=user_id
+            )
+            messages.append({"role": "user", "content": prompt})
+        else:
+            messages = [{"role": "user", "content": prompt}]
         return await self._make_ai_request(messages)
 
     async def generate_response(self, user_message: str, conversation_history: List[Dict], conversation_id: str = None, role: str = "user") -> str:

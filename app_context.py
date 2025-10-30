@@ -108,7 +108,9 @@ class AppContext:
                     vector_store=vector_store,
                     embedding_model=embedding_model,
                     summarization_model=summarization_model,
-                    message_repo=self.conversation_manager.storage.messages
+                    message_repo=self.conversation_manager.storage.messages,
+                    conversation_repo=self.conversation_manager.storage.conversations,
+                    user_repo=self.conversation_manager.storage.users
                 )
                 logger.info("LlamaIndexMemoryManager initialized.")
             else:
@@ -130,6 +132,8 @@ class AppContext:
             self.prompt_assembler = PromptAssembler(
                 message_repo=self.conversation_manager.storage.messages,
                 memory_manager=self.memory_manager,
+                conversation_repo=self.conversation_manager.storage.conversations,
+                user_repo=self.conversation_manager.storage.users,
                 persona_repo=self.conversation_manager.storage.personas,
                 config=prompt_config
             )

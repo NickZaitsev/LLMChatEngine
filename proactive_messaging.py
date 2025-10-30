@@ -184,36 +184,26 @@ class ProactiveMessagingService:
             Dictionary of user states keyed by user ID
         """
         try:
-            # Get all keys matching the pattern for user states only
-            # User state keys have exactly 3 segments: "proactive_messaging:user:12345"
-            # Task keys have 5 segments: "proactive_messaging:user:12345:tasks:RegularReachout"
             pattern = "proactive_messaging:user:*"
             all_keys = self.redis_client.keys(pattern)
             
-            # Filter to only include user state keys (not task keys)
-            keys = []
-            for key in all_keys:
-                key_segments = key.decode('utf-8').split(':')
-                # Only include keys with exactly 3 segments (user state keys)
-                if len(key_segments) == 3:
-                    keys.append(key)
-                else:
-                    logger.debug(f"Skipping non-user-state key: {key}")
-            
             user_states = {}
-            for key in keys:
+            for key in all_keys:
                 try:
-                    # Log the key being processed for debugging
-                    logger.debug(f"Processing Redis key: {key}")
-                    
-                    # Check if this is a task key (contains ':tasks:' segment)
                     key_str = key.decode('utf-8')
-                    if ':tasks:' in key_str:
-                        logger.debug(f"Skipping task key: {key}")
-                        continue
+                    key_segments = key_str.split(':')
                     
-                    # Extract user ID from key
-                    user_id = int(key_str.split(':')[-1])
+                    # Ensure this is a user state key (e.g., "proactive_messaging:user:12345")
+                    if len(key_segments) != 3:
+                        logger.debug(f"Skipping non-user-state key: {key_str}")
+                        continue
+                        
+                    user_id_str = key_segments[-1]
+                    if not user_id_str.isdigit():
+                        logger.warning(f"Skipping malformed user key in Redis: {key_str}")
+                        continue
+                        
+                    user_id = int(user_id_str)
                     state_json = self.redis_client.get(key)
                     if state_json:
                         state = json.loads(state_json)
@@ -221,16 +211,13 @@ class ProactiveMessagingService:
                         if 'last_proactive_message' in state and state['last_proactive_message']:
                             try:
                                 state['last_proactive_message'] = datetime.fromisoformat(state['last_proactive_message'])
-                            except ValueError:
-                                # If parsing fails, remove the field
+                            except (ValueError, TypeError):
                                 state['last_proactive_message'] = None
                         if 'scheduled_time' in state and state['scheduled_time']:
                             try:
                                 state['scheduled_time'] = datetime.fromisoformat(state['scheduled_time'])
-                            except ValueError:
-                                # If parsing fails, remove the field
+                            except (ValueError, TypeError):
                                 state['scheduled_time'] = None
-                        # scheduled_task_id is already a string, no conversion needed
                         user_states[user_id] = state
                 except Exception as e:
                     logger.error(f"Error processing key {key}: {e}")
@@ -790,14 +777,14 @@ async def manage_proactive_messages_async(task):
     """
     task_id = task.request.id
     logger.info(f"Running async logic for manage_proactive_messages [{task_id}]")
-    
+
     try:
         user_states = proactive_messaging_service._get_all_user_states()
         now = datetime.now()
-        
+
         for user_id, state in user_states.items():
             scheduled_time = state.get('scheduled_time')
-            
+
             if isinstance(scheduled_time, str):
                 try:
                     scheduled_time = datetime.fromisoformat(scheduled_time)
@@ -806,17 +793,15 @@ async def manage_proactive_messages_async(task):
                     continue
 
             if scheduled_time and scheduled_time < now:
-                logger.info(f"User {user_id} is due for a proactive message. Triggering.")
+                logger.info(f"User {user_id} is due for a proactive message. Triggering via service.")
 
-                # Prevent re-triggering by updating scheduled_time
-                state['scheduled_time'] = (now + timedelta(days=365)).isoformat()
-                proactive_messaging_service._set_user_state(user_id, state)
+                # Use the proactive messaging service to handle scheduling properly
+                # This ensures proper task management and prevents duplicates
+                proactive_messaging_service.schedule_proactive_message(
+                    user_id,
+                    message_type="RegularReachout"
+                )
 
-                # Revoke any existing tasks for this user before scheduling new one
-                proactive_messaging_service._revoke_user_tasks(user_id, state, "RegularReachout")
-
-                send_proactive_message.apply_async(args=[user_id])
-                
     except Exception as e:
         logger.error(f"Async error in manage_proactive_messages_async [{task_id}]: {e}")
 
@@ -862,12 +847,23 @@ async def create_memory_async(task):
         user_states = proactive_messaging_service._get_all_user_states()
         
         for user_id, state in user_states.items():
-            # Trigger summarization for each active user
-            await app_context.memory_manager.trigger_summarization(
-                user_id=str(user_id),
-                prompt_template=SUMMARIZATION_PROMPT_TEMPLATE
-            )
-            logger.info(f"Triggered memory summarization for user {user_id}")
+            # Skip if user_id is None or invalid
+            if user_id is None:
+                logger.warning("Skipping memory summarization for user with None ID")
+                continue
+
+            try:
+                # Convert user_id to string if it's not already
+                user_id_str = str(user_id)
+                # Trigger summarization for each active user
+                await app_context.memory_manager.trigger_summarization(
+                    user_id=user_id_str,
+                    prompt_template=SUMMARIZATION_PROMPT_TEMPLATE
+                )
+                logger.info(f"Triggered memory summarization for user {user_id_str}")
+            except (ValueError, TypeError) as e:
+                logger.error(f"Failed to process user {user_id}: {e}")
+                continue
             
     except Exception as e:
         logger.error(f"Async error in create_memory_async [{task_id}]: {e}")

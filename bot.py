@@ -741,7 +741,8 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                 embedding_model=embedding_model,
                 summarization_model=summarizer,
                 message_repo=storage.messages,
-                conversation_repo=storage.conversations
+                conversation_repo=storage.conversations,
+                user_repo=storage.users
             )
             logger.info("LlamaIndexMemoryManager initialized successfully")
 
@@ -756,6 +757,8 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             self.prompt_assembler = PromptAssembler(
                 message_repo=storage.messages,
                 memory_manager=self.memory_manager,
+                conversation_repo=storage.conversations,
+                user_repo=storage.users,
                 persona_repo=storage.personas,
                 config=prompt_config
             )
