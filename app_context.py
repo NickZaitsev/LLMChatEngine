@@ -16,11 +16,12 @@ from config import (
     DATABASE_URL, USE_PGVECTOR, PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
     PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE, MESSAGE_QUEUE_REDIS_URL,
     TELEGRAM_TOKEN, MEMORY_ENABLED, SUMMARIZATION_LLM_ID,
-    VECTOR_STORE_TABLE_NAME, MEMORY_EMBED_MODEL_PATH, MEMORY_EMBED_DIM
+    VECTOR_STORE_TABLE_NAME, MEMORY_EMBED_MODEL_PATH, MEMORY_EMBED_DIM,
+    MEMORY_EMBEDDING_PROVIDER, LMSTUDIO_BASE_URL
 )
 from memory.manager import LlamaIndexMemoryManager
 from memory.llamaindex.vector_store import PgVectorStore
-from memory.llamaindex.embedding import HuggingFaceEmbeddingModel
+from memory.llamaindex.embedding import HuggingFaceEmbeddingModel, LMStudioEmbeddingModel
 from memory.llamaindex.summarizer import LlamaIndexSummarizer
 from message_manager import MessageQueueManager, TypingIndicatorManager
 from prompt.assembler import PromptAssembler
@@ -84,11 +85,21 @@ class AppContext:
         # 3. Initialize Memory Manager (LlamaIndex stack)
         try:
             if MEMORY_ENABLED:
-                embedding_model = HuggingFaceEmbeddingModel(
-                    model_path=MEMORY_EMBED_MODEL_PATH
-                )
-                
-                logger.info(f"Using embedding dimension: {MEMORY_EMBED_DIM} for {MEMORY_EMBED_MODEL_PATH}")
+                if MEMORY_EMBEDDING_PROVIDER == 'huggingface':
+                    embedding_model = HuggingFaceEmbeddingModel(
+                        model_path=MEMORY_EMBED_MODEL_PATH
+                    )
+                    logger.info(f"Using HuggingFace embedding model: {MEMORY_EMBED_MODEL_PATH}")
+                elif MEMORY_EMBEDDING_PROVIDER == 'lmstudio':
+                    embedding_model = LMStudioEmbeddingModel(
+                        base_url=LMSTUDIO_BASE_URL,
+                        local_path=MEMORY_EMBED_MODEL_PATH  # Pass local_path for consistency
+                    )
+                    logger.info(f"Using LMStudio embedding model at: {LMSTUDIO_BASE_URL}")
+                else:
+                    raise ValueError(f"Unsupported embedding provider: {MEMORY_EMBEDDING_PROVIDER}")
+
+                logger.info(f"Using embedding dimension: {MEMORY_EMBED_DIM}")
 
                 vector_store = PgVectorStore(
                     db_url=DATABASE_URL,

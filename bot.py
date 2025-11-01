@@ -43,7 +43,7 @@ if MEMORY_ENABLED:
     try:
         from memory.manager import LlamaIndexMemoryManager
         from memory.llamaindex.vector_store import PgVectorStore
-        from memory.llamaindex.embedding import LMStudioEmbeddingModel
+        from memory.llamaindex.embedding import HuggingFaceEmbeddingModel
         from memory.llamaindex.summarizer import LlamaIndexSummarizer
         from prompt.assembler import PromptAssembler
         MEMORY_IMPORTS_AVAILABLE = True
@@ -730,9 +730,8 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             
             # 2. Initialize EmbeddingModel
 
-            embedding_model = LMStudioEmbeddingModel(
-                base_url=LMSTUDIO_BASE_URL,
-                local_path=MEMORY_EMBED_MODEL_PATH
+            embedding_model = HuggingFaceEmbeddingModel(
+                model_path=MEMORY_EMBED_MODEL_PATH
             )
 
             # 3. Initialize SummarizationModel
