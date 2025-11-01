@@ -231,61 +231,56 @@ class PromptAssembler:
             messages.append(system_message)
             token_counts["system_tokens"] += system_tokens
             logger.debug(f"Added system template: {system_tokens} tokens")
-        # 2. Add persona configuration if available
+
+        # 2. Get conversation and add summary if it exists
+        conversation = await self.conversation_repo.get_conversation(conversation_id)
+        if conversation and conversation.summary:
+            summary_message = {"role": "system", "content": f"This is a summary of the conversation so far:\n{conversation.summary}"}
+            summary_tokens = self.token_counter.count_tokens(summary_message["content"])
+            messages.append(summary_message)
+            token_counts["system_tokens"] += summary_tokens
+            logger.debug(f"Added conversation summary: {summary_tokens} tokens")
+
+        # 3. Add persona configuration if available
         try:
-            if self.persona_repo:
-                # Get conversation to find persona_id
-                # Note: This would require extending the interface or getting conversation details
-                # For now, we'll skip persona integration and log a warning
-                logger.debug("Persona integration skipped - would need conversation details")
+            if self.persona_repo and conversation:
+                # Persona logic here if needed in future
+                pass
         except Exception as e:
             logger.warning(f"Failed to load persona configuration: {e}")
-        
-        # 3. Calculate memory token budget
+
+        # 4. Calculate memory token budget
         memory_budget = int(history_budget * self.memory_token_budget_ratio)
         remaining_history_budget = history_budget - memory_budget
 
-        # 4. Retrieve and add relevant memories
+        # 5. Retrieve and add relevant memories
         try:
-            logger.debug(f"Memory retrieval: max_memory_items={self.max_memory_items}, type={type(self.max_memory_items)}")
-            # Get the last user message to use as a query
             last_user_message = await self.message_repo.get_last_user_message(conversation_id)
-            logger.debug(f"Last user message: {last_user_message.content if last_user_message else 'None'}")
-            if last_user_message:
-                # Get conversation to find the user ID
-                conversation = await self.conversation_repo.get_conversation(conversation_id)
-                logger.debug(f"Conversation: {conversation.id if conversation else 'None'}")
-                if conversation:
-                    # Get user to find the username (Telegram ID)
-                    user = await self.user_repo.get_user(str(conversation.user_id))
-                    logger.debug(f"User: {user.username if user else 'None'}")
-                    if user:
-                        logger.debug(f"Calling memory_manager.get_context with user_id={user.username}, query length={len(last_user_message.content)}, top_k={self.max_memory_items}")
-                        context = await self.memory_manager.get_context(
-                            user_id=user.username,  # Pass the Telegram ID as user_id
-                            query=last_user_message.content,
-                            top_k=self.max_memory_items
-                        )
-                        logger.debug(f"Memory context retrieved: length={len(context) if context else 0}")
-                        if context:
-                            # The new get_context returns a string, not a list of records
-                            memory_content = f"### Memory Context\n{context}"
-                            memory_message = {"role": "system", "content": memory_content}
-                            memory_message_tokens = self.token_counter.count_tokens(memory_content)
-
-                            if memory_message_tokens <= memory_budget:
-                                messages.append(memory_message)
-                                token_counts["memory_tokens"] = memory_message_tokens
-                                remaining_history_budget -= memory_message_tokens
-                                logger.debug(f"Added memories: {memory_message_tokens} tokens")
+            if last_user_message and conversation:
+                user = await self.user_repo.get_user(str(conversation.user_id))
+                if user:
+                    context = await self.memory_manager.get_context(
+                        user_id=user.username,
+                        query=last_user_message.content,
+                        top_k=self.max_memory_items
+                    )
+                    if context:
+                        memory_content = f"### Memory Context\n{context}"
+                        memory_message = {"role": "system", "content": memory_content}
+                        memory_message_tokens = self.token_counter.count_tokens(memory_content)
+                        if memory_message_tokens <= memory_budget:
+                            messages.append(memory_message)
+                            token_counts["memory_tokens"] = memory_message_tokens
+                            remaining_history_budget -= memory_message_tokens
+                            logger.info(f"Added memories to prompt: {memory_message_tokens} tokens")
         except Exception as e:
-            logger.warning(f"Failed to retrieve memories: {e}")
-            logger.debug(f"Memory retrieval exception details: {type(e).__name__}: {e}", exc_info=True)
-        
-        # 6. Fetch recent conversation history
+            logger.warning(f"Failed to retrieve memories: {e}", exc_info=True)
+
+        # 6. Fetch active conversation history
         try:
-            recent_messages = await self.message_repo.fetch_recent_messages(
-                conversation_id, remaining_history_budget
+            last_summarized_id = conversation.last_summarized_message_id if conversation else None
+            recent_messages = await self.message_repo.fetch_active_messages(
+                conversation_id, remaining_history_budget, last_summarized_id
             )
             
             # Use all recent messages as-is
@@ -332,6 +327,17 @@ class PromptAssembler:
             logger.debug(f"Included memory IDs: {included_memory_ids}")
         
         return messages, metadata
+
+    async def get_active_message_count(self, conversation_id: str) -> int:
+        """
+        Get the number of active (unsummarized) messages in a conversation.
+        """
+        conversation = await self.conversation_repo.get_conversation(conversation_id)
+        if not conversation:
+            return 0
+        return await self.message_repo.count_active_messages(
+            conversation_id, conversation.last_summarized_message_id
+        )
     
     def _extract_summary_text(self, memory_text: str) -> str:
         """

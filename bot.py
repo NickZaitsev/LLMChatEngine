@@ -8,15 +8,16 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
-                   PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED,
-                   PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
-                   PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
-                   MEMORY_EMBED_MODEL, MEMORY_SUMMARIZER_MODE, MEMORY_CHUNK_OVERLAP, VECTOR_STORE_TABLE_NAME,
-                   MESSAGE_PREVIEW_LENGTH,
-                   POLLING_INTERVAL,
-                   MESSAGE_QUEUE_REDIS_URL,
-                   MESSAGE_QUEUE_MAX_RETRIES,
-                   MESSAGE_QUEUE_LOCK_TIMEOUT)
+                    PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED,
+                    PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
+                    PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
+                    MEMORY_EMBED_MODEL, VECTOR_STORE_TABLE_NAME,
+                    MESSAGE_PREVIEW_LENGTH,
+                    POLLING_INTERVAL,
+                    MESSAGE_QUEUE_REDIS_URL,
+                    MESSAGE_QUEUE_MAX_RETRIES,
+                    MESSAGE_QUEUE_LOCK_TIMEOUT,
+                    LMSTUDIO_BASE_URL)
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
 from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response, MessageQueueManager, MessageDispatcher
@@ -42,7 +43,7 @@ if MEMORY_ENABLED:
     try:
         from memory.manager import LlamaIndexMemoryManager
         from memory.llamaindex.vector_store import PgVectorStore
-        from memory.llamaindex.embedding import HuggingFaceEmbeddingModel
+        from memory.llamaindex.embedding import LMStudioEmbeddingModel
         from memory.llamaindex.summarizer import LlamaIndexSummarizer
         from prompt.assembler import PromptAssembler
         MEMORY_IMPORTS_AVAILABLE = True
@@ -728,7 +729,11 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             )
             
             # 2. Initialize EmbeddingModel
-            embedding_model = HuggingFaceEmbeddingModel(model_name=MEMORY_EMBED_MODEL)
+
+            embedding_model = LMStudioEmbeddingModel(
+                model_name=MEMORY_EMBED_MODEL,
+                base_url=LMSTUDIO_BASE_URL
+            )
 
             # 3. Initialize SummarizationModel
             summarizer = LlamaIndexSummarizer(

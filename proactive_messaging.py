@@ -36,7 +36,6 @@ from config import (
     PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES,
     PROACTIVE_MESSAGING_PROMPT,
     PROACTIVE_MESSAGING_RESTART_DELAY_MAX,
-    SUMMARIZATION_PROMPT_TEMPLATE,
 )
 
 # Import AppContext for shared services
@@ -812,58 +811,7 @@ celery_app.conf.beat_schedule = {
         'task': 'proactive_messaging.manage_proactive_messages',
         'schedule': crontab(minute='*/1'),  # Run every 1 minute
     },
-    'create-memory-task': {
-        'task': 'proactive_messaging.create_memory_task',
-        'schedule': crontab(minute='*/15'),  # Run every 15 minutes
-    },
 }
 
 # Default queue
 celery_app.conf.task_default_queue = 'proactive_messaging'
-
-
-@celery_app.task(bind=True)
-def create_memory_task(self):
-    """
-    Celery task to create memories from recent conversations.
-    """
-    task_id = self.request.id
-    logger.info(f"Starting Celery task create_memory_task [{task_id}]")
-    try:
-        asyncio.run(create_memory_async(self))
-    except Exception as e:
-        logger.error(f"Error in create_memory_task [{task_id}]: {e}")
-
-
-async def create_memory_async(task):
-    """
-    Async implementation of the memory creation logic.
-    """
-    task_id = task.request.id
-    logger.info(f"Running async logic for create_memory_task [{task_id}]")
-    
-    try:
-        app_context = await get_app_context()
-        user_states = proactive_messaging_service._get_all_user_states()
-        
-        for user_id, state in user_states.items():
-            # Skip if user_id is None or invalid
-            if user_id is None:
-                logger.warning("Skipping memory summarization for user with None ID")
-                continue
-
-            try:
-                # Convert user_id to string if it's not already
-                user_id_str = str(user_id)
-                # Trigger summarization for each active user
-                await app_context.memory_manager.trigger_summarization(
-                    user_id=user_id_str,
-                    prompt_template=SUMMARIZATION_PROMPT_TEMPLATE
-                )
-                logger.info(f"Triggered memory summarization for user {user_id_str}")
-            except (ValueError, TypeError) as e:
-                logger.error(f"Failed to process user {user_id}: {e}")
-                continue
-            
-    except Exception as e:
-        logger.error(f"Async error in create_memory_async [{task_id}]: {e}")

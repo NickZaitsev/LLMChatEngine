@@ -166,6 +166,17 @@ class Conversation(Base):
         default=dict,
         doc="Additional conversation data stored as JSON"
     )
+    summary: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="The latest summary of the conversation"
+    )
+    last_summarized_message_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey('messages.id', ondelete='SET NULL'),
+        nullable=True,
+        doc="ID of the last message included in the summary"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -177,10 +188,11 @@ class Conversation(Base):
     user: Mapped["User"] = relationship("User", back_populates="conversations")
     persona: Mapped["Persona"] = relationship("Persona", back_populates="conversations")
     messages: Mapped[List["Message"]] = relationship(
-        "Message", 
+        "Message",
         back_populates="conversation",
         cascade="all, delete-orphan",
-        order_by="Message.created_at"
+        order_by="Message.created_at",
+        foreign_keys="[Message.conversation_id]"
     )
     memories: Mapped[List["Memory"]] = relationship(
         "Memory", 
@@ -188,6 +200,11 @@ class Conversation(Base):
         cascade="all, delete-orphan"
     )
     
+    last_summarized_message: Mapped[Optional["Message"]] = relationship(
+        "Message",
+        foreign_keys=[last_summarized_message_id]
+    )
+
     def __repr__(self) -> str:
         return f"<Conversation(id={self.id}, title='{self.title}', user_id={self.user_id})>"
 
@@ -249,7 +266,11 @@ class Message(Base):
     )
     
     # Relationships
-    conversation: Mapped["Conversation"] = relationship("Conversation", back_populates="messages")
+    conversation: Mapped["Conversation"] = relationship(
+        "Conversation",
+        back_populates="messages",
+        foreign_keys=[conversation_id]
+    )
     
     # Indexes for efficient querying
     __table_args__ = (
