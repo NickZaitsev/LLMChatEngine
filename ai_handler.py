@@ -289,10 +289,23 @@ class AIHandler:
                         logger.info("Success on retry attempt %d/%d", attempt + 1, self.max_retries)
                     
                     logger.info("Response received (%d chars)", len(response))
+
+                    # Trigger summarization if needed
+                    try:
+                        from config import MAX_ACTIVE_MESSAGES
+                        from memory.tasks import create_conversation_summary
+                        
+                        active_messages_count = await self.prompt_assembler.get_active_message_count(conversation_id)
+                        if active_messages_count > MAX_ACTIVE_MESSAGES:
+                            logger.info(f"Active messages ({active_messages_count}) exceed threshold ({MAX_ACTIVE_MESSAGES}). Triggering summarization.")
+                            create_conversation_summary.delay(conversation_id)
+                    except Exception as e:
+                        logger.error(f"Failed to trigger summarization: {e}")
+
                     return response
                     
                 except asyncio.TimeoutError:
-                    logger.warning("Request timed out on attempt %d/%d after %.1f seconds", 
+                    logger.warning("Request timed out on attempt %d/%d after %.1f seconds",
                                  attempt + 1, self.max_retries, self.request_timeout)
                     
                     if attempt < self.max_retries - 1:

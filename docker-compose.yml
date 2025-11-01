@@ -6,13 +6,7 @@ services:
     restart: unless-stopped
     environment:
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
-      - AZURE_API_KEY=${AZURE_API_KEY}
-      - AZURE_MODEL=${AZURE_MODEL:-deepseek/DeepSeek-V3-0324}
-      - BOT_NAME=${BOT_NAME:-Luna}
       - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:-ai_bot_pass}@postgres:5432/ai_bot
-      - PROVIDER=${PROVIDER:-lmstudio}
-      - LMSTUDIO_MODEL=${LMSTUDIO_MODEL:-openai/gpt-oss-20b}
-      - LMSTUDIO_BASE_URL=http://host-machine:1234/v1
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,12 +72,6 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:-ai_bot_pass}@postgres:5432/ai_bot
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
-      - AZURE_API_KEY=${AZURE_API_KEY}
-      - AZURE_MODEL=${AZURE_MODEL:-deepseek/DeepSeek-V3-0324}
-      - BOT_NAME=${BOT_NAME:-Luna}
-      - PROVIDER=${PROVIDER:-lmstudio}
-      - LMSTUDIO_MODEL=${LMSTUDIO_MODEL:-openai/gpt-oss-20b}
-      - LMSTUDIO_BASE_URL=http://host-machine:1234/v1
     depends_on:
       - redis
       - postgres
@@ -104,18 +92,31 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:-ai_bot_pass}@postgres:5432/ai_bot
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
-      - AZURE_API_KEY=${AZURE_API_KEY}
-      - AZURE_MODEL=${AZURE_MODEL:-deepseek/DeepSeek-V3-0324}
-      - BOT_NAME=${BOT_NAME:-Luna}
-      - PROVIDER=${PROVIDER:-lmstudio}
-      - LMSTUDIO_MODEL=${LMSTUDIO_MODEL:-openai/gpt-oss-20b}
-      - LMSTUDIO_BASE_URL=http://host-machine:1234/v1
     depends_on:
       - redis
       - postgres
     volumes:
       - .:/app
       - celery_beat_schedule:/app/celerybeat-schedule
+    networks:
+      - backup_network
+    extra_hosts:
+      - "host-machine:host-gateway"
+
+  celery-memory:
+    build: .
+    container_name: ai-girlfriend-celery-memory
+    restart: unless-stopped
+    command: celery -A memory.tasks:celery_app worker --loglevel=info -Q memory_tasks
+    environment:
+      - PYTHONPATH=/app
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:-ai_bot_pass}@postgres:5432/ai_bot
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - .:/app
     networks:
       - backup_network
     extra_hosts:

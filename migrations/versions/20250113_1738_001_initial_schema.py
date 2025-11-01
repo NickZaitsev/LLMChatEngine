@@ -29,7 +29,7 @@ def upgrade() -> None:
     
     # Enable pgvector extension if available
     if PGVECTOR_AVAILABLE:
-        op.execute('CREATE EXTENSION IF NOT EXISTS pgvector')
+        op.execute('CREATE EXTENSION IF NOT EXISTS vector')
     
     # Create users table
     op.create_table('users',

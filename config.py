@@ -26,6 +26,7 @@ DEFAULT_BOT_PERSONALITY = (
     "You are romantic but not overly sexual. You respond with warmth and empathy."
 )
 
+
 # Load environment variables
 load_dotenv()
 
@@ -43,7 +44,7 @@ AZURE_ENDPOINT = os.getenv('AZURE_ENDPOINT')
 AZURE_API_KEY = os.getenv('AZURE_API_KEY')
 AZURE_MODEL = os.getenv('AZURE_MODEL')
 LMSTUDIO_MODEL = os.getenv('LMSTUDIO_MODEL', DEFAULT_LMSTUDIO_MODEL)
-LMSTUDIO_BASE_URL = os.getenv('LMSTUDIO_BASE_URL', 'http://host-machine:1234/v1')
+LMSTUDIO_BASE_URL = os.getenv('LMSTUDIO_BASE_URL', 'http://host.docker.internal:1234/v1')
 
 # LM Studio Model Loading Configuration
 LMSTUDIO_AUTO_LOAD = os.getenv('LMSTUDIO_AUTO_LOAD', 'true').lower() in ('true', '1', 'yes', 'on')
@@ -58,6 +59,9 @@ BOT_PERSONALITY = os.getenv('BOT_PERSONALITY', DEFAULT_BOT_PERSONALITY)
 # Conversation Settings - Optimized for 8000/4000 token limits
 MAX_CONVERSATION_HISTORY = int(os.getenv('MAX_CONVERSATION_HISTORY', str(DEFAULT_MAX_CONVERSATION_HISTORY)))
 TEMPERATURE = float(os.getenv('TEMPERATURE', str(DEFAULT_TEMPERATURE)))
+
+# Maximum number of active (unsummarized) messages before triggering a new summary
+MAX_ACTIVE_MESSAGES = int(os.getenv('MAX_ACTIVE_MESSAGES', '50'))
 
 # Context Management - Using full 8000 input token capacity
 MAX_CONTEXT_TOKENS = int(os.getenv('MAX_CONTEXT_TOKENS', str(DEFAULT_MAX_CONTEXT_TOKENS)))
@@ -75,13 +79,9 @@ PROMPT_REPLY_TOKEN_BUDGET = int(os.getenv('PROMPT_REPLY_TOKEN_BUDGET', str(RESER
 # LlamaIndex Configuration
 MEMORY_ENABLED = os.getenv('MEMORY_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
 MEMORY_SUMMARIZER_MODE = os.getenv('MEMORY_SUMMARIZER_MODE', 'local')
-# FIXME: Hardcoded to a known public model to prevent startup errors.
-# The value from the environment ('google/embedding-gemma-2b') may be incorrect or require authentication.
-EMBEDDING_MODEL_ID = 'BAAI/bge-small-en-v1.5'
+MEMORY_EMBED_MODEL = os.getenv('MEMORY_EMBED_MODEL', 'sentence-transformers/all-MiniLM-L6-v2')
 SUMMARIZATION_LLM_ID = os.getenv('SUMMARIZATION_LLM_ID')  # Optional
-SUMMARIZATION_PROMPT_TEMPLATE = os.getenv('SUMMARIZATION_PROMPT_TEMPLATE', "Please summarize the following conversation chunk concisely: {text}")
 VECTOR_STORE_TABLE_NAME = os.getenv('VECTOR_STORE_TABLE_NAME', 'llama_pg_vector_store')
-MEMORY_EMBED_MODEL = EMBEDDING_MODEL_ID
 MEMORY_CHUNK_OVERLAP = int(os.getenv('MEMORY_CHUNK_OVERLAP', '20'))
 
 # Typing Simulation Configuration
@@ -156,8 +156,8 @@ def _validate_config():
             warnings.warn("AZURE_API_KEY is not set for Azure provider")
         if not AZURE_MODEL:
             warnings.warn("AZURE_MODEL is not set for Azure provider")
-    
-    elif PROVIDER == 'lmstudio':
+
+    if PROVIDER == 'lmstudio':
         if not LMSTUDIO_MODEL:
             warnings.warn("LMSTUDIO_MODEL is not set for LM Studio provider")
         if not LMSTUDIO_BASE_URL:
@@ -255,6 +255,21 @@ BUFFER_LONG_MESSAGE_TIMEOUT = float(os.getenv('BUFFER_LONG_MESSAGE_TIMEOUT', '0.
 BUFFER_MAX_MESSAGES = int(os.getenv('BUFFER_MAX_MESSAGES', '8'))
 BUFFER_WORD_COUNT_THRESHOLD = int(os.getenv('BUFFER_WORD_COUNT_THRESHOLD', '30'))
 BUFFER_CLEANUP_INTERVAL = int(os.getenv('BUFFER_CLEANUP_INTERVAL', '300'))  # seconds
+
+SUMMARIZATION_PROMPT = """
+You are an AI that summarizes a conversation, but only focus on important information about the user:
+- Personal details, preferences, goals, decisions
+- Anything that could be useful for future interactions
+
+Existing summary about the user so far:
+{existing_summary}
+
+New conversation text:
+{text}
+
+Update the user-focused summary based on the new text, keeping it concise and only include relevant user details.
+"""
+
 
 # Perform validation
 _validate_config()

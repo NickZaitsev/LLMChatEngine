@@ -15,12 +15,12 @@ from ai_handler import AIHandler
 from config import (
     DATABASE_URL, USE_PGVECTOR, PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
     PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE, MESSAGE_QUEUE_REDIS_URL,
-    TELEGRAM_TOKEN, MEMORY_ENABLED, EMBEDDING_MODEL_ID, SUMMARIZATION_LLM_ID,
-    SUMMARIZATION_PROMPT_TEMPLATE, VECTOR_STORE_TABLE_NAME
+    TELEGRAM_TOKEN, MEMORY_ENABLED, MEMORY_EMBED_MODEL, SUMMARIZATION_LLM_ID,
+    VECTOR_STORE_TABLE_NAME, LMSTUDIO_BASE_URL
 )
 from memory.manager import LlamaIndexMemoryManager
 from memory.llamaindex.vector_store import PgVectorStore
-from memory.llamaindex.embedding import HuggingFaceEmbeddingModel
+from memory.llamaindex.embedding import LMStudioEmbeddingModel
 from memory.llamaindex.summarizer import LlamaIndexSummarizer
 from message_manager import MessageQueueManager, TypingIndicatorManager
 from prompt.assembler import PromptAssembler
@@ -84,17 +84,14 @@ class AppContext:
         # 3. Initialize Memory Manager (LlamaIndex stack)
         try:
             if MEMORY_ENABLED:
-                embedding_model = HuggingFaceEmbeddingModel(model_name=EMBEDDING_MODEL_ID)
+                embedding_model = LMStudioEmbeddingModel(
+                    model_name=MEMORY_EMBED_MODEL,
+                    base_url=LMSTUDIO_BASE_URL
+                )
                 
-                # Dynamically get embed_dim from the model
-                embed_dim = 384  # Replace with actual dynamic retrieval if possible
-                try:
-                    # This is a placeholder for getting the dimension
-                    # In a real scenario, the model would expose this
-                    if hasattr(embedding_model._model, 'get_sentence_embedding_dimension'):
-                         embed_dim = embedding_model._model.get_sentence_embedding_dimension()
-                except Exception:
-                    logger.warning(f"Could not dynamically get embedding dimension. Falling back to {embed_dim}.")
+                # Nomic-embed-text-v1.5 has an embedding dimension of 768
+                embed_dim = 768
+                logger.info(f"Using embedding dimension: {embed_dim} for {MEMORY_EMBED_MODEL}")
 
                 vector_store = PgVectorStore(
                     db_url=DATABASE_URL,
