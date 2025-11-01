@@ -44,7 +44,8 @@ PROMPT_REPLY_TOKEN_BUDGET=500
 # LlamaIndex Configuration
 MEMORY_ENABLED=true
 MEMORY_SUMMARIZER_MODE=local # 'llm' or 'local'
-MEMORY_EMBED_MODEL_PATH="Qwen/Qwen3-Embedding-0.6B" # Path to a local HuggingFace SentenceTransformer model
+MEMORY_EMBEDDING_PROVIDER=huggingface # 'huggingface' or 'lmstudio'
+MEMORY_EMBED_MODEL_PATH="/app/Qwen3-Embedding-0.6B/" # Path to a local HuggingFace SentenceTransformer model
 MEMORY_EMBED_DIM=1024 # Embedding dimension for the model
 SUMMARIZATION_LLM_ID="optional-llm-id" # Optional, for 'llm' summarizer mode
 VECTOR_STORE_TABLE_NAME="llama_pg_vector_store"

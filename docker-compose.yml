@@ -14,7 +14,8 @@ services:
       - backup_network
     extra_hosts:
       - "host-machine:host-gateway"
-
+    volumes:
+      - ./models/Qwen3-Embedding-0.6B:/models/Qwen3-Embedding-0.6B
   postgres:
     image: pgvector/pgvector:pg15
     container_name: ai-girlfriend-postgres
@@ -118,6 +119,7 @@ services:
       - postgres
     volumes:
       - .:/app
+      - ./models/Qwen3-Embedding-0.6B:/models/Qwen3-Embedding-0.6B
     networks:
       - backup_network
     extra_hosts:
