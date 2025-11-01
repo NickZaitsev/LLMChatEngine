@@ -1,5 +1,6 @@
 # Exclude large model files and unnecessary files from Docker build context
 embeddinggemma-300m/
+Qwen3-Embedding-0.6B/
 *.pyc
 __pycache__/
 *.pyo

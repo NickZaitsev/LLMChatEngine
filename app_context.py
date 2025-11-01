@@ -15,12 +15,12 @@ from ai_handler import AIHandler
 from config import (
     DATABASE_URL, USE_PGVECTOR, PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
     PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE, MESSAGE_QUEUE_REDIS_URL,
-    TELEGRAM_TOKEN, MEMORY_ENABLED, MEMORY_EMBED_MODEL, SUMMARIZATION_LLM_ID,
-    VECTOR_STORE_TABLE_NAME, LMSTUDIO_BASE_URL
+    TELEGRAM_TOKEN, MEMORY_ENABLED, SUMMARIZATION_LLM_ID,
+    VECTOR_STORE_TABLE_NAME, MEMORY_EMBED_MODEL_PATH, MEMORY_EMBED_DIM
 )
 from memory.manager import LlamaIndexMemoryManager
 from memory.llamaindex.vector_store import PgVectorStore
-from memory.llamaindex.embedding import LMStudioEmbeddingModel
+from memory.llamaindex.embedding import HuggingFaceEmbeddingModel
 from memory.llamaindex.summarizer import LlamaIndexSummarizer
 from message_manager import MessageQueueManager, TypingIndicatorManager
 from prompt.assembler import PromptAssembler
@@ -84,19 +84,16 @@ class AppContext:
         # 3. Initialize Memory Manager (LlamaIndex stack)
         try:
             if MEMORY_ENABLED:
-                embedding_model = LMStudioEmbeddingModel(
-                    model_name=MEMORY_EMBED_MODEL,
-                    base_url=LMSTUDIO_BASE_URL
+                embedding_model = HuggingFaceEmbeddingModel(
+                    model_path=MEMORY_EMBED_MODEL_PATH
                 )
                 
-                # Nomic-embed-text-v1.5 has an embedding dimension of 768
-                embed_dim = 768
-                logger.info(f"Using embedding dimension: {embed_dim} for {MEMORY_EMBED_MODEL}")
+                logger.info(f"Using embedding dimension: {MEMORY_EMBED_DIM} for {MEMORY_EMBED_MODEL_PATH}")
 
                 vector_store = PgVectorStore(
                     db_url=DATABASE_URL,
                     table_name=VECTOR_STORE_TABLE_NAME,
-                    embed_dim=embed_dim
+                    embed_dim=MEMORY_EMBED_DIM
                 )
 
                 summarization_model = LlamaIndexSummarizer(ai_handler=self.ai_handler)
