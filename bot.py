@@ -11,7 +11,7 @@ from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                     PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED,
                     PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
                     PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
-                    MEMORY_EMBED_MODEL, VECTOR_STORE_TABLE_NAME,
+                    MEMORY_EMBED_MODEL_PATH, VECTOR_STORE_TABLE_NAME,
                     MESSAGE_PREVIEW_LENGTH,
                     POLLING_INTERVAL,
                     MESSAGE_QUEUE_REDIS_URL,
@@ -731,8 +731,8 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             # 2. Initialize EmbeddingModel
 
             embedding_model = LMStudioEmbeddingModel(
-                model_name=MEMORY_EMBED_MODEL,
-                base_url=LMSTUDIO_BASE_URL
+                base_url=LMSTUDIO_BASE_URL,
+                local_path=MEMORY_EMBED_MODEL_PATH
             )
 
             # 3. Initialize SummarizationModel

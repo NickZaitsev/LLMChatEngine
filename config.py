@@ -79,7 +79,8 @@ PROMPT_REPLY_TOKEN_BUDGET = int(os.getenv('PROMPT_REPLY_TOKEN_BUDGET', str(RESER
 # LlamaIndex Configuration
 MEMORY_ENABLED = os.getenv('MEMORY_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
 MEMORY_SUMMARIZER_MODE = os.getenv('MEMORY_SUMMARIZER_MODE', 'local')
-MEMORY_EMBED_MODEL = os.getenv('MEMORY_EMBED_MODEL', 'sentence-transformers/all-MiniLM-L6-v2')
+MEMORY_EMBED_MODEL_PATH = os.getenv('MEMORY_EMBED_MODEL_PATH', 'Qwen/Qwen3-Embedding-0.6B')
+MEMORY_EMBED_DIM = int(os.getenv('MEMORY_EMBED_DIM', '1024'))
 SUMMARIZATION_LLM_ID = os.getenv('SUMMARIZATION_LLM_ID')  # Optional
 VECTOR_STORE_TABLE_NAME = os.getenv('VECTOR_STORE_TABLE_NAME', 'llama_pg_vector_store')
 MEMORY_CHUNK_OVERLAP = int(os.getenv('MEMORY_CHUNK_OVERLAP', '20'))
@@ -178,6 +179,9 @@ def _validate_config():
     # Memory Manager validation
     if MEMORY_ENABLED and MEMORY_SUMMARIZER_MODE not in ['llm', 'local']:
         warnings.warn("MEMORY_SUMMARIZER_MODE must be 'llm' or 'local'")
+    if MEMORY_ENABLED and not MEMORY_EMBED_MODEL_PATH:
+        warnings.warn("MEMORY_ENABLED is true, but MEMORY_EMBED_MODEL_PATH is not set.")
+
 # Proactive Messaging validation
     if PROACTIVE_MESSAGING_ENABLED:
         if not PROACTIVE_MESSAGING_REDIS_URL:
