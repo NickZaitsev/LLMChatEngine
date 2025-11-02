@@ -273,8 +273,10 @@ class PromptAssembler:
                             token_counts["memory_tokens"] = memory_message_tokens
                             remaining_history_budget -= memory_message_tokens
                             logger.info(f"Added memories to prompt: {memory_message_tokens} tokens")
+        except ValueError as e:
+            logger.warning(f"Failed to retrieve memories due to a value error: {e}")
         except Exception as e:
-            logger.warning(f"Failed to retrieve memories: {e}", exc_info=True)
+            logger.warning(f"An unexpected error occurred while retrieving memories: {e}", exc_info=True)
 
         # 6. Fetch active conversation history
         try:

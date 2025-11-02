@@ -88,7 +88,7 @@ class AppContext:
             if MEMORY_ENABLED:
                 if MEMORY_EMBEDDING_PROVIDER == 'lmstudio':
                     embedding_model = LMStudioEmbeddingModel(
-                        model_path=MEMORY_EMBED_MODEL
+                        model_name=MEMORY_EMBED_MODEL
                     )
                     logger.info(f"Using lmstudio embedding model: {MEMORY_EMBED_MODEL}")
                 else:

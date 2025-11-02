@@ -5,6 +5,8 @@ import json
 from typing import Optional, Dict, List
 from urllib.parse import urljoin
 
+from config import LMSTUDIO_MAX_LOAD_WAIT
+
 logger = logging.getLogger(__name__)
 
 
@@ -93,7 +95,7 @@ class LMStudioManager:
                 lambda: requests.post(
                     f"{self.api_base}/chat/completions",
                     json=test_payload,
-                    timeout=10
+                    timeout=LMSTUDIO_MAX_LOAD_WAIT,
                 )
             )
 
