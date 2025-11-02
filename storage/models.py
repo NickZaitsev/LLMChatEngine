@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import expression
+import config
 
 # Try to import pgvector, but handle gracefully if not available
 try:
@@ -434,9 +435,9 @@ class Memory(Base):
     # Conditional embedding column based on pgvector availability
     if PGVECTOR_AVAILABLE and Vector:
         embedding: Mapped[Optional[List[float]]] = mapped_column(
-            Vector(384), 
+            Vector(config.MEMORY_EMBED_DIM),
             nullable=True,
-            doc="Vector embedding for semantic search (384 dimensions)"
+            doc=f"Vector embedding for semantic search ({config.MEMORY_EMBED_DIM} dimensions)"
         )
         
         # Create index for vector similarity search if pgvector is available

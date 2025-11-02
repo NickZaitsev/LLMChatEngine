@@ -17,10 +17,9 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 
 from memory.manager import MemoryManager, MemoryRecord
-from memory.summarizer import SummarizerOutput, MergeOutput
 from storage.interfaces import Message
 from tests.conftest import generate_uuid
-
+from config import MEMORY_EMBED_DIM
 
 @pytest.fixture
 def mock_llm_summarize():
@@ -174,7 +173,7 @@ class TestEpisodicMemoryCreation:
     ):
         """Test basic episodic memory creation."""
         # Arrange
-        mock_embed.return_value = [0.1] * 384
+        mock_embed.return_value = [0.1] * MEMORY_EMBED_DIM
         conversation_id = str(sample_conversation.id)
         
         # Act
@@ -208,7 +207,7 @@ class TestEpisodicMemoryCreation:
     ):
         """Test message chunking behavior."""
         # Arrange
-        mock_embed.return_value = [0.1] * 384
+        mock_embed.return_value = [0.1] * MEMORY_EMBED_DIM
         conversation_id = str(sample_conversation.id)
         
         # Act with small chunk size
@@ -237,7 +236,7 @@ class TestEpisodicMemoryCreation:
     ):
         """Test deduplication of existing memories."""
         # Arrange
-        mock_embed.return_value = [0.1] * 384
+        mock_embed.return_value = [0.1] * MEMORY_EMBED_DIM
         conversation_id = str(sample_conversation.id)
         
         # Act - Create memories twice
@@ -287,7 +286,7 @@ class TestSummaryRollup:
     ):
         """Test creating first summary rollup."""
         # Arrange
-        mock_embed.return_value = [0.1] * 384
+        mock_embed.return_value = [0.1] * MEMORY_EMBED_DIM
         conversation_id = str(sample_conversation.id)
         
         # Create some episodic memories first
@@ -303,7 +302,7 @@ class TestSummaryRollup:
         await memory_manager.memory_repo.store_memory(
             conversation_id=conversation_id,
             text=json.dumps(episodic_data),
-            embedding=[0.2] * 384,
+            embedding=[0.2] * MEMORY_EMBED_DIM,
             memory_type="episodic"
         )
         
@@ -333,7 +332,7 @@ class TestSummaryRollup:
     ):
         """Test updating an existing summary."""
         # Arrange
-        mock_embed.return_value = [0.1] * 384
+        mock_embed.return_value = [0.1] * MEMORY_EMBED_DIM
         conversation_id = str(sample_conversation.id)
         
         # Create existing summary
@@ -347,7 +346,7 @@ class TestSummaryRollup:
         await memory_manager.memory_repo.store_memory(
             conversation_id=conversation_id,
             text=json.dumps(existing_summary_data),
-            embedding=[0.1] * 384,
+            embedding=[0.1] * MEMORY_EMBED_DIM,
             memory_type="summary"
         )
         
@@ -364,7 +363,7 @@ class TestSummaryRollup:
         await memory_manager.memory_repo.store_memory(
             conversation_id=conversation_id,
             text=json.dumps(new_episodic_data),
-            embedding=[0.2] * 384,
+            embedding=[0.2] * MEMORY_EMBED_DIM,
             memory_type="episodic"
         )
         
@@ -388,7 +387,7 @@ class TestSummaryRollup:
     ):
         """Test that rollup is idempotent for same content."""
         # Arrange
-        mock_embed.return_value = [0.1] * 384
+        mock_embed.return_value = [0.1] * MEMORY_EMBED_DIM
         conversation_id = str(sample_conversation.id)
         
         # Mock the LLM to return same content
@@ -412,7 +411,7 @@ class TestSummaryRollup:
         await memory_manager.memory_repo.store_memory(
             conversation_id=conversation_id,
             text=json.dumps(episodic_data),
-            embedding=[0.1] * 384,
+            embedding=[0.1] * MEMORY_EMBED_DIM,
             memory_type="episodic"
         )
         
@@ -461,7 +460,7 @@ class TestMemoryRetrieval:
     ):
         """Test basic memory retrieval."""
         # Arrange
-        mock_embed.return_value = [0.1] * 384
+        mock_embed.return_value = [0.1] * MEMORY_EMBED_DIM
         conversation_id = str(sample_conversation.id)
         
         # Create some test memories with different content
@@ -485,7 +484,7 @@ class TestMemoryRetrieval:
         # Store memories with different embeddings
         for i, memory_data in enumerate(memories_data):
             # Create different embeddings for different content
-            embedding = [0.1 + i * 0.1] * 384
+            embedding = [0.1 + i * 0.1] * MEMORY_EMBED_DIM
             await memory_manager.memory_repo.store_memory(
                 conversation_id=conversation_id,
                 text=json.dumps(memory_data),
@@ -570,7 +569,7 @@ class TestMemoryRetrieval:
     ):
         """Test top_k limiting."""
         # Arrange
-        mock_embed.return_value = [0.1] * 384
+        mock_embed.return_value = [0.1] * MEMORY_EMBED_DIM
         conversation_id = str(sample_conversation.id)
         
         # Store multiple memories
@@ -585,7 +584,7 @@ class TestMemoryRetrieval:
             await memory_manager.memory_repo.store_memory(
                 conversation_id=conversation_id,
                 text=json.dumps(memory_data),
-                embedding=[0.1 + i * 0.01] * 384,
+                embedding=[0.1 + i * 0.01] * MEMORY_EMBED_DIM,
                 memory_type="episodic"
             )
         
@@ -611,7 +610,7 @@ class TestMemoryRetrieval:
     ):
         """Test retrieval when no memories exist."""
         # Arrange
-        mock_embed.return_value = [0.1] * 384
+        mock_embed.return_value = [0.1] * MEMORY_EMBED_DIM
         
         # Act
         memories = await memory_manager.retrieve_relevant_memories(
@@ -752,7 +751,7 @@ class TestErrorHandling:
     ):
         """Test fallback when summarizer fails."""
         # Arrange
-        mock_embed.return_value = [0.1] * 384
+        mock_embed.return_value = [0.1] * MEMORY_EMBED_DIM
         conversation_id = str(sample_conversation.id)
         
         # Mock summarizer to fail
@@ -805,8 +804,8 @@ class TestMemoryManagerIntegration:
     ):
         """Test complete workflow: create memories -> rollup -> retrieve."""
         # Arrange
-        mock_embed_single.return_value = [0.1] * 384
-        mock_embed_texts.return_value = [[0.1] * 384]
+        mock_embed_single.return_value = [0.1] * MEMORY_EMBED_DIM
+        mock_embed_texts.return_value = [[0.1] * MEMORY_EMBED_DIM]
         conversation_id = str(sample_conversation.id)
         
         # Act 1 - Create episodic memories

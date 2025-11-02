@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from storage import create_storage, Storage
 from storage.models import PGVECTOR_AVAILABLE
+from config import MEMORY_EMBED_DIM
 
 
 @pytest.mark.asyncio
@@ -174,7 +175,7 @@ class TestStorageIntegration:
         )
         
         # Store memory
-        embedding = [0.1] * 384
+        embedding = [0.1] * MEMORY_EMBED_DIM
         memory = await storage.memories.store_memory(
             conversation_id=str(conversation.id),
             text="User greeted the assistant",
@@ -325,7 +326,7 @@ class TestStorageIntegration:
             str(conversation.id), "user", "Test message"
         )
         memory = await storage.memories.store_memory(
-            str(conversation.id), "Test memory", [0.1] * 384
+            str(conversation.id), "Test memory", [0.1] * MEMORY_EMBED_DIM
         )
         
         # Verify everything exists

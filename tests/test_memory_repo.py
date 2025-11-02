@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from storage.repos import PostgresMemoryRepo
 from tests.conftest import assert_uuid_string
+from config import MEMORY_EMBED_DIM
 
 
 @pytest.mark.asyncio
@@ -234,7 +235,7 @@ class TestMemoryRepo:
     async def test_search_memories_empty_results(self, memory_repo: PostgresMemoryRepo):
         """Test searching when no memories exist"""
         # Arrange
-        query_embedding = [0.1] * 384
+        query_embedding = [0.1] * MEMORY_EMBED_DIM
         
         # Act
         results = await memory_repo.search_memories(query_embedding)
