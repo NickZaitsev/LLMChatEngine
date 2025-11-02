@@ -10,20 +10,21 @@ across the application, particularly in Celery tasks.
 import asyncio
 import logging
 from typing import Optional
-
+from memory.llamaindex.embedding import LMStudioEmbeddingModel
+from llama_index.llms.lmstudio import LMStudio
 from ai_handler import AIHandler
 from config import (
     DATABASE_URL, USE_PGVECTOR, PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
     PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE, MESSAGE_QUEUE_REDIS_URL,
-    TELEGRAM_TOKEN, MEMORY_ENABLED, SUMMARIZATION_LLM_ID,
-    VECTOR_STORE_TABLE_NAME, MEMORY_EMBED_MODEL_PATH, MEMORY_EMBED_DIM,
+    TELEGRAM_TOKEN, MEMORY_ENABLED,
+    VECTOR_STORE_TABLE_NAME, MEMORY_EMBED_MODEL, MEMORY_EMBED_DIM,
     MEMORY_EMBEDDING_PROVIDER, LMSTUDIO_BASE_URL
 )
 from memory.manager import LlamaIndexMemoryManager
 from memory.llamaindex.vector_store import PgVectorStore
-from memory.llamaindex.embedding import HuggingFaceEmbeddingModel, LMStudioEmbeddingModel
 from memory.llamaindex.summarizer import LlamaIndexSummarizer
 from message_manager import MessageQueueManager, TypingIndicatorManager
+from llama_index.llms.lmstudio import LMStudio
 from prompt.assembler import PromptAssembler
 from storage_conversation_manager import PostgresConversationManager
 from telegram import Bot
@@ -85,17 +86,11 @@ class AppContext:
         # 3. Initialize Memory Manager (LlamaIndex stack)
         try:
             if MEMORY_ENABLED:
-                if MEMORY_EMBEDDING_PROVIDER == 'huggingface':
-                    embedding_model = HuggingFaceEmbeddingModel(
-                        model_path=MEMORY_EMBED_MODEL_PATH
-                    )
-                    logger.info(f"Using HuggingFace embedding model: {MEMORY_EMBED_MODEL_PATH}")
-                elif MEMORY_EMBEDDING_PROVIDER == 'lmstudio':
+                if MEMORY_EMBEDDING_PROVIDER == 'lmstudio':
                     embedding_model = LMStudioEmbeddingModel(
-                        base_url=LMSTUDIO_BASE_URL,
-                        local_path=MEMORY_EMBED_MODEL_PATH  # Pass local_path for consistency
+                        model_path=MEMORY_EMBED_MODEL
                     )
-                    logger.info(f"Using LMStudio embedding model at: {LMSTUDIO_BASE_URL}")
+                    logger.info(f"Using lmstudio embedding model: {MEMORY_EMBED_MODEL}")
                 else:
                     raise ValueError(f"Unsupported embedding provider: {MEMORY_EMBEDDING_PROVIDER}")
 

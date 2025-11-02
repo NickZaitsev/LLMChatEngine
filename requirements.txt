@@ -15,10 +15,10 @@ celery==5.5.3
 redis==7.0.0
 
 # Memory management dependencies (LlamaIndex)
-llama-index>=0.10.49
-llama-index-vector-stores-postgres>=0.1.4
+llama-index==0.14.5
+llama-index-vector-stores-postgres==0.7.1
+llama-index-llms-lmstudio==0.4.1
 # llama-index-llms-openai>=0.1.23
-llama-index-embeddings-huggingface>=0.2.0
 # google-generativeai==0.8.5
 # sentence-transformers==2.2.2
-# torch==2.4.0
+# torch==2.4.0 

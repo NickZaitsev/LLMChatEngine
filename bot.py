@@ -11,13 +11,14 @@ from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                     PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED,
                     PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
                     PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
-                    MEMORY_EMBED_MODEL_PATH, VECTOR_STORE_TABLE_NAME,
+                    MEMORY_EMBED_MODEL, VECTOR_STORE_TABLE_NAME,
                     MESSAGE_PREVIEW_LENGTH,
                     POLLING_INTERVAL,
                     MESSAGE_QUEUE_REDIS_URL,
                     MESSAGE_QUEUE_MAX_RETRIES,
                     MESSAGE_QUEUE_LOCK_TIMEOUT,
                     LMSTUDIO_BASE_URL)
+from memory.llamaindex.embedding import LMStudioEmbeddingModel
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
 from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response, MessageQueueManager, MessageDispatcher
@@ -43,9 +44,9 @@ if MEMORY_ENABLED:
     try:
         from memory.manager import LlamaIndexMemoryManager
         from memory.llamaindex.vector_store import PgVectorStore
-        from memory.llamaindex.embedding import HuggingFaceEmbeddingModel
         from memory.llamaindex.summarizer import LlamaIndexSummarizer
         from prompt.assembler import PromptAssembler
+        from llama_index.llms.lmstudio import LMStudio
         MEMORY_IMPORTS_AVAILABLE = True
     except ImportError as e:
         logger.warning("Memory/PromptAssembler imports failed: %s", e)
@@ -730,9 +731,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             
             # 2. Initialize EmbeddingModel
 
-            embedding_model = HuggingFaceEmbeddingModel(
-                model_path=MEMORY_EMBED_MODEL_PATH
-            )
+            embedding_model = LMStudioEmbeddingModel(MEMORY_EMBED_MODEL)
 
             # 3. Initialize SummarizationModel
             summarizer = LlamaIndexSummarizer(
@@ -802,7 +801,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                         # Check if target model is loaded
                         if auto_load:
                             logger.info("Attempting to ensure model %s is loaded...", model_name)
-                            model_loaded = await model_manager.ensure_model_loaded(model_name, auto_load=True)
+                            model_loaded = await model_manager.ensure_model_loaded(model_name, auto_load)
                             
                             if model_loaded:
                                 logger.info("✅ Model %s is loaded and ready", model_name)
