@@ -76,6 +76,9 @@ class LlamaIndexMemoryManager:
         logger.info(f"==> get_context called with user_id='{user_id}', top_k={top_k}")
         try:
             query_embedding = await self._embedding_model.get_embedding(query)
+            if not query_embedding:
+                logger.warning("Failed to generate query embedding. Returning empty context.")
+                return ""
             logger.info(f"Query embedding generated (length: {len(query_embedding)})")
             
             logger.info(f"==> Calling vector_store.query with user_id='{user_id}'")
@@ -91,7 +94,7 @@ class LlamaIndexMemoryManager:
             return context
         except Exception as e:
             logger.error(f"Error in get_context: {e}", exc_info=True)
-            raise
+            return ""
 
     async def trigger_summarization(self, user_id: str, prompt_template: str) -> None:
         """
