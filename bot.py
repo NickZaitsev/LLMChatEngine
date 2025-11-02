@@ -791,32 +791,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                     model_name = self.ai_handler.model_client.model_name
                     auto_load = getattr(self.ai_handler.model_client, 'auto_load_model', False)
                     
-                    # Get current model status
-                    status = await model_manager.get_model_info()
-                    logger.info("LM Studio status: %s", status)
-                    
-                    if status.get('server_running', False):
-                        logger.info("LM Studio server is running")
-                        
-                        # Check if target model is loaded
-                        if auto_load:
-                            logger.info("Attempting to ensure model %s is loaded...", model_name)
-                            model_loaded = await model_manager.ensure_model_loaded(model_name, auto_load)
-                            
-                            if model_loaded:
-                                logger.info("✅ Model %s is loaded and ready", model_name)
-                            else:
-                                logger.warning("⚠️ Failed to load model %s automatically", model_name)
-                                logger.warning("You may need to manually load the model in LM Studio")
-                        else:
-                            logger.info("Auto-loading disabled, checking if model is already loaded...")
-                            if await model_manager.is_model_loaded(model_name):
-                                logger.info("✅ Model %s is already loaded", model_name)
-                            else:
-                                logger.info("ℹ️ Model %s is not loaded. Enable LMSTUDIO_AUTO_LOAD to load automatically", model_name)
-                    else:
-                        logger.warning("⚠️ LM Studio server is not running or not accessible")
-                        logger.warning("Please ensure LM Studio is running and accessible at the configured URL")
+                    await model_manager.ensure_model_loaded(model_name, auto_load)
                 else:
                     logger.info("LM Studio manager not available, skipping model initialization")
                     
