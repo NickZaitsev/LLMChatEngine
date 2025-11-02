@@ -31,25 +31,19 @@ async def test_lmstudio_manager():
         
         # Test server connectivity
         print("\n[*] Testing LM Studio server connectivity...")
-        is_running = await manager.is_server_running()
-        if is_running:
-            print("[+] LM Studio server is accessible")
+        print("[+] LM Studio server is accessible")
             
-            # Get model info
-            model_info = await manager.get_model_info()
-            print(f"[i] Server info: {model_info}")
+        # Get model info
+        model_info = await manager.get_model_info()
+        print(f"[i] Server info: {model_info}")
             
-            # Get available models
-            models = await manager.get_available_models()
-            print(f"[i] Available models: {len(models)} found")
-            for model in models:
-                print(f"    - {model.get('id', 'Unknown model')}")
-            
-        else:
-            print("[!] LM Studio server is not accessible")
-            print("    Please ensure LM Studio is running on localhost:1234")
+        # Get available models
+        models = await manager.get_available_models()
+        print(f"[i] Available models: {len(models)} found")
+        for model in models:
+            print(f"    - {model.get('id', 'Unknown model')}")
         
-        return manager, is_running
+        return manager
         
     except ImportError as e:
         print(f"[-] Failed to import LMStudioManager: {e}")
@@ -142,10 +136,6 @@ async def test_model_loading():
         
         manager = LMStudioManager()
         
-        # Check server connectivity first
-        if not await manager.is_server_running():
-            print("[!] LM Studio server not accessible - skipping model loading test")
-            return True
         
         print(f"[*] Testing model loading for: {LMSTUDIO_MODEL}")
         

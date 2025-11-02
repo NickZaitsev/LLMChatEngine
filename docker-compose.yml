@@ -66,7 +66,7 @@ services:
     build: .
     container_name: ai-girlfriend-celery-worker
     restart: unless-stopped
-    command: celery -A proactive_messaging worker --loglevel=info --statedb=/app/celery_worker_state.db -Q proactive_messaging
+    command: celery -A proactive_messaging worker --concurrency=5 --loglevel=info --statedb=/app/celery_worker_state.db -Q proactive_messaging
     env_file: .env
     environment:
       - REDIS_URL=redis://redis:6379/0
@@ -106,7 +106,7 @@ services:
     build: .
     container_name: ai-girlfriend-celery-memory
     restart: unless-stopped
-    command: celery -A memory.tasks:celery_app worker --loglevel=info -Q memory_tasks
+    command: celery -A memory.tasks:celery_app worker --concurrency=5 --loglevel=info -Q memory_tasks
     env_file: .env
     environment:
       - PYTHONPATH=/app
