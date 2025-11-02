@@ -158,10 +158,12 @@ async def sample_conversation(conversation_repo: PostgresConversationRepo, sampl
     )
 
 
+import config
+
 @pytest.fixture
 def sample_embedding():
     """Create a sample embedding vector for testing."""
-    return [0.1] * 384  # 384-dimensional vector with all values 0.1
+    return [0.1] * config.MEMORY_EMBED_DIM
 
 
 # Utility functions for tests

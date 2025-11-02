@@ -17,7 +17,7 @@ from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                     MESSAGE_QUEUE_REDIS_URL,
                     MESSAGE_QUEUE_MAX_RETRIES,
                     MESSAGE_QUEUE_LOCK_TIMEOUT,
-                    LMSTUDIO_BASE_URL)
+                    LMSTUDIO_BASE_URL, MEMORY_EMBED_DIM)
 from memory.llamaindex.embedding import LMStudioEmbeddingModel
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
@@ -726,7 +726,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             vector_store = PgVectorStore(
                 db_url=DATABASE_URL,
                 table_name=VECTOR_STORE_TABLE_NAME,
-                embed_dim=384  # Placeholder, will be dynamic later
+                embed_dim=MEMORY_EMBED_DIM  # Placeholder, will be dynamic later
             )
             
             # 2. Initialize EmbeddingModel

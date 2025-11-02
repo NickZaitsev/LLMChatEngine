@@ -14,6 +14,7 @@ from typing import Dict, List
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+from config import MEMORY_EMBED_DIM
 
 
 async def verify_storage_system():
@@ -101,8 +102,8 @@ async def verify_storage_system():
         logger.info("🧠 Testing memory operations...")
         
         # Create test embeddings
-        embedding_1 = [0.1, 0.2, 0.3] + [0.0] * 381  # 384-dimensional
-        embedding_2 = [0.9, 0.1, 0.0] + [0.0] * 381  # Different similarity
+        embedding_1 = [0.1, 0.2, 0.3] + [0.0] * (MEMORY_EMBED_DIM-3)  
+        embedding_2 = [0.9, 0.1, 0.0] + [0.0] * (MEMORY_EMBED_DIM-3)  # Different similarity
         
         # Store memories
         memory_1 = await storage.memories.store_memory(
@@ -122,7 +123,7 @@ async def verify_storage_system():
         logger.info(f"✅ Stored {len([memory_1, memory_2])} memories with embeddings")
         
         # Test similarity search
-        query_embedding = [0.15, 0.25, 0.35] + [0.0] * 381  # Similar to embedding_1
+        query_embedding = [0.15, 0.25, 0.35] + [0.0] * (MEMORY_EMBED_DIM-3)  # Similar to embedding_1
         similar_memories = await storage.memories.search_memories(
             query_embedding,
             top_k=5,

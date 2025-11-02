@@ -8,6 +8,8 @@ Create Date: 2025-10-30 23:38:42.876728+00:00
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+import pgvector
+from config import MEMORY_EMBED_DIM
 
 # revision identifiers, used by Alembic.
 revision = '619d48a9dd9c'
@@ -44,7 +46,7 @@ def downgrade() -> None:
     sa.Column('text', sa.VARCHAR(), autoincrement=False, nullable=False),
     sa.Column('metadata_', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True),
     sa.Column('node_id', sa.VARCHAR(), autoincrement=False, nullable=True),
-    sa.Column('embedding', pgvector.sqlalchemy.vector.VECTOR(dim=384), autoincrement=False, nullable=True),
+    sa.Column('embedding', pgvector.sqlalchemy.vector.VECTOR(dim=MEMORY_EMBED_DIM), autoincrement=False, nullable=True),
     sa.PrimaryKeyConstraint('id', name=op.f('data_llama_pg_vector_store_pkey'))
     )
     op.create_index(op.f('llama_pg_vector_store_idx_1'), 'data_llama_pg_vector_store', [sa.literal_column("(metadata_ ->> 'ref_doc_id'::text)")], unique=False)

@@ -8,7 +8,7 @@ Create Date: 2025-01-13 17:38:00.000000
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
-
+from config import MEMORY_EMBED_DIM
 # Try to import pgvector, but handle gracefully if not available
 try:
     from pgvector.sqlalchemy import Vector
@@ -89,7 +89,7 @@ def upgrade() -> None:
             sa.Column('memory_type', sa.String(length=50), nullable=False, default='episodic'),
             sa.Column('text', sa.Text(), nullable=False),
             sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, default=sa.text('now()')),
-            sa.Column('embedding', Vector(384), nullable=True),
+            sa.Column('embedding', Vector(MEMORY_EMBED_DIM), nullable=True),
             sa.ForeignKeyConstraint(['conversation_id'], ['conversations.id'], ondelete='CASCADE'),
             sa.PrimaryKeyConstraint('id')
         )
