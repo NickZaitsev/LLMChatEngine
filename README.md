@@ -5,13 +5,14 @@ A powerful, production-ready LLM chat engine with advanced memory management, se
 ## Features
 
 - **Multi-LLM Provider Support**: Clean integration with Azure OpenAI, LM Studio, and other LLM providers
-- **Advanced Memory Management**: LlamaIndex-based memory system with semantic search via pgvector.
-- **PostgreSQL Storage**: Scalable database backend with async SQLAlchemy 2.x
+- **Advanced Memory Management**: LlamaIndex-based memory system with semantic search via pgvector and automated conversation summarization
+- **PostgreSQL Storage**: Scalable database backend with async SQLAlchemy 2.x and pgvector extension
 - **Production Ready**: Multi-stage Docker build, database migrations, comprehensive logging
 - **Modular Architecture**: Extensible design for different chat platforms and interfaces
 - **Message Buffering**: Intelligent message buffering to capture complete user thoughts
 - **Proactive Features**: Scheduled messaging with Celery Beat and automated conversation management
 - **Centralized App Context**: Singleton pattern for shared service initialization and management
+- **Conversation Summarization**: Automatic periodic summarization of long conversations using Celery tasks
 
 ## Quick Start with Docker
 
@@ -92,13 +93,14 @@ docker-compose down
 LLMChatEngine provides a modular architecture that can be adapted for various chat platforms:
 
 - **App Context**: Singleton pattern for centralized service initialization and management
-- **AI Handler**: Orchestrates LLM interactions across multiple providers
-- **Memory Manager**: LlamaIndex-based system for creating and managing memories.
-- **Prompt Assembler**: Constructs contextual prompts with conversation history
-- **Message Manager**: Handles message queuing and ordered delivery
-- **Buffer Manager**: Buffers user input for coherent processing
-- **Storage Layer**: PostgreSQL with pgvector for persistent data management
-- **Proactive Messaging**: Celery Beat-based system for scheduled user engagement
+- **AI Handler**: Orchestrates LLM interactions across multiple providers with retry logic and timeout handling
+- **Memory Manager**: LlamaIndex-based system for creating and managing semantic memories with vector search
+- **Prompt Assembler**: Constructs contextual prompts integrating conversation history, memories, and summaries
+- **Message Manager**: Handles message queuing and ordered delivery with interaction indicators
+- **Buffer Manager**: Buffers user input for coherent processing and complete thought capture
+- **Storage Layer**: PostgreSQL with pgvector extension for persistent data management and vector storage
+- **Proactive Messaging**: Celery Beat-based system for scheduled user engagement and automated messaging
+- **Conversation Summarization**: Celery-based periodic summarization of long conversations to manage context length
 
 ![Architecture Diagram](docs/architecture.png)
 
