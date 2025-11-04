@@ -102,19 +102,14 @@ MESSAGE_QUEUE_LOCK_TIMEOUT = int(os.getenv('MESSAGE_QUEUE_LOCK_TIMEOUT', '30'))
 MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL = int(os.getenv('MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL', '10'))
 MESSAGE_QUEUE_DISPATCHER_INTERVAL = float(os.getenv('MESSAGE_QUEUE_DISPATCHER_INTERVAL', '0.1'))
 
-# Proactive messaging intervals (in seconds)
-PROACTIVE_MESSAGING_INTERVAL_1H = int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1H', '3600'))  # 1 hour
-PROACTIVE_MESSAGING_INTERVAL_9H = int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_9H', '32400'))  # 9 hours
-PROACTIVE_MESSAGING_INTERVAL_1D = int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1D', '86400'))  # 1 day
-PROACTIVE_MESSAGING_INTERVAL_1W = int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1W', '604800'))  # 1 week
-PROACTIVE_MESSAGING_INTERVAL_1MO = int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1MO', '2592000'))  # 1 month
-
-# Jitter for intervals (in seconds)
-PROACTIVE_MESSAGING_JITTER_1H = int(os.getenv('PROACTIVE_MESSAGING_JITTER_1H', '900'))  # 15 minutes
-PROACTIVE_MESSAGING_JITTER_9H = int(os.getenv('PROACTIVE_MESSAGING_JITTER_9H', '1800'))  # 30 minutes
-PROACTIVE_MESSAGING_JITTER_1D = int(os.getenv('PROACTIVE_MESSAGING_JITTER_1D', '7200'))  # 2 hours
-PROACTIVE_MESSAGING_JITTER_1W = int(os.getenv('PROACTIVE_MESSAGING_JITTER_1W', '43200'))  # 12 hours
-PROACTIVE_MESSAGING_JITTER_1MO = int(os.getenv('PROACTIVE_MESSAGING_JITTER_1MO', '86400'))  # 1 day
+# Proactive messaging cadences
+PROACTIVE_MESSAGING_CADENCES = [
+    {"name": "1h", "interval": int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1H', '3600')), "jitter": int(os.getenv('PROACTIVE_MESSAGING_JITTER_1H', '20'))},
+    {"name": "9h", "interval": int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_9H', '32400')), "jitter": int(os.getenv('PROACTIVE_MESSAGING_JITTER_9H', '180'))},
+    {"name": "1d", "interval": int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1D', '86400')), "jitter": int(os.getenv('PROACTIVE_MESSAGING_JITTER_1D', '720'))},
+    {"name": "1w", "interval": int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1W', '604800')), "jitter": int(os.getenv('PROACTIVE_MESSAGING_JITTER_1W', '4320'))},
+    {"name": "1mo", "interval": int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1MO', '2592000')), "jitter": int(os.getenv('PROACTIVE_MESSAGING_JITTER_1MO', '8640'))},
+]
 
 # Quiet hours (in 24-hour format)
 PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED = os.getenv('PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
@@ -187,31 +182,23 @@ def _validate_config():
         if not PROACTIVE_MESSAGING_REDIS_URL:
             warnings.warn("PROACTIVE_MESSAGING_REDIS_URL is required when proactive messaging is enabled")
         
-        # Validate intervals are positive
-        intervals = [
-            ("PROACTIVE_MESSAGING_INTERVAL_1H", PROACTIVE_MESSAGING_INTERVAL_1H),
-            ("PROACTIVE_MESSAGING_INTERVAL_9H", PROACTIVE_MESSAGING_INTERVAL_9H),
-            ("PROACTIVE_MESSAGING_INTERVAL_1D", PROACTIVE_MESSAGING_INTERVAL_1D),
-            ("PROACTIVE_MESSAGING_INTERVAL_1W", PROACTIVE_MESSAGING_INTERVAL_1W),
-            ("PROACTIVE_MESSAGING_INTERVAL_1MO", PROACTIVE_MESSAGING_INTERVAL_1MO)
-        ]
+        # Validate proactive messaging cadences
+        if not PROACTIVE_MESSAGING_CADENCES:
+            warnings.warn("PROACTIVE_MESSAGING_CADENCES should not be empty")
         
-        for name, value in intervals:
-            if value <= 0:
-                warnings.warn(f"{name} should be positive")
-        
-        # Validate jitter values are non-negative
-        jitter_values = [
-            ("PROACTIVE_MESSAGING_JITTER_1H", PROACTIVE_MESSAGING_JITTER_1H),
-            ("PROACTIVE_MESSAGING_JITTER_9H", PROACTIVE_MESSAGING_JITTER_9H),
-            ("PROACTIVE_MESSAGING_JITTER_1D", PROACTIVE_MESSAGING_JITTER_1D),
-            ("PROACTIVE_MESSAGING_JITTER_1W", PROACTIVE_MESSAGING_JITTER_1W),
-            ("PROACTIVE_MESSAGING_JITTER_1MO", PROACTIVE_MESSAGING_JITTER_1MO)
-        ]
-        
-        for name, value in jitter_values:
-            if value < 0:
-                warnings.warn(f"{name} should be non-negative")
+        for cadence in PROACTIVE_MESSAGING_CADENCES:
+            if not isinstance(cadence, dict) or not all(k in cadence for k in ["name", "interval", "jitter"]):
+                warnings.warn(f"Invalid cadence format: {cadence}. Each cadence should be a dict with 'name', 'interval', and 'jitter'.")
+                continue
+            
+            if not isinstance(cadence["name"], str) or not cadence["name"]:
+                warnings.warn(f"Cadence 'name' should be a non-empty string in {cadence}")
+            
+            if not isinstance(cadence["interval"], int) or cadence["interval"] <= 0:
+                warnings.warn(f"Cadence 'interval' should be a positive integer in {cadence}")
+            
+            if not isinstance(cadence["jitter"], int) or cadence["jitter"] < 0:
+                warnings.warn(f"Cadence 'jitter' should be a non-negative integer in {cadence}")
         
         # Validate quiet hours format (only if enabled)
         if PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED:

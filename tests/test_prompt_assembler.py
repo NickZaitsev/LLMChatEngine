@@ -13,7 +13,7 @@ from uuid import uuid4, UUID
 from typing import List, Dict, Any
 
 from storage.interfaces import Message, Memory
-from memory.manager import MemoryManager, MemoryRecord
+from memory.manager import LlamaIndexMemoryManager as MemoryManager
 from prompt.assembler import PromptAssembler, TokenCounter, Tokenizer
 import config
 
@@ -159,6 +159,8 @@ def prompt_assembler(mock_message_repo, mock_memory_manager, mock_persona_repo, 
     return PromptAssembler(
         message_repo=mock_message_repo,
         memory_manager=mock_memory_manager,
+        conversation_repo=MagicMock(),
+        user_repo=MagicMock(),
         persona_repo=mock_persona_repo,
         tokenizer=mock_tokenizer,
         config=config
@@ -401,6 +403,8 @@ class TestPromptAssembler:
         assembler = PromptAssembler(
             message_repo=mock_message_repo,
             memory_manager=mock_memory_manager,
+            conversation_repo=MagicMock(),
+            user_repo=MagicMock(),
             persona_repo=mock_persona_repo,
             tokenizer=mock_tokenizer,
             config=config

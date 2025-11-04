@@ -20,16 +20,7 @@ import json
 from config import (
     PROACTIVE_MESSAGING_ENABLED,
     PROACTIVE_MESSAGING_REDIS_URL,
-    PROACTIVE_MESSAGING_INTERVAL_1H,
-    PROACTIVE_MESSAGING_INTERVAL_9H,
-    PROACTIVE_MESSAGING_INTERVAL_1D,
-    PROACTIVE_MESSAGING_INTERVAL_1W,
-    PROACTIVE_MESSAGING_INTERVAL_1MO,
-    PROACTIVE_MESSAGING_JITTER_1H,
-    PROACTIVE_MESSAGING_JITTER_9H,
-    PROACTIVE_MESSAGING_JITTER_1D,
-    PROACTIVE_MESSAGING_JITTER_1W,
-    PROACTIVE_MESSAGING_JITTER_1MO,
+    PROACTIVE_MESSAGING_CADENCES,
     PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED,
     PROACTIVE_MESSAGING_QUIET_HOURS_START,
     PROACTIVE_MESSAGING_QUIET_HOURS_END,
@@ -55,32 +46,9 @@ logger = logging.getLogger(__name__)
 celery_app = Celery('proactive_messaging')
 celery_app.config_from_object(celeryconfig)
 
-# Cadence levels
-CADENCE_LEVELS = [
-    '1h',   # 1 hour
-    '9h',   # 9 hours
-    '1d',   # 1 day
-    '1w',   # 1 week
-    '1mo'   # 1 month
-]
-
-# Interval mappings
-INTERVALS = {
-    '1h': PROACTIVE_MESSAGING_INTERVAL_1H,
-    '9h': PROACTIVE_MESSAGING_INTERVAL_9H,
-    '1d': PROACTIVE_MESSAGING_INTERVAL_1D,
-    '1w': PROACTIVE_MESSAGING_INTERVAL_1W,
-    '1mo': PROACTIVE_MESSAGING_INTERVAL_1MO
-}
-
-# Jitter mappings
-JITTERS = {
-    '1h': PROACTIVE_MESSAGING_JITTER_1H,
-    '9h': PROACTIVE_MESSAGING_JITTER_9H,
-    '1d': PROACTIVE_MESSAGING_JITTER_1D,
-    '1w': PROACTIVE_MESSAGING_JITTER_1W,
-    '1mo': PROACTIVE_MESSAGING_JITTER_1MO
-}
+# Create a mapping from cadence name to its properties for quick lookups
+CADENCE_MAP = {c["name"]: c for c in PROACTIVE_MESSAGING_CADENCES}
+CADENCE_LEVELS = [c["name"] for c in PROACTIVE_MESSAGING_CADENCES]
 
 class ProactiveMessagingService:
     """Service for handling proactive messaging functionality."""
@@ -101,8 +69,8 @@ class ProactiveMessagingService:
         logger.info(f"  Quiet Hours Enabled: {self.quiet_hours_enabled}")
         logger.info(f"  Quiet Hours: {self.quiet_hours_start} - {self.quiet_hours_end}")
         logger.info(f"  Max Consecutive Outreaches: {self.max_consecutive_outreaches}")
-        logger.info(f"  Intervals: 1H={PROACTIVE_MESSAGING_INTERVAL_1H}s, 9H={PROACTIVE_MESSAGING_INTERVAL_9H}s, 1D={PROACTIVE_MESSAGING_INTERVAL_1D}s, 1W={PROACTIVE_MESSAGING_INTERVAL_1W}s, 1MO={PROACTIVE_MESSAGING_INTERVAL_1MO}s")
-        logger.info(f"  Jitter: 1H={PROACTIVE_MESSAGING_JITTER_1H}s, 9H={PROACTIVE_MESSAGING_JITTER_9H}s, 1D={PROACTIVE_MESSAGING_JITTER_1D}s, 1W={PROACTIVE_MESSAGING_JITTER_1W}s, 1MO={PROACTIVE_MESSAGING_JITTER_1MO}s")
+        cadence_info = ", ".join([f'{c["name"]}={c["interval"]}s (jitter: {c["jitter"]}s)' for c in PROACTIVE_MESSAGING_CADENCES])
+        logger.info(f"  Cadences: {cadence_info}")
         
         # Initialize Redis client
         self.redis_client = redis.from_url(self.redis_url)
@@ -175,6 +143,15 @@ class ProactiveMessagingService:
         except Exception as e:
             logger.error(f"Error setting user state for user {user_id} in Redis: {e}")
 
+    @staticmethod
+    def _serialize_state(state: dict) -> str:
+        """Serialize state dictionary to a JSON string, handling datetimes."""
+        state_copy = state.copy()
+        for key, value in state_copy.items():
+            if isinstance(value, datetime):
+                state_copy[key] = value.isoformat()
+        return json.dumps(state_copy, default=str)
+
     def _get_all_user_states(self):
         """
         Get all user states from Redis.
@@ -242,146 +219,6 @@ class ProactiveMessagingService:
         return scheduled_time < datetime.now()
 
     
-    def _revoke_user_tasks(self, user_id: int, state: dict, message_type: str = "RegularReachout", exclude_task_id: str = None):
-        """
-        Revoke all existing scheduled tasks for a user of a specific message type.
-
-        Args:
-            user_id: Telegram user ID
-            state: User state dictionary containing task information
-            message_type: Type of message tasks to revoke (default: "RegularReachout")
-            exclude_task_id: Task ID to exclude from revocation (default: None)
-        """
-        try:
-            # Get all task IDs for the user from Redis for the specific message type
-            task_key = f"proactive_messaging:user:{user_id}:tasks:{message_type}"
-            task_ids = self.redis_client.smembers(task_key)
-            
-            revoked_count = 0
-            for task_id_bytes in task_ids:
-                # Handle None values and convert bytes to string
-                if task_id_bytes is None:
-                    continue  # Skip None values
-                task_id = task_id_bytes.decode('utf-8') if isinstance(task_id_bytes, bytes) else str(task_id_bytes)
-                if not task_id:  # Skip empty task IDs
-                    continue
-                if exclude_task_id and task_id == exclude_task_id:
-                    logger.debug(f"Skipping revocation of current task {task_id} for user {user_id}")
-                    continue
-                logger.info(f"Revoking scheduled task {task_id} for user {user_id} of type {message_type}")
-                # Revoke the Celery task
-                celery_app.control.revoke(task_id, terminate=True)
-                # Track the revoked task in Redis
-                self._add_revoked_task(user_id, task_id, message_type)
-                revoked_count += 1
-                logger.info(f"Revoked scheduled task {task_id} for user {user_id} of type {message_type}")
-            
-            # Clear all task IDs from Redis for this message type
-            if task_ids:
-                self.redis_client.delete(task_key)
-                logger.info(f"Revoked {revoked_count} {message_type} tasks for user {user_id} and cleared task list")
-            else:
-                logger.debug(f"No scheduled {message_type} tasks found for user {user_id}")
-        except Exception as e:
-            logger.error(f"Error revoking {message_type} tasks for user {user_id}: {e}")
-            # Re-raise the exception so callers can handle it if needed
-            raise
-
-    
-    def _revoke_all_user_tasks(self, user_id: int, state: dict):
-        """
-        Revoke all existing scheduled tasks for a user regardless of message type.
-        
-        Args:
-            user_id: Telegram user ID
-            state: User state dictionary containing task information
-        """
-        try:
-            # Get all task keys for the user from Redis
-            pattern = f"proactive_messaging:user:{user_id}:tasks:*"
-            task_keys = self.redis_client.keys(pattern)
-            
-            total_revoked_count = 0
-            for task_key in task_keys:
-                task_ids = self.redis_client.smembers(task_key)
-                
-                revoked_count = 0
-                for task_id_bytes in task_ids:
-                    task_id = task_id_bytes.decode('utf-8') if isinstance(task_id_bytes, bytes) else task_id_bytes
-                    # Extract message type from key
-                    message_type = task_key.decode('utf-8').split(':')[-1] if isinstance(task_key, bytes) else task_key.split(':')[-1]
-                    logger.info(f"Revoking scheduled task {task_id} for user {user_id} of type {message_type}")
-                    # Revoke the Celery task
-                    celery_app.control.revoke(task_id, terminate=True)
-                    # Track the revoked task in Redis
-                    self._add_revoked_task(user_id, task_id, message_type)
-                    revoked_count += 1
-                    logger.info(f"Revoked scheduled task {task_id} for user {user_id} of type {message_type}")
-                
-                # Clear all task IDs from Redis for this message type
-                if task_ids:
-                    self.redis_client.delete(task_key)
-                    total_revoked_count += revoked_count
-                    logger.info(f"Revoked {revoked_count} tasks of type {message_type} for user {user_id} and cleared task list")
-                else:
-                    logger.debug(f"No scheduled tasks of type {message_type} found for user {user_id}")
-            
-            logger.info(f"Revoked a total of {total_revoked_count} tasks for user {user_id} across all message types")
-        except Exception as e:
-            logger.error(f"Error revoking all tasks for user {user_id}: {e}")
-    
-    def _add_task_id(self, user_id: int, task_id: str, message_type: str = "RegularReachout"):
-        """
-        Add a task ID to the user's task list in Redis for a specific message type.
-        
-        Args:
-            user_id: Telegram user ID
-            task_id: Celery task ID
-            message_type: Type of message (default: "RegularReachout")
-        """
-        try:
-            task_key = f"proactive_messaging:user:{user_id}:tasks:{message_type}"
-            self.redis_client.sadd(task_key, task_id)
-            logger.debug(f"Added task {task_id} of type {message_type} to user {user_id}'s task list")
-        except Exception as e:
-            logger.error(f"Error adding task ID for user {user_id} of type {message_type}: {e}")
-    def _add_revoked_task(self, user_id: int, task_id: str, message_type: str = "RegularReachout"):
-        """
-        Add a revoked task ID to a set in Redis to track revoked tasks.
-        
-        Args:
-            user_id: Telegram user ID
-            task_id: Celery task ID
-            message_type: Type of message (default: "RegularReachout")
-        """
-        try:
-            revoked_key = f"proactive_messaging:user:{user_id}:revoked_tasks:{message_type}"
-            self.redis_client.sadd(revoked_key, task_id)
-            logger.debug(f"Added revoked task {task_id} of type {message_type} for user {user_id}")
-            
-            # Set expiration for the revoked tasks set (24 hours)
-            self.redis_client.expire(revoked_key, 86400)
-        except Exception as e:
-            logger.error(f"Error adding revoked task ID for user {user_id} of type {message_type}: {e}")
-    
-    def _is_task_revoked(self, user_id: int, task_id: str, message_type: str = "RegularReachout") -> bool:
-        """
-        Check if a task has been revoked.
-        
-        Args:
-            user_id: Telegram user ID
-            task_id: Celery task ID
-            message_type: Type of message (default: "RegularReachout")
-            
-        Returns:
-            True if task has been revoked, False otherwise
-        """
-        try:
-            revoked_key = f"proactive_messaging:user:{user_id}:revoked_tasks:{message_type}"
-            return self.redis_client.sismember(revoked_key, task_id)
-        except Exception as e:
-            logger.error(f"Error checking if task {task_id} is revoked for user {user_id} of type {message_type}: {e}")
-            return False
     
     def parse_time(self, time_str: str) -> tuple:
         """
@@ -485,8 +322,9 @@ class ProactiveMessagingService:
         Returns:
             Interval in seconds with jitter
         """
-        base_interval = INTERVALS.get(cadence, PROACTIVE_MESSAGING_INTERVAL_1H)
-        jitter = JITTERS.get(cadence, PROACTIVE_MESSAGING_JITTER_1H)
+        cadence_config = CADENCE_MAP.get(cadence, CADENCE_MAP[CADENCE_LEVELS[0]])
+        base_interval = cadence_config["interval"]
+        jitter = cadence_config["jitter"]
         
         logger.debug(f"Calculating interval with jitter for cadence {cadence}: base={base_interval}, jitter={jitter}")
         
@@ -520,7 +358,7 @@ class ProactiveMessagingService:
         """
         user_state = self._get_user_state(user_id)
         user_state.update({
-            'cadence': '1h',
+            'cadence': CADENCE_LEVELS[0],
             'consecutive_outreaches': 0,
             'last_proactive_message': None,
             'scheduled_task_id': None,
@@ -528,7 +366,7 @@ class ProactiveMessagingService:
         })
         self._set_user_state(user_id, user_state)
         
-        logger.info(f"Reset cadence for user {user_id} to 1h")
+        logger.info(f"Reset cadence for user {user_id} to {CADENCE_LEVELS[0]}")
     
     def update_user_reply_status(self, user_id: int, replied: bool = True):
         """
@@ -544,106 +382,22 @@ class ProactiveMessagingService:
         self._set_user_state(user_id, user_state)
         
         if replied:
-            # Reset cadence when user replies
+            # When a user replies, we just reset their state.
+            # The centralized `manage_proactive_messages` task will handle rescheduling.
             self.reset_cadence(user_id)
-            logger.info(f"User {user_id} replied, cadence reset")
-    
-    def schedule_proactive_message(self, user_id: int, scheduled_time: datetime = None, message_type: str = "RegularReachout", exclude_task_id: str = None):
-        """
-        Schedule a proactive message for a user.
-
-        Args:
-            user_id: Telegram user ID
-            scheduled_time: Optional specific time to schedule the message (defaults to None)
-            message_type: Type of message to schedule (default: "RegularReachout")
-            exclude_task_id: Task ID to exclude from revocation (default: None)
-        """
-        logger.info(f"Scheduling proactive message for user {user_id} of type {message_type}")
-        
-        if not self.enabled:
-            logger.info("Proactive messaging is disabled")
-            return
-        
-        # Get user state or initialize it
-        user_state = self._get_user_state(user_id)
-        if not user_state:
-            logger.debug(f"User {user_id} not found in Redis, initializing...")
-            self.reset_cadence(user_id)
-            user_state = self._get_user_state(user_id)
-        
-        current_cadence = user_state.get('cadence', '1h')
-        logger.debug(f"Current cadence for user {user_id}: {current_cadence}")
-        
-        # Check if we should switch to long-term mode
-        if self.should_switch_to_long_term_mode(user_id):
-            current_cadence = '1mo'
-            logger.info(f"Switching user {user_id} to long-term mode")
-        
-        # Calculate next interval with jitter if no scheduled_time provided
-        if scheduled_time is None:
-            interval = self.get_interval_with_jitter(current_cadence)
-            logger.debug(f"Calculated interval for user {user_id}: {interval} seconds")
-            
-            # Schedule the message
-            scheduled_time = datetime.now() + timedelta(seconds=interval)
-            logger.debug(f"Initial scheduled time for user {user_id}: {scheduled_time}")
-        
-        # Adjust for quiet hours
-        original_time = scheduled_time
-        scheduled_time = self.adjust_for_quiet_hours(scheduled_time)
-        if original_time != scheduled_time:
-            logger.info(f"Adjusted scheduled time for user {user_id} due to quiet hours: {original_time} -> {scheduled_time}")
-        
-        # Update user state
-        user_state.update({
-            'scheduled_time': scheduled_time.isoformat() if scheduled_time else None,
-            'cadence': current_cadence,
-            'user_replied': False
-        })
-        self._set_user_state(user_id, user_state)
-        
-        # Revoke any existing scheduled tasks for this user before scheduling a new one
-        self._revoke_user_tasks(user_id, user_state, message_type, exclude_task_id)
-        logger.debug(f"Other user tasks of type {message_type} revoked for user {user_id}")
-        
-        # Schedule the Celery task
-        logger.debug(f"Scheduling Celery task for user {user_id} with ETA: {scheduled_time}")
-        task = send_proactive_message.apply_async(
-            args=[user_id],
-            eta=scheduled_time
-        )
-        
-        # Store the task ID in Redis
-        self._add_task_id(user_id, task.id, message_type)
-        
-        logger.info(f"Scheduled proactive message for user {user_id} at {scheduled_time} with cadence {current_cadence} and task ID {task.id}")
+            logger.info(f"User {user_id} replied. Cadence state has been reset.")
     
     def handle_user_message(self, user_id: int):
         """
-        Handle incoming user message - cancel scheduled message and reset cadence.
+        Handle incoming user message - reset cadence state.
+        The `manage_proactive_messages` task will handle rescheduling.
         
         Args:
             user_id: Telegram user ID
         """
-        # Revoke any scheduled proactive message for this user
-        user_state = self._get_user_state(user_id)
-        if user_state:
-            # Revoke the scheduled task if it exists
-            self._revoke_user_tasks(user_id, user_state, "RegularReachout")
-            
-            # Update user state
-            user_state['scheduled_time'] = None
-            user_state['scheduled_task_id'] = None
-            user_state['user_replied'] = True
-            self._set_user_state(user_id, user_state)
-        
-        # Reset cadence to shortest interval
+        # A user message resets their proactive messaging cadence.
         self.reset_cadence(user_id)
-        
-        # Schedule new proactive message
-        self.schedule_proactive_message(user_id, message_type="RegularReachout")
-        
-        logger.info(f"Handled user message for user {user_id}, cadence reset and new message scheduled")
+        logger.info(f"Handled user message for user {user_id}, cadence state reset.")
 
 # Initialize the service
 proactive_messaging_service = ProactiveMessagingService()
@@ -681,35 +435,26 @@ async def send_proactive_message_async(task, user_id: int):
     user_state = proactive_messaging_service._get_user_state(user_id)
     logger.debug(f"User {user_id} state: {user_state}")
     
-    # Check if user has replied since scheduling
-    if user_state.get('user_replied', False):
-        logger.info(f"User {user_id} has replied, skipping proactive message [{task_id}]")
+    # This task is now simplified: its only job is to send a message.
+    # The `manage_proactive_messages` task is responsible for all scheduling logic.
+
+    # Verify that this task should run.
+    # The 'scheduled_task_id' in Redis should match this task's ID.
+    if user_state.get('scheduled_task_id') != task_id:
+        logger.warning(
+            f"Task {task_id} for user {user_id} is stale or superseded. "
+            f"Expected {user_state.get('scheduled_task_id')}. Skipping."
+        )
         return
-
-    # Check if this task has been revoked
-    if proactive_messaging_service._is_task_revoked(user_id, task_id, "RegularReachout"):
-        logger.info(f"Task {task_id} for user {user_id} has been revoked, skipping.")
-        return
-
-
+        
     app_context = await get_app_context()
 
-    # Update consecutive outreaches
-    consecutive_outreaches = user_state.get('consecutive_outreaches', 0) + 1
-    user_state['consecutive_outreaches'] = consecutive_outreaches
-    user_state['last_proactive_message'] = datetime.now().isoformat()
-    proactive_messaging_service._set_user_state(user_id, user_state)
-    logger.info(f"User {user_id} consecutive outreaches: {consecutive_outreaches} [{task_id}]")
-    
     try:
-        # Get conversation history
+        # Generate and send the message...
         conversation_history = await app_context.conversation_manager.get_formatted_conversation_async(user_id)
-        
-        # Get conversation ID
         conversation = await app_context.conversation_manager._ensure_user_and_conversation(user_id)
         conversation_id = str(conversation.id) if conversation else None
         
-        # Generate AI response
         ai_response = await generate_ai_response(
             ai_handler=app_context.ai_handler,
             typing_manager=app_context.typing_manager,
@@ -721,39 +466,36 @@ async def send_proactive_message_async(task, user_id: int):
             role="user",
             show_typing=True
         )
-        
+
         if ai_response:
             cleaned_response = clean_ai_response(ai_response)
             if cleaned_response:
-                # Add message to history
                 await app_context.conversation_manager.add_message_async(user_id, "assistant", cleaned_response)
-                logger.info(f"Proactive message added to history for user {user_id} [{task_id}]")
-                
-                # Enqueue message for sending
                 await app_context.message_queue_manager.enqueue_message(
                     user_id=user_id,
                     chat_id=user_id,
                     text=cleaned_response,
                     message_type="proactive",
                 )
-                logger.info(f"Proactive message enqueued for user {user_id} [{task_id}]")
-            else:
-                logger.info(f"Cleaned proactive message for user {user_id} was empty.")
+                logger.info(f"Proactive message successfully generated and enqueued for user {user_id} [{task_id}]")
         else:
-            logger.error(f"Failed to generate proactive message for user {user_id} [{task_id}]")
+            logger.error(f"AI response was empty for proactive message to user {user_id} [{task_id}]")
 
     except Exception as e:
-        logger.error(f"Error during async proactive message generation for user {user_id} [{task_id}]: {e}")
-        # The main sync task will handle retry logic
+        logger.error(f"Error in send_proactive_message_async for user {user_id} [{task_id}]: {e}", exc_info=True)
+        # The sync task's retry logic will handle this.
         raise
-
-    # Escalate and schedule the next message
-    current_cadence = user_state.get('cadence', '1h')
-    next_cadence = proactive_messaging_service.get_next_interval(current_cadence)
-    logger.info(f"Escalating cadence for user {user_id} from {current_cadence} to {next_cadence}")
-    user_state['cadence'] = next_cadence
-    proactive_messaging_service._set_user_state(user_id, user_state)
-    proactive_messaging_service.schedule_proactive_message(user_id, exclude_task_id=task_id)
+    finally:
+        # CRITICAL: Update state AFTER sending.
+        # This signals that the outreach was completed and the user has not yet replied.
+        user_state = proactive_messaging_service._get_user_state(user_id)
+        user_state['last_proactive_message'] = datetime.now().isoformat()
+        user_state['consecutive_outreaches'] = user_state.get('consecutive_outreaches', 0) + 1
+        user_state['user_replied'] = False
+        # Clear the task ID since this task is now complete.
+        user_state['scheduled_task_id'] = None
+        proactive_messaging_service._set_user_state(user_id, user_state)
+        logger.info(f"Updated user {user_id} state post-outreach. Consecutive outreaches: {user_state['consecutive_outreaches']}.")
 
 
 @celery_app.task(bind=True)
@@ -773,36 +515,64 @@ def manage_proactive_messages(self):
 async def manage_proactive_messages_async(task):
     """
     Async implementation of the proactive message management logic.
+    This is the SOLE authority for scheduling proactive messages.
     """
     task_id = task.request.id
-    logger.info(f"Running async logic for manage_proactive_messages [{task_id}]")
+    logger.info(f"Running proactive message management task [{task_id}]")
 
-    try:
-        user_states = proactive_messaging_service._get_all_user_states()
-        now = datetime.now()
+    user_states = proactive_messaging_service._get_all_user_states()
+    now = datetime.now()
 
-        for user_id, state in user_states.items():
-            scheduled_time = state.get('scheduled_time')
+    for user_id, state in user_states.items():
+        lock_key = f"proactive_messaging:lock:user:{user_id}"
+        lock = proactive_messaging_service.redis_client.lock(lock_key, timeout=60)
 
-            if isinstance(scheduled_time, str):
-                try:
-                    scheduled_time = datetime.fromisoformat(scheduled_time)
-                except (ValueError, TypeError):
-                    logger.error(f"Invalid scheduled_time format for user {user_id}: {scheduled_time}")
+        if lock.acquire(blocking=False):
+            try:
+                # Re-fetch state now that we have the lock
+                state = proactive_messaging_service._get_user_state(user_id)
+
+                if state.get('scheduled_task_id'):
+                    logger.debug(f"Skipping user {user_id}: task {state['scheduled_task_id']} is already scheduled.")
                     continue
 
-            if scheduled_time and scheduled_time < now:
-                logger.info(f"User {user_id} is due for a proactive message. Triggering via service.")
+                current_cadence_name = state.get('cadence', CADENCE_LEVELS[0])
+                if proactive_messaging_service.should_switch_to_long_term_mode(user_id):
+                    current_cadence_name = CADENCE_LEVELS[-1]
+                
+                cadence_config = CADENCE_MAP.get(current_cadence_name)
+                
+                last_message_time = state.get('last_proactive_message')
+                if last_message_time:
+                    interval_with_jitter = proactive_messaging_service.get_interval_with_jitter(current_cadence_name)
+                    next_schedule_time = last_message_time + timedelta(seconds=interval_with_jitter)
+                else:
+                    initial_delay = random.randint(60, 300)
+                    next_schedule_time = now + timedelta(seconds=initial_delay)
+                
+                if now >= next_schedule_time:
+                    logger.info(f"User {user_id} is due for a proactive message. Scheduling now.")
+                    
+                    scheduled_time = proactive_messaging_service.adjust_for_quiet_hours(now)
+                    
+                    new_task = send_proactive_message.apply_async(
+                        args=[user_id],
+                        eta=scheduled_time
+                    )
+                    
+                    state['scheduled_task_id'] = new_task.id
+                    state['cadence'] = current_cadence_name
+                    proactive_messaging_service._set_user_state(user_id, state)
+                    
+                    logger.info(
+                        f"Scheduled new proactive message for user {user_id} with task ID {new_task.id} "
+                        f"at {scheduled_time} (cadence: {current_cadence_name})."
+                    )
 
-                # Use the proactive messaging service to handle scheduling properly
-                # This ensures proper task management and prevents duplicates
-                proactive_messaging_service.schedule_proactive_message(
-                    user_id,
-                    message_type="RegularReachout"
-                )
-
-    except Exception as e:
-        logger.error(f"Async error in manage_proactive_messages_async [{task_id}]: {e}")
+            except Exception as e:
+                logger.error(f"Error processing user {user_id} in manage_proactive_messages: {e}", exc_info=True)
+            finally:
+                lock.release()
 
 
 # Celery Beat Schedule

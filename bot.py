@@ -572,13 +572,14 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         conversation = await self.conversation_manager._ensure_user_and_conversation(user_id)
         conversation_id = str(conversation.id) if conversation else None
         
-        # Notify proactive messaging service about user message BEFORE sending response
+        # Notify proactive messaging service that the user has sent a message.
+        # This will reset the user's proactive messaging cadence state.
         if self.proactive_messaging_service:
             try:
                 self.proactive_messaging_service.handle_user_message(user_id)
-                logger.info("Notified proactive messaging service about user message from user %s", user_id)
+                logger.info("Proactive messaging service notified of user message from %s.", user_id)
             except Exception as e:
-                logger.error("Failed to notify proactive messaging service: %s", e)
+                logger.error("Failed to notify proactive messaging service for user %s: %s", user_id, e)
         
         # Start typing indicator and get AI response
         try:
