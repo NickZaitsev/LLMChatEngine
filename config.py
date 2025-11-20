@@ -46,6 +46,11 @@ AZURE_MODEL = os.getenv('AZURE_MODEL')
 LMSTUDIO_MODEL = os.getenv('LMSTUDIO_MODEL', DEFAULT_LMSTUDIO_MODEL)
 LMSTUDIO_BASE_URL = os.getenv('LMSTUDIO_BASE_URL', 'http://host.docker.internal:1234/v1')
 
+# Gemini Configuration
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+GEMINI_MODEL = os.getenv('GEMINI_MODEL')
+GEMINI_EMBEDDING_MODEL = os.getenv('GEMINI_EMBEDDING_MODEL')
+
 # LM Studio Model Loading Configuration
 LMSTUDIO_AUTO_LOAD = os.getenv('LMSTUDIO_AUTO_LOAD', 'true').lower() in ('true', '1', 'yes', 'on')
 LMSTUDIO_MAX_LOAD_WAIT = int(os.getenv('LMSTUDIO_MAX_LOAD_WAIT', '300'))
@@ -142,8 +147,8 @@ def _validate_config():
     if not DATABASE_URL:
         warnings.warn("DATABASE_URL is required for PostgreSQL storage.")
 
-    if PROVIDER not in ['azure', 'lmstudio']:
-        warnings.warn(f"PROVIDER '{PROVIDER}' is not supported. Supported values: 'azure', 'lmstudio'")
+    if PROVIDER not in ['azure', 'lmstudio', 'gemini']:
+        warnings.warn(f"PROVIDER '{PROVIDER}' is not supported. Supported values: 'azure', 'lmstudio', 'gemini'")
 
     if PROVIDER == 'azure':
         if not AZURE_ENDPOINT:
@@ -161,6 +166,12 @@ def _validate_config():
         if LMSTUDIO_MAX_LOAD_WAIT < 30:
             warnings.warn("LMSTUDIO_MAX_LOAD_WAIT is very low, model loading might timeout")
     
+    if PROVIDER == 'gemini':
+        if not GEMINI_API_KEY:
+            warnings.warn("GEMINI_API_KEY is not set for Gemini provider")
+        if not GEMINI_MODEL:
+            warnings.warn("GEMINI_MODEL is not set for Gemini provider")
+    
     # PromptAssembler validation
     if PROMPT_MEMORY_TOKEN_BUDGET_RATIO < 0 or PROMPT_MEMORY_TOKEN_BUDGET_RATIO > 1:
         warnings.warn("PROMPT_MEMORY_TOKEN_BUDGET_RATIO should be between 0 and 1")
@@ -176,6 +187,11 @@ def _validate_config():
         warnings.warn("MEMORY_SUMMARIZER_MODE must be 'llm' or 'local'")
     if MEMORY_ENABLED and not MEMORY_EMBED_MODEL:
         warnings.warn("MEMORY_ENABLED is true, but MEMORY_EMBED_MODEL is not set.")
+    if MEMORY_ENABLED and MEMORY_EMBEDDING_PROVIDER not in ['lmstudio', 'gemini']:
+        warnings.warn(f"MEMORY_EMBEDDING_PROVIDER '{MEMORY_EMBEDDING_PROVIDER}' is not supported. Supported values: 'lmstudio', 'gemini'")
+    if MEMORY_ENABLED and MEMORY_EMBEDDING_PROVIDER == 'gemini':
+        if not GEMINI_EMBEDDING_MODEL:
+            warnings.warn("GEMINI_EMBEDDING_MODEL is required when MEMORY_EMBEDDING_PROVIDER is 'gemini'")
 
 # Proactive Messaging validation
     if PROACTIVE_MESSAGING_ENABLED:
