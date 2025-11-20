@@ -11,6 +11,7 @@ import asyncio
 import logging
 from typing import Optional
 from memory.llamaindex.embedding import LMStudioEmbeddingModel
+from memory.llamaindex.gemini import GeminiEmbeddingModel
 from llama_index.llms.lmstudio import LMStudio
 from ai_handler import AIHandler
 from config import (
@@ -18,7 +19,7 @@ from config import (
     PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE, MESSAGE_QUEUE_REDIS_URL,
     TELEGRAM_TOKEN, MEMORY_ENABLED,
     VECTOR_STORE_TABLE_NAME, MEMORY_EMBED_MODEL, MEMORY_EMBED_DIM,
-    MEMORY_EMBEDDING_PROVIDER, LMSTUDIO_BASE_URL
+    MEMORY_EMBEDDING_PROVIDER, LMSTUDIO_BASE_URL, GEMINI_EMBEDDING_MODEL
 )
 from memory.manager import LlamaIndexMemoryManager
 from memory.llamaindex.vector_store import PgVectorStore
@@ -86,7 +87,12 @@ class AppContext:
         # 3. Initialize Memory Manager (LlamaIndex stack)
         try:
             if MEMORY_ENABLED:
-                if MEMORY_EMBEDDING_PROVIDER == 'lmstudio':
+                if MEMORY_EMBEDDING_PROVIDER == 'gemini':
+                    embedding_model = GeminiEmbeddingModel(
+                        model_name=GEMINI_EMBEDDING_MODEL
+                    )
+                    logger.info(f"Using Gemini embedding model: {GEMINI_EMBEDDING_MODEL}")
+                elif MEMORY_EMBEDDING_PROVIDER == 'lmstudio':
                     embedding_model = LMStudioEmbeddingModel(
                         model_name=MEMORY_EMBED_MODEL
                     )
