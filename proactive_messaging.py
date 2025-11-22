@@ -360,7 +360,7 @@ class ProactiveMessagingService:
         user_state.update({
             'cadence': CADENCE_LEVELS[0],
             'consecutive_outreaches': 0,
-            'last_proactive_message': None,
+            'last_proactive_message': datetime.now(),
             'scheduled_task_id': None,
             'user_replied': False
         })
@@ -532,6 +532,8 @@ async def manage_proactive_messages_async(task):
                 # Re-fetch state now that we have the lock
                 state = proactive_messaging_service._get_user_state(user_id)
 
+                logger.info(f"Processing user {user_id} with state: {state}")
+
                 if state.get('scheduled_task_id'):
                     logger.debug(f"Skipping user {user_id}: task {state['scheduled_task_id']} is already scheduled.")
                     continue
@@ -543,13 +545,15 @@ async def manage_proactive_messages_async(task):
                 cadence_config = CADENCE_MAP.get(current_cadence_name)
                 
                 last_message_time = state.get('last_proactive_message')
-                if last_message_time:
-                    interval_with_jitter = proactive_messaging_service.get_interval_with_jitter(current_cadence_name)
-                    next_schedule_time = last_message_time + timedelta(seconds=interval_with_jitter)
-                else:
-                    initial_delay = random.randint(60, 300)
-                    next_schedule_time = now + timedelta(seconds=initial_delay)
-                
+                if not last_message_time:
+                    logger.info(f"User {user_id} has no 'last_proactive_message' timestamp. Initializing it to the current time.")
+                    state['last_proactive_message'] = now
+                    proactive_messaging_service._set_user_state(user_id, state)
+                    continue
+
+                interval_with_jitter = proactive_messaging_service.get_interval_with_jitter(current_cadence_name)
+                next_schedule_time = last_message_time + timedelta(seconds=interval_with_jitter)
+
                 if now >= next_schedule_time:
                     logger.info(f"User {user_id} is due for a proactive message. Scheduling now.")
                     
