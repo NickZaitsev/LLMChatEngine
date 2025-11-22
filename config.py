@@ -96,6 +96,7 @@ MAX_TYPING_SPEED = int(os.getenv('MAX_TYPING_SPEED', '30'))  # characters per se
 MAX_DELAY = int(os.getenv('MAX_DELAY', '5'))  # maximum delay in seconds
 RANDOM_OFFSET_MIN = float(os.getenv('RANDOM_OFFSET_MIN', '0.1'))  # minimum random offset in seconds
 RANDOM_OFFSET_MAX = float(os.getenv('RANDOM_OFFSET_MAX', '0.5'))  # maximum random offset in seconds
+INDICATE_TYPING_DURING_DELAY = os.getenv('INDICATE_TYPING_DURING_DELAY', 'false').lower() in ('true', '1', 'yes', 'on')
 # Proactive Messaging Configuration
 PROACTIVE_MESSAGING_ENABLED = os.getenv('PROACTIVE_MESSAGING_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
 PROACTIVE_MESSAGING_REDIS_URL = os.getenv('PROACTIVE_MESSAGING_REDIS_URL', 'redis://redis:6379/0')
