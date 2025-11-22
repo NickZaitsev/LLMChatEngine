@@ -7,7 +7,8 @@ from config import (
     BUFFER_LONG_MESSAGE_TIMEOUT,
     BUFFER_MAX_MESSAGES,
     BUFFER_WORD_COUNT_THRESHOLD,
-    BUFFER_CLEANUP_INTERVAL
+    BUFFER_CLEANUP_INTERVAL,
+    INDICATE_TYPING_DURING_DELAY
 )
 import logging
 
@@ -219,8 +220,9 @@ class BufferManager:
         timeout = await self.get_adaptive_timeout(user_id)
         logger.debug(f"Scheduling dispatch for user {user_id} in {timeout} seconds")
         
-        # Stop typing indicator when scheduling a new dispatch
-        await self._stop_typing_indicator(user_id)
+        # Conditionally stop typing indicator when scheduling a new dispatch
+        if not INDICATE_TYPING_DURING_DELAY:
+            await self._stop_typing_indicator(user_id)
         
         # Create and store new dispatch task
         async def _dispatch_with_timeout():
