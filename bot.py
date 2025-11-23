@@ -8,7 +8,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
-                    PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED,
+                    PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED, PROACTIVE_MESSAGING_ENABLED,
                     PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
                     PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
                     MEMORY_EMBED_MODEL, VECTOR_STORE_TABLE_NAME,
@@ -96,12 +96,14 @@ class AIGirlfriendBot:
         
         # Initialize proactive messaging service
         self.proactive_messaging_service = None
-        if PROACTIVE_MESSAGING_AVAILABLE:
+        if PROACTIVE_MESSAGING_AVAILABLE and PROACTIVE_MESSAGING_ENABLED:
             try:
                 self.proactive_messaging_service = proactive_messaging_service
                 logger.info("Proactive messaging service initialized successfully")
             except Exception as e:
                 logger.error("Failed to initialize proactive messaging service: %s", e)
+        elif PROACTIVE_MESSAGING_AVAILABLE and not PROACTIVE_MESSAGING_ENABLED:
+            logger.info("Proactive messaging is available but disabled by configuration.")
         
         # Initialize message queue manager
         try:

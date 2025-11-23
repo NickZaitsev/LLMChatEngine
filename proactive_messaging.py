@@ -489,13 +489,25 @@ async def send_proactive_message_async(task, user_id: int):
         # CRITICAL: Update state AFTER sending.
         # This signals that the outreach was completed and the user has not yet replied.
         user_state = proactive_messaging_service._get_user_state(user_id)
-        user_state['last_proactive_message'] = datetime.now().isoformat()
+        
+        # Determine the next cadence level
+        current_cadence = user_state.get('cadence', CADENCE_LEVELS[0])
+        next_cadence = proactive_messaging_service.get_next_interval(current_cadence)
+
+        # Update the state
+        user_state['last_proactive_message'] = datetime.now()
         user_state['consecutive_outreaches'] = user_state.get('consecutive_outreaches', 0) + 1
         user_state['user_replied'] = False
-        # Clear the task ID since this task is now complete.
-        user_state['scheduled_task_id'] = None
+        user_state['cadence'] = next_cadence
+        user_state['scheduled_task_id'] = None  # Clear the task ID
+
         proactive_messaging_service._set_user_state(user_id, user_state)
-        logger.info(f"Updated user {user_id} state post-outreach. Consecutive outreaches: {user_state['consecutive_outreaches']}.")
+        
+        logger.info(
+            f"Updated user {user_id} state post-outreach. "
+            f"New cadence: {next_cadence}. "
+            f"Consecutive outreaches: {user_state['consecutive_outreaches']}."
+        )
 
 
 @celery_app.task(bind=True)
@@ -506,6 +518,9 @@ def manage_proactive_messages(self):
     """
     task_id = self.request.id
     logger.info(f"Starting Celery Beat task manage_proactive_messages [{task_id}]")
+    if not proactive_messaging_service.enabled:
+        logger.info(f"Proactive messaging is disabled. Skipping task [{task_id}].")
+        return
     try:
         asyncio.run(manage_proactive_messages_async(self))
     except Exception as e:
@@ -565,7 +580,6 @@ async def manage_proactive_messages_async(task):
                     )
                     
                     state['scheduled_task_id'] = new_task.id
-                    state['cadence'] = current_cadence_name
                     proactive_messaging_service._set_user_state(user_id, state)
                     
                     logger.info(
@@ -579,13 +593,14 @@ async def manage_proactive_messages_async(task):
                 lock.release()
 
 
-# Celery Beat Schedule
-celery_app.conf.beat_schedule = {
-    'manage-proactive-messages': {
-        'task': 'proactive_messaging.manage_proactive_messages',
-        'schedule': crontab(minute='*/1'),  # Run every 1 minute
-    },
-}
+# Celery Beat Schedule (only if enabled)
+if PROACTIVE_MESSAGING_ENABLED:
+    celery_app.conf.beat_schedule = {
+        'manage-proactive-messages': {
+            'task': 'proactive_messaging.manage_proactive_messages',
+            'schedule': crontab(minute='*/1'),  # Run every 1 minute
+        },
+    }
 
 # Default queue
 celery_app.conf.task_default_queue = 'proactive_messaging'
