@@ -8,15 +8,17 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
-                   PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED,
-                   PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
-                   PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
-                   MEMORY_EMBED_MODEL, MEMORY_SUMMARIZER_MODE, MEMORY_CHUNK_OVERLAP, VECTOR_STORE_TABLE_NAME,
-                   MESSAGE_PREVIEW_LENGTH,
-                   POLLING_INTERVAL,
-                   MESSAGE_QUEUE_REDIS_URL,
-                   MESSAGE_QUEUE_MAX_RETRIES,
-                   MESSAGE_QUEUE_LOCK_TIMEOUT)
+                    PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED, PROACTIVE_MESSAGING_ENABLED,
+                    PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
+                    PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
+                    MEMORY_EMBED_MODEL, VECTOR_STORE_TABLE_NAME,
+                    MESSAGE_PREVIEW_LENGTH,
+                    POLLING_INTERVAL,
+                    MESSAGE_QUEUE_REDIS_URL,
+                    MESSAGE_QUEUE_MAX_RETRIES,
+                    MESSAGE_QUEUE_LOCK_TIMEOUT,
+                    LMSTUDIO_BASE_URL, MEMORY_EMBED_DIM)
+from memory.llamaindex.embedding import LMStudioEmbeddingModel
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
 from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response, MessageQueueManager, MessageDispatcher
@@ -42,9 +44,9 @@ if MEMORY_ENABLED:
     try:
         from memory.manager import LlamaIndexMemoryManager
         from memory.llamaindex.vector_store import PgVectorStore
-        from memory.llamaindex.embedding import HuggingFaceEmbeddingModel
         from memory.llamaindex.summarizer import LlamaIndexSummarizer
         from prompt.assembler import PromptAssembler
+        from llama_index.llms.lmstudio import LMStudio
         MEMORY_IMPORTS_AVAILABLE = True
     except ImportError as e:
         logger.warning("Memory/PromptAssembler imports failed: %s", e)
@@ -94,12 +96,14 @@ class AIGirlfriendBot:
         
         # Initialize proactive messaging service
         self.proactive_messaging_service = None
-        if PROACTIVE_MESSAGING_AVAILABLE:
+        if PROACTIVE_MESSAGING_AVAILABLE and PROACTIVE_MESSAGING_ENABLED:
             try:
                 self.proactive_messaging_service = proactive_messaging_service
                 logger.info("Proactive messaging service initialized successfully")
             except Exception as e:
                 logger.error("Failed to initialize proactive messaging service: %s", e)
+        elif PROACTIVE_MESSAGING_AVAILABLE and not PROACTIVE_MESSAGING_ENABLED:
+            logger.info("Proactive messaging is available but disabled by configuration.")
         
         # Initialize message queue manager
         try:
@@ -570,13 +574,14 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         conversation = await self.conversation_manager._ensure_user_and_conversation(user_id)
         conversation_id = str(conversation.id) if conversation else None
         
-        # Notify proactive messaging service about user message BEFORE sending response
+        # Notify proactive messaging service that the user has sent a message.
+        # This will reset the user's proactive messaging cadence state.
         if self.proactive_messaging_service:
             try:
                 self.proactive_messaging_service.handle_user_message(user_id)
-                logger.info("Notified proactive messaging service about user message from user %s", user_id)
+                logger.info("Proactive messaging service notified of user message from %s.", user_id)
             except Exception as e:
-                logger.error("Failed to notify proactive messaging service: %s", e)
+                logger.error("Failed to notify proactive messaging service for user %s: %s", user_id, e)
         
         # Start typing indicator and get AI response
         try:
@@ -724,11 +729,12 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             vector_store = PgVectorStore(
                 db_url=DATABASE_URL,
                 table_name=VECTOR_STORE_TABLE_NAME,
-                embed_dim=384  # Placeholder, will be dynamic later
+                embed_dim=MEMORY_EMBED_DIM  # Placeholder, will be dynamic later
             )
             
             # 2. Initialize EmbeddingModel
-            embedding_model = HuggingFaceEmbeddingModel(model_name=MEMORY_EMBED_MODEL)
+
+            embedding_model = LMStudioEmbeddingModel(MEMORY_EMBED_MODEL)
 
             # 3. Initialize SummarizationModel
             summarizer = LlamaIndexSummarizer(
@@ -788,32 +794,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                     model_name = self.ai_handler.model_client.model_name
                     auto_load = getattr(self.ai_handler.model_client, 'auto_load_model', False)
                     
-                    # Get current model status
-                    status = await model_manager.get_model_info()
-                    logger.info("LM Studio status: %s", status)
-                    
-                    if status.get('server_running', False):
-                        logger.info("LM Studio server is running")
-                        
-                        # Check if target model is loaded
-                        if auto_load:
-                            logger.info("Attempting to ensure model %s is loaded...", model_name)
-                            model_loaded = await model_manager.ensure_model_loaded(model_name, auto_load=True)
-                            
-                            if model_loaded:
-                                logger.info("✅ Model %s is loaded and ready", model_name)
-                            else:
-                                logger.warning("⚠️ Failed to load model %s automatically", model_name)
-                                logger.warning("You may need to manually load the model in LM Studio")
-                        else:
-                            logger.info("Auto-loading disabled, checking if model is already loaded...")
-                            if await model_manager.is_model_loaded(model_name):
-                                logger.info("✅ Model %s is already loaded", model_name)
-                            else:
-                                logger.info("ℹ️ Model %s is not loaded. Enable LMSTUDIO_AUTO_LOAD to load automatically", model_name)
-                    else:
-                        logger.warning("⚠️ LM Studio server is not running or not accessible")
-                        logger.warning("Please ensure LM Studio is running and accessible at the configured URL")
+                    await model_manager.ensure_model_loaded(model_name, auto_load)
                 else:
                     logger.info("LM Studio manager not available, skipping model initialization")
                     

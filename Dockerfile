@@ -25,6 +25,9 @@ COPY requirements.txt .
 # The cache is persisted by Docker and reused, avoiding re-downloads.
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
 
+# Pre-cache tiktoken models to avoid runtime downloads
+RUN python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
+
 
 # ---- Final Stage ----
 # This stage creates the lean, production-ready image.

@@ -193,15 +193,15 @@ class PostgresMessageRepo:
             
             return [
                 Message(
-                    id=msg.id,
-                    conversation_id=msg.conversation_id,
-                    role=msg.role,
-                    content=msg.content,
-                    extra_data=msg.extra_data,
-                    token_count=msg.token_count,
-                    created_at=msg.created_at
+                    id=m.id,
+                    conversation_id=m.conversation_id,
+                    role=m.role,
+                    content=m.content,
+                    extra_data=m.extra_data,
+                    token_count=m.token_count,
+                    created_at=m.created_at
                 )
-                for msg in selected_messages
+                for m in selected_messages
             ]
     
     async def fetch_messages_since(self, conversation_id: str, since_ts: datetime) -> List[Message]:
@@ -233,15 +233,15 @@ class PostgresMessageRepo:
             
             return [
                 Message(
-                    id=msg.id,
-                    conversation_id=msg.conversation_id,
-                    role=msg.role,
-                    content=msg.content,
-                    extra_data=msg.extra_data,
-                    token_count=msg.token_count,
-                    created_at=msg.created_at
+                    id=m.id,
+                    conversation_id=m.conversation_id,
+                    role=m.role,
+                    content=m.content,
+                    extra_data=m.extra_data,
+                    token_count=m.token_count,
+                    created_at=m.created_at
                 )
-                for msg in messages
+                for m in messages
             ]
     
     async def list_messages(
@@ -366,6 +366,108 @@ class PostgresMessageRepo:
             Estimated token count
         """
         return self.token_estimator.estimate_tokens(text)
+
+    async def count_active_messages(self, conversation_id: str, last_summarized_message_id: Optional[UUID]) -> int:
+        """
+        Count active (unsummarized) messages in a conversation.
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(func.count(MessageModel.id)).where(
+                MessageModel.conversation_id == conversation_uuid
+            )
+            if last_summarized_message_id:
+                # We need to get the created_at timestamp of the last summarized message
+                last_summarized_message = await session.get(MessageModel, last_summarized_message_id)
+                if last_summarized_message:
+                    stmt = stmt.where(MessageModel.created_at > last_summarized_message.created_at)
+
+            result = await session.execute(stmt)
+            return result.scalar_one()
+
+    async def fetch_active_messages(self, conversation_id: str, token_budget: int, last_summarized_message_id: Optional[UUID]) -> List[Message]:
+        """
+        Fetch recent active (unsummarized) messages within a token budget.
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(MessageModel).where(
+                MessageModel.conversation_id == conversation_uuid
+            )
+            if last_summarized_message_id:
+                last_summarized_message = await session.get(MessageModel, last_summarized_message_id)
+                if last_summarized_message:
+                    stmt = stmt.where(MessageModel.created_at > last_summarized_message.created_at)
+            
+            stmt = stmt.order_by(desc(MessageModel.created_at))
+            
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+
+            selected_messages = []
+            current_tokens = 0
+            for message in messages:
+                if current_tokens + message.token_count <= token_budget:
+                    selected_messages.append(message)
+                    current_tokens += message.token_count
+                else:
+                    break
+            
+            selected_messages.reverse()
+            
+            return [
+                Message(
+                    id=m.id,
+                    conversation_id=m.conversation_id,
+                    role=m.role,
+                    content=m.content,
+                    extra_data=m.extra_data,
+                    token_count=m.token_count,
+                    created_at=m.created_at
+                ) for m in selected_messages
+            ]
+
+    async def get_messages_for_summary(self, conversation_id: str, last_summarized_message_id: Optional[UUID]) -> List[Message]:
+        """
+        Fetch all active messages to be summarized.
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(MessageModel).where(
+                MessageModel.conversation_id == conversation_uuid
+            )
+            if last_summarized_message_id:
+                last_summarized_message = await session.get(MessageModel, last_summarized_message_id)
+                if last_summarized_message:
+                    stmt = stmt.where(MessageModel.created_at > last_summarized_message.created_at)
+
+            stmt = stmt.order_by(MessageModel.created_at.asc())
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+            
+            return [
+                Message(
+                    id=m.id,
+                    conversation_id=m.conversation_id,
+                    role=m.role,
+                    content=m.content,
+                    extra_data=m.extra_data,
+                    token_count=m.token_count,
+                    created_at=m.created_at
+                ) for m in messages
+            ]
 
 
 class PostgresMessageHistoryRepo:
@@ -784,7 +886,9 @@ class PostgresConversationRepo:
                     persona_id=conversation_model.persona_id,
                     title=conversation_model.title,
                     extra_data=conversation_model.extra_data,
-                    created_at=conversation_model.created_at
+                    created_at=conversation_model.created_at,
+                    summary=conversation_model.summary,
+                    last_summarized_message_id=conversation_model.last_summarized_message_id
                 )
                 
             except IntegrityError as e:
@@ -823,7 +927,9 @@ class PostgresConversationRepo:
                 persona_id=conversation.persona_id,
                 title=conversation.title,
                 extra_data=conversation.extra_data,
-                created_at=conversation.created_at
+                created_at=conversation.created_at,
+                summary=conversation.summary,
+                last_summarized_message_id=conversation.last_summarized_message_id
             )
     
     async def list_conversations(self, user_id: str) -> List[Conversation]:
@@ -856,60 +962,58 @@ class PostgresConversationRepo:
                     persona_id=conv.persona_id,
                     title=conv.title,
                     extra_data=conv.extra_data,
-                    created_at=conv.created_at
+                    created_at=conv.created_at,
+                    summary=conv.summary,
+                    last_summarized_message_id=conv.last_summarized_message_id
                 )
                 for conv in conversations
             ]
     
     async def update_conversation(
-        self, 
-        conversation_id: str, 
-        title: str = None, 
-        extra_data: Dict[str, Any] = None
+        self,
+        conversation_id: str,
+        title: str = None,
+        extra_data: Dict[str, Any] = None,
+        summary: str = None,
+        last_summarized_message_id: UUID = None
     ) -> Optional[Conversation]:
         """
         Update an existing conversation.
-        
-        Args:
-            conversation_id: UUID string of the conversation
-            title: New title (if provided)
-            extra_data: New extra_data (if provided)
-            
-        Returns:
-            Updated Conversation object if found, None otherwise
         """
         try:
             conversation_uuid = UUID(conversation_id)
         except ValueError as e:
             raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
-        
+
         async with self.session_maker() as session:
-            stmt = select(ConversationModel).where(
-                ConversationModel.id == conversation_uuid
-            )
-            
+            stmt = select(ConversationModel).where(ConversationModel.id == conversation_uuid)
             result = await session.execute(stmt)
             conversation = result.scalar_one_or_none()
-            
+
             if not conversation:
                 return None
-            
-            # Update fields if provided
+
             if title is not None:
                 conversation.title = title
             if extra_data is not None:
                 conversation.extra_data = extra_data
-            
+            if summary is not None:
+                conversation.summary = summary
+            if last_summarized_message_id is not None:
+                conversation.last_summarized_message_id = last_summarized_message_id
+
             await session.commit()
             await session.refresh(conversation)
-            
+
             return Conversation(
                 id=conversation.id,
                 user_id=conversation.user_id,
                 persona_id=conversation.persona_id,
                 title=conversation.title,
                 extra_data=conversation.extra_data,
-                created_at=conversation.created_at
+                created_at=conversation.created_at,
+                summary=conversation.summary,
+                last_summarized_message_id=conversation.last_summarized_message_id
             )
 
 

@@ -1,13 +1,12 @@
 # Telegram Bot Configuration
 TELEGRAM_TOKEN=your_telegram_bot_token_here
 
-# Database Configuration (NEW - PostgreSQL Storage)
+# Database Configuration
 DATABASE_URL=postgresql+asyncpg://ai_bot:your_secure_password@localhost:5432/ai_bot
 DB_PASSWORD=your_secure_password_here
 USE_PGVECTOR=true
 
-
-# LLM Provider Configuration (REQUIRED for AI responses)
+# LLM Provider Configuration
 PROVIDER=azure                                    # Options: "azure" or "lmstudio"
 AZURE_ENDPOINT=https://your-endpoint.openai.azure.com/
 AZURE_API_KEY=your_azure_api_key_here
@@ -18,157 +17,78 @@ LMSTUDIO_MODEL=deepseek/DeepSeek-V3-0324         # Any LM Studio model name
 LMSTUDIO_BASE_URL=http://localhost:1234/v1       # LM Studio API endpoint
 LMSTUDIO_AUTO_LOAD=true                          # Automatically load model at startup
 LMSTUDIO_MAX_LOAD_WAIT=300                       # Max seconds to wait for model loading
-LMSTUDIO_SERVER_TIMEOUT=30                       # Request timeout for LM Studio API
+LMSTUDIO_SERVER_TIMEOUT=80                       # Request timeout for LM Studio API
 LMSTUDIO_STARTUP_CHECK=true                      # Check and load model during bot startup
 
 # Bot Personality Configuration
 BOT_NAME=Luna
-BOT_PERSONALITY=You are {BOT_NAME}, a caring and affectionate AI girlfriend. You are sweet, supportive, and always there to listen. You love to chat about daily life, give emotional support, and share positive energy. You are romantic but not overly sexual. You respond with warmth and empathy.
+BOT_PERSONALITY="You are {BOT_NAME}, a caring and affectionate AI girlfriend. You are sweet, supportive, and always there to listen. You love to chat about daily life, give emotional support, and share positive energy. You are romantic but not overly sexual. You respond with warmth and empathy."
 
-# Conversation Settings - OPTIMIZED FOR MAXIMUM MEMORY
-MAX_CONVERSATION_HISTORY=100          # Much higher message limit
+# Conversation Settings
+MAX_CONVERSATION_HISTORY=100
 TEMPERATURE=0.8
+MAX_ACTIVE_MESSAGES=50
 
-# Context Management - USING YOUR FULL 8000/4000 TOKEN LIMITS
-MAX_CONTEXT_TOKENS=8000               # Your full input capacity
-RESERVED_TOKENS=500                   # Minimal reserve for current interaction
-# Result: 7500 tokens available for conversation history!
-
-
-# PromptAssembler Configuration Example
-
-# PostgreSQL Configuration (MANDATORY - In-memory storage is no longer supported)
-DATABASE_URL=postgresql://user:password@localhost:5432/ai_bot_db
-USE_PGVECTOR=true
-
+# Context Management
+MAX_CONTEXT_TOKENS=8000
+RESERVED_TOKENS=500
 
 # PromptAssembler Settings
 PROMPT_MAX_MEMORY_ITEMS=3
 PROMPT_MEMORY_TOKEN_BUDGET_RATIO=0.4
-PROMPT_TRUNCATION_LENGTH=200  
+PROMPT_TRUNCATION_LENGTH=200
 PROMPT_INCLUDE_SYSTEM_TEMPLATE=true
 PROMPT_HISTORY_BUDGET=7500
 PROMPT_REPLY_TOKEN_BUDGET=500
 
-# Memory Manager Configuration (required for PromptAssembler)
+# LlamaIndex Configuration
 MEMORY_ENABLED=true
-MEMORY_EMBED_MODEL=sentence-transformers/all-MiniLM-L6-v2
-MEMORY_SUMMARIZER_MODE=llm
-MEMORY_CHUNK_OVERLAP=2
+MEMORY_SUMMARIZER_MODE=local # 'llm' or 'local'
+MEMORY_EMBEDDING_PROVIDER=lmstudio
+MEMORY_EMBED_MODEL="Qwen3-Embedding-0.6B"
+MEMORY_EMBED_DIM=1024 # Embedding dimension for the model
+VECTOR_STORE_TABLE_NAME="llama_pg_vector_store"
+MEMORY_CHUNK_OVERLAP=20
 
-# Note: PromptAssembler requires:
-# 2. DATABASE_URL configured
-# 3. MEMORY_ENABLED=true
-# 4. PostgreSQL with pgvector extension (for embeddings)
-
-# Example complete configuration:
-# DATABASE_URL=postgresql://user:password@localhost:5432/ai_bot_db
-# USE_PGVECTOR=true
-# MEMORY_ENABLED=true
-
-
-
-
-
-
-
-# 🎯 OPTIMIZED SETTINGS EXPLAINED:
-# - MAX_CONTEXT_TOKENS=8000: Uses your full input capacity
-# - RESERVED_TOKENS=500: Minimal reserve, maximum history
-# - MAX_TOKENS=3000: Uses most of your 4000 output capacity
-# - MAX_CONVERSATION_HISTORY=100: Much higher message limit
-# 
-# Result: bot can remember ~50-100 message exchanges with full context!
-
-# 🔧 LLM PROVIDER SETUP (REQUIRED):
-# - PROVIDER: Choose between "azure" (cloud) or "lmstudio" (local)
-# - For Azure: Set AZURE_ENDPOINT, AZURE_API_KEY, and AZURE_MODEL
-# - For LM Studio: Configure all LMSTUDIO_* settings below
-#
-# 🚀 LM STUDIO AUTOMATIC MODEL LOADING:
-# - LMSTUDIO_AUTO_LOAD=true: Bot will automatically load your model at startup
-# - LMSTUDIO_STARTUP_CHECK=true: Check model status during bot initialization
-# - LMSTUDIO_MAX_LOAD_WAIT: How long to wait for model loading (default: 300s)
-# - The bot will ensure your model is loaded before processing any requests!
-#
-# ⚠️  IMPORTANT: You must configure at least one provider for AI responses to work!
-# Typing Simulation Configuration
-# Minimum typing speed in characters per second
+# Typing Simulation
 MIN_TYPING_SPEED=10
-
-# Maximum typing speed in characters per second
 MAX_TYPING_SPEED=30
-
-# Maximum delay in seconds between messages
 MAX_DELAY=5
-
-# Minimum random offset in seconds
 RANDOM_OFFSET_MIN=0.1
-
-# Maximum random offset in seconds
 RANDOM_OFFSET_MAX=0.5
 
-# Polling Configuration
-# Time in seconds between getUpdates requests (lower = more frequent updates, higher = less server load)
-POLLING_INTERVAL=0.1
-
-
-# Proactive Messaging Configuration
+# Proactive Messaging
 PROACTIVE_MESSAGING_ENABLED=true
-PROACTIVE_MESSAGING_REDIS_URL=redis://localhost:6379/0
-
-# Proactive messaging intervals (in seconds)
+PROACTIVE_MESSAGING_REDIS_URL=redis://redis:6379/0
 PROACTIVE_MESSAGING_INTERVAL_1H=3600
 PROACTIVE_MESSAGING_INTERVAL_9H=32400
 PROACTIVE_MESSAGING_INTERVAL_1D=86400
 PROACTIVE_MESSAGING_INTERVAL_1W=604800
 PROACTIVE_MESSAGING_INTERVAL_1MO=2592000
-
-# Jitter for intervals (in seconds)
 PROACTIVE_MESSAGING_JITTER_1H=900
 PROACTIVE_MESSAGING_JITTER_9H=1800
 PROACTIVE_MESSAGING_JITTER_1D=7200
 PROACTIVE_MESSAGING_JITTER_1W=43200
 PROACTIVE_MESSAGING_JITTER_1MO=86400
-
-# Quiet hours (in 24-hour format)
 PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED=true
-PROACTIVE_MESSAGING_QUIET_HOURS_START=02:30
-PROACTIVE_MESSAGING_QUIET_HOURS_END=08:00
-
-# Consecutive outreach settings
+PROACTIVE_MESSAGING_QUIET_HOURS_START="02:30"
+PROACTIVE_MESSAGING_QUIET_HOURS_END="08:00"
 PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES=5
-
-# Retry policies
 PROACTIVE_MESSAGING_RETRY_DELAY=300
 PROACTIVE_MESSAGING_MAX_RETRIES=3
+PROACTIVE_MESSAGING_RESTART_DELAY_MAX=900
+PROACTIVE_MESSAGING_PROMPT="Сгенерируй дружеское, заботливое сообщение, чтобы проверить, как у пользователя дела, на том языке, на котором ты обычно с ним разговариваешь. Помни: ты человек, а не ИИ. Сообщение должно быть кратким и естественным. Не повторяйся"
 
-# Rescheduling delay for proactive messaging restart (in seconds)
-PROACTIVE_MESSAGING_RESTART_DELAY_MAX=300
-
-# Proactive messaging prompt
-PROACTIVE_MESSAGING_PROMPT=Сгенерируй дружеское, заботливое сообщение, чтобы проверить, как у пользователя дела, на том языке, на котором ты обычно с ним разговариваешь. Помни: ты человек, а не ИИ. Сообщение должно быть кратким и естественным.
-
-# Buffer Manager Configuration
-# Timeout for short messages in seconds
-BUFFER_SHORT_MESSAGE_TIMEOUT=3.5
-
-# Timeout for long messages in seconds
-BUFFER_LONG_MESSAGE_TIMEOUT=0.1
-
-# Maximum number of messages to buffer
-BUFFER_MAX_MESSAGES=10
-
-# Threshold for determining short vs long messages (in words)
-BUFFER_WORD_COUNT_THRESHOLD=10
-
-# Interval for cleaning up inactive buffers in seconds
-BUFFER_CLEANUP_INTERVAL=300
-# Message Queue Configuration
-MESSAGE_QUEUE_REDIS_URL=redis://localhost:6379/0
+# Message Queue
+MESSAGE_QUEUE_REDIS_URL=redis://redis:6379/0
 MESSAGE_QUEUE_MAX_RETRIES=3
 MESSAGE_QUEUE_LOCK_TIMEOUT=30
 MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL=10
 MESSAGE_QUEUE_DISPATCHER_INTERVAL=0.1
 
-# Message Queue Delay Configuration
+# Buffer Manager
+BUFFER_SHORT_MESSAGE_TIMEOUT=4
+BUFFER_LONG_MESSAGE_TIMEOUT=0.1
+BUFFER_MAX_MESSAGES=8
+BUFFER_WORD_COUNT_THRESHOLD=30
+BUFFER_CLEANUP_INTERVAL=300

@@ -73,18 +73,28 @@ class LlamaIndexMemoryManager:
         """
         import logging
         logger = logging.getLogger(__name__)
-        logger.debug(f"get_context called with user_id={user_id}, query='{query[:50]}...', top_k={top_k}")
+        logger.info(f"==> get_context called with user_id='{user_id}', top_k={top_k}")
         try:
             query_embedding = await self._embedding_model.get_embedding(query)
-            logger.debug(f"Query embedding generated: length={len(query_embedding)}")
+            if not query_embedding:
+                logger.warning("Failed to generate query embedding. Returning empty context.")
+                return ""
+            logger.info(f"Query embedding generated (length: {len(query_embedding)})")
+            
+            logger.info(f"==> Calling vector_store.query with user_id='{user_id}'")
             nodes = await self._vector_store.query(query_embedding, top_k, user_id)
-            logger.debug(f"Vector store query returned {len(nodes)} nodes")
+            logger.info(f"<== Vector store query returned {len(nodes)} nodes")
+
+            if not nodes:
+                logger.warning("Vector store returned no nodes.")
+                return ""
+
             context = "\n".join([node.get_content() for node in nodes])
-            logger.debug(f"Context assembled: length={len(context)}")
+            logger.info(f"Context assembled (length: {len(context)})")
             return context
         except Exception as e:
             logger.error(f"Error in get_context: {e}", exc_info=True)
-            raise
+            return ""
 
     async def trigger_summarization(self, user_id: str, prompt_template: str) -> None:
         """

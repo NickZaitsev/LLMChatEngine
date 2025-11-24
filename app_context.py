@@ -10,19 +10,22 @@ across the application, particularly in Celery tasks.
 import asyncio
 import logging
 from typing import Optional
-
+from memory.llamaindex.embedding import LMStudioEmbeddingModel
+from memory.llamaindex.gemini import GeminiEmbeddingModel
+from llama_index.llms.lmstudio import LMStudio
 from ai_handler import AIHandler
 from config import (
     DATABASE_URL, USE_PGVECTOR, PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
     PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE, MESSAGE_QUEUE_REDIS_URL,
-    TELEGRAM_TOKEN, MEMORY_ENABLED, EMBEDDING_MODEL_ID, SUMMARIZATION_LLM_ID,
-    SUMMARIZATION_PROMPT_TEMPLATE, VECTOR_STORE_TABLE_NAME
+    TELEGRAM_TOKEN, MEMORY_ENABLED,
+    VECTOR_STORE_TABLE_NAME, MEMORY_EMBED_MODEL, MEMORY_EMBED_DIM,
+    MEMORY_EMBEDDING_PROVIDER, LMSTUDIO_BASE_URL, GEMINI_EMBEDDING_MODEL
 )
 from memory.manager import LlamaIndexMemoryManager
 from memory.llamaindex.vector_store import PgVectorStore
-from memory.llamaindex.embedding import HuggingFaceEmbeddingModel
 from memory.llamaindex.summarizer import LlamaIndexSummarizer
 from message_manager import MessageQueueManager, TypingIndicatorManager
+from llama_index.llms.lmstudio import LMStudio
 from prompt.assembler import PromptAssembler
 from storage_conversation_manager import PostgresConversationManager
 from telegram import Bot
@@ -84,22 +87,25 @@ class AppContext:
         # 3. Initialize Memory Manager (LlamaIndex stack)
         try:
             if MEMORY_ENABLED:
-                embedding_model = HuggingFaceEmbeddingModel(model_name=EMBEDDING_MODEL_ID)
-                
-                # Dynamically get embed_dim from the model
-                embed_dim = 384  # Replace with actual dynamic retrieval if possible
-                try:
-                    # This is a placeholder for getting the dimension
-                    # In a real scenario, the model would expose this
-                    if hasattr(embedding_model._model, 'get_sentence_embedding_dimension'):
-                         embed_dim = embedding_model._model.get_sentence_embedding_dimension()
-                except Exception:
-                    logger.warning(f"Could not dynamically get embedding dimension. Falling back to {embed_dim}.")
+                if MEMORY_EMBEDDING_PROVIDER == 'gemini':
+                    embedding_model = GeminiEmbeddingModel(
+                        model_name=GEMINI_EMBEDDING_MODEL
+                    )
+                    logger.info(f"Using Gemini embedding model: {GEMINI_EMBEDDING_MODEL}")
+                elif MEMORY_EMBEDDING_PROVIDER == 'lmstudio':
+                    embedding_model = LMStudioEmbeddingModel(
+                        model_name=MEMORY_EMBED_MODEL
+                    )
+                    logger.info(f"Using lmstudio embedding model: {MEMORY_EMBED_MODEL}")
+                else:
+                    raise ValueError(f"Unsupported embedding provider: {MEMORY_EMBEDDING_PROVIDER}")
+
+                logger.info(f"Using embedding dimension: {MEMORY_EMBED_DIM}")
 
                 vector_store = PgVectorStore(
                     db_url=DATABASE_URL,
                     table_name=VECTOR_STORE_TABLE_NAME,
-                    embed_dim=embed_dim
+                    embed_dim=MEMORY_EMBED_DIM
                 )
 
                 summarization_model = LlamaIndexSummarizer(ai_handler=self.ai_handler)

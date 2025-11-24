@@ -31,6 +31,7 @@ result_expires = 3600  # 1 hour
 task_routes = {
     'proactive_messaging.send_proactive_message': {'queue': 'proactive_messaging'},
     'proactive_messaging.manage_proactive_messages': {'queue': 'proactive_messaging'},
+    'memory.tasks.create_conversation_summary': {'queue': 'memory_tasks'},
 }
 
 # Task Queues
@@ -39,5 +40,9 @@ task_queues = {
     'proactive_messaging': {
         'exchange': 'proactive_messaging',
         'routing_key': 'proactive_messaging',
+    },
+    'memory_tasks': {
+        'exchange': 'memory_tasks',
+        'routing_key': 'memory_tasks',
     },
 }

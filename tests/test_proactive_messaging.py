@@ -1,275 +1,159 @@
-"""
-Tests for the proactive messaging system.
-"""
-
-import unittest
-from unittest.mock import patch, MagicMock
-from datetime import datetime, timedelta
-import sys
-import os
+import asyncio
+import pytest
 import json
+from datetime import datetime, timedelta
+from unittest.mock import patch, MagicMock
 
-# Add the parent directory to the path to import proactive_messaging
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from proactive_messaging import ProactiveMessagingService, manage_proactive_messages_async, CADENCE_LEVELS, PROACTIVE_MESSAGING_CADENCES
+from config import PROACTIVE_MESSAGING_QUIET_HOURS_START, PROACTIVE_MESSAGING_QUIET_HOURS_END
 
-from proactive_messaging import (
-    ProactiveMessagingService,
-    CADENCE_LEVELS,
-    INTERVALS,
-    JITTERS
-)
+@pytest.fixture
+def mock_redis_client():
+    """Fixture for a mock Redis client."""
+    client = MagicMock()
+    client.get.return_value = None
+    client.set.return_value = True
+    client.keys.return_value = []
+    return client
 
-class TestProactiveMessagingService(unittest.TestCase):
-    """Test cases for the ProactiveMessagingService class."""
-    
-    def setUp(self):
-        """Set up test fixtures before each test method."""
-        # Patch Redis client to avoid connecting to a real Redis server
-        self.redis_patch = patch('proactive_messaging.redis.from_url')
-        self.mock_redis_client = self.redis_patch.start()
-        
-        # Create a mock Redis instance
-        self.mock_redis = MagicMock()
-        self.mock_redis_client.return_value = self.mock_redis
-        
-        # Initialize the service with mocked Redis
-        self.service = ProactiveMessagingService()
-        
-        # Mock the logger to prevent actual logging during tests
-        self.service.logger = MagicMock()
-    
-    def tearDown(self):
-        """Clean up after each test method."""
-        self.redis_patch.stop()
-    
-    def test_parse_time_valid(self):
-        """Test parsing valid time strings."""
-        hours, minutes = self.service.parse_time("14:30")
-        self.assertEqual(hours, 14)
-        self.assertEqual(minutes, 30)
-        
-        hours, minutes = self.service.parse_time("02:05")
-        self.assertEqual(hours, 2)
-        self.assertEqual(minutes, 5)
-    
-    def test_parse_time_invalid(self):
-        """Test parsing invalid time strings."""
-        hours, minutes = self.service.parse_time("invalid")
-        self.assertEqual(hours, 0)
-        self.assertEqual(minutes, 0)
-        
-        hours, minutes = self.service.parse_time("25:70")
-        self.assertEqual(hours, 25)
-        self.assertEqual(minutes, 70)
-    
-    def test_is_within_quiet_hours(self):
-        """Test checking if time is within quiet hours."""
-        # Set quiet hours for testing
-        self.service.quiet_hours_start = "02:30"
-        self.service.quiet_hours_end = "08:00"
-        
-        # Test time within quiet hours
-        test_time = datetime(2023, 1, 1, 5, 0)  # 5:00 AM
-        self.assertTrue(self.service.is_within_quiet_hours(test_time))
-        
-        # Test time outside quiet hours
-        test_time = datetime(2023, 1, 1, 10, 0)  # 10:00 AM
-        self.assertFalse(self.service.is_within_quiet_hours(test_time))
-        
-        # Test boundary times
-        test_time = datetime(2023, 1, 1, 2, 30)  # Start of quiet hours
-        self.assertTrue(self.service.is_within_quiet_hours(test_time))
-        
-        test_time = datetime(2023, 1, 1, 8, 0)  # End of quiet hours
-        self.assertTrue(self.service.is_within_quiet_hours(test_time))
-    
-    def test_adjust_for_quiet_hours(self):
-        """Test adjusting scheduled time for quiet hours."""
-        # Set quiet hours for testing
-        self.service.quiet_hours_start = "02:30"
-        self.service.quiet_hours_end = "08:00"
-        
-        # Test time within quiet hours
-        scheduled_time = datetime(2023, 1, 1, 5, 0)  # 5:00 AM
-        adjusted_time = self.service.adjust_for_quiet_hours(scheduled_time)
-        
-        # Should be adjusted to end of quiet hours plus buffer
-        expected_time = datetime(2023, 1, 1, 8, 5)  # 8:05 AM
-        self.assertEqual(adjusted_time, expected_time)
-        
-        # Test time outside quiet hours (should remain unchanged)
-        scheduled_time = datetime(2023, 1, 1, 10, 0)  # 10:00 AM
-        adjusted_time = self.service.adjust_for_quiet_hours(scheduled_time)
-        self.assertEqual(adjusted_time, scheduled_time)
-    
-    def test_get_next_interval(self):
-        """Test getting the next interval in cadence escalation."""
-        # Test normal progression
-        self.assertEqual(self.service.get_next_interval('1h'), '9h')
-        self.assertEqual(self.service.get_next_interval('9h'), '1d')
-        self.assertEqual(self.service.get_next_interval('1d'), '1w')
-        self.assertEqual(self.service.get_next_interval('1w'), '1mo')
-        
-        # Test last level (should stay at last level)
-        self.assertEqual(self.service.get_next_interval('1mo'), '1mo')
-        
-        # Test invalid current cadence (should start from beginning)
-        self.assertEqual(self.service.get_next_interval('invalid'), '1h')
-    
-    def test_get_interval_with_jitter(self):
-        """Test getting interval with jitter applied."""
-        # Mock INTERVALS and JITTERS to use expected values for testing
-        with patch('proactive_messaging.INTERVALS', {'1h': 3600}), \
-             patch('proactive_messaging.JITTERS', {'1h': 900}):
-            # Test with 1h cadence
-            interval = self.service.get_interval_with_jitter('1h')
-            
-            # Should be base interval (3600) plus or minus jitter (900)
-            # So between 2700 and 4500 seconds
-            self.assertGreaterEqual(interval, 2700)
-            self.assertLessEqual(interval, 4500)
-            
-            # Test minimum interval (should be at least 60 seconds)
-            with patch.dict(JITTERS, {'1h': 3600}):  # Large jitter
-                interval = self.service.get_interval_with_jitter('1h')
-                self.assertGreaterEqual(interval, 60)
-    
-    def test_should_switch_to_long_term_mode(self):
-        """Test checking if user should switch to long-term mode."""
-        user_id = 12345
-        
-        # Test with fewer than max consecutive outreaches
-        user_state = {'consecutive_outreaches': 3}
-        self.mock_redis.get.return_value = json.dumps(user_state)
-        self.assertFalse(self.service.should_switch_to_long_term_mode(user_id))
-        
-        # Test with exactly max consecutive outreaches
-        user_state = {'consecutive_outreaches': 5}
-        self.mock_redis.get.return_value = json.dumps(user_state)
-        self.assertTrue(self.service.should_switch_to_long_term_mode(user_id))
-        
-        # Test with more than max consecutive outreaches
-        user_state = {'consecutive_outreaches': 10}
-        self.mock_redis.get.return_value = json.dumps(user_state)
-        self.assertTrue(self.service.should_switch_to_long_term_mode(user_id))
-        
-        # Test with user not in states
-        self.mock_redis.get.return_value = None
-        self.assertFalse(self.service.should_switch_to_long_term_mode(9999))
-    
-    def test_reset_cadence(self):
-        """Test resetting cadence to shortest interval."""
-        user_id = 12345
-        
-        # Set initial state in Redis
-        initial_state = {
-            'cadence': '1w',
-            'consecutive_outreaches': 3,
-            'last_proactive_message': datetime.now().isoformat(),
-            'user_replied': False
-        }
-        self.mock_redis.get.return_value = json.dumps(initial_state)
-        
-        # Reset cadence
-        self.service.reset_cadence(user_id)
-        
-        # Check that Redis set was called with the correct state
-        expected_state = {
-            'cadence': '1h',
-            'consecutive_outreaches': 0,
-            'last_proactive_message': None,
-            'user_replied': False
-        }
-        self.mock_redis.set.assert_called()
-    
-    def test_update_user_reply_status_replied(self):
-        """Test updating user reply status when user replied."""
-        user_id = 12345
-        
-        # Set initial state in Redis
-        initial_state = {
-            'cadence': '1w',
-            'consecutive_outreaches': 3,
-            'user_replied': False
-        }
-        self.mock_redis.get.return_value = json.dumps(initial_state)
-        
-        # Update user reply status
-        self.service.update_user_reply_status(user_id, replied=True)
-        
-        # Check that Redis set was called
-        self.mock_redis.set.assert_called()
-    
-    def test_update_user_reply_status_not_replied(self):
-        """Test updating user reply status when user did not reply."""
-        user_id = 12345
-        
-        # Set initial state in Redis
-        initial_state = {
-            'cadence': '1w',
-            'consecutive_outreaches': 3,
-            'user_replied': True
-        }
-        self.mock_redis.get.return_value = json.dumps(initial_state)
-        
-        # Update user reply status
-        self.service.update_user_reply_status(user_id, replied=False)
-        
-        # Check that Redis set was called
-        self.mock_redis.set.assert_called()
-    
-    @patch('proactive_messaging.send_proactive_message')
-    def test_schedule_proactive_message(self, mock_send_task):
-        """Test scheduling a proactive message."""
-        user_id = 12345
-        
-        # Enable proactive messaging
-        self.service.enabled = True
-        
-        # Mock Redis get to return None (user not found)
-        self.mock_redis.get.return_value = None
-        
-        # Schedule proactive message
-        self.service.schedule_proactive_message(user_id)
-        
-        # Check that Redis set was called (user state was initialized)
-        self.mock_redis.set.assert_called()
-        
-        # Check that Celery task was scheduled
-        mock_send_task.apply_async.assert_called_once()
-    
-    @patch('proactive_messaging.send_proactive_message')
-    def test_schedule_proactive_message_disabled(self, mock_send_task):
-        """Test scheduling a proactive message when disabled."""
-        user_id = 12345
-        
-        # Disable proactive messaging
-        self.service.enabled = False
-        
-        # Schedule proactive message
-        self.service.schedule_proactive_message(user_id)
-        
-        # Check that Celery task was not scheduled
-        mock_send_task.apply_async.assert_not_called()
-    
-    @patch('proactive_messaging.send_proactive_message')
-    def test_handle_user_message(self, mock_send_task):
-        """Test handling incoming user message."""
-        user_id = 12345
-        
-        # Set initial state in Redis
-        initial_state = {
-            'scheduled_time': (datetime.now() + timedelta(hours=1)).isoformat(),
-            'cadence': '1w',
-            'user_replied': False
-        }
-        self.mock_redis.get.return_value = json.dumps(initial_state)
-        
-        # Handle user message
-        self.service.handle_user_message(user_id)
-        
-        # Check that Redis set was called (state was updated)
-        self.mock_redis.set.assert_called()
+@pytest.fixture
+def proactive_service(mock_redis_client):
+    """
+    Fixture that provides a ProactiveMessagingService instance with a mocked Redis client,
+    and patches the singleton instance in the module.
+    """
+    # Create an instance of the service with a mocked redis client
+    service = ProactiveMessagingService()
+    service.redis_client = mock_redis_client
 
-if __name__ == '__main__':
-    unittest.main()
+    # Patch the singleton instance in the module where it's defined
+    with patch('proactive_messaging.proactive_messaging_service', service):
+        # Also patch the logger to suppress output during tests
+        with patch('proactive_messaging.logger'):
+            yield service
+
+@pytest.mark.asyncio
+@patch('proactive_messaging.send_proactive_message.apply_async')
+async def test_manage_proactive_messages_schedules_due_user(mock_apply_async, proactive_service, mock_redis_client):
+    """
+    Test that the centralized `manage_proactive_messages` task correctly schedules a message for a user who is due.
+    """
+    user_id = 123
+    # User's last message was long ago, they are due for a proactive message
+    initial_state = {
+        "cadence": "1h",
+        "last_proactive_message": (datetime.now() - timedelta(hours=2)).isoformat(),
+        "consecutive_outreaches": 1,
+        "scheduled_task_id": None, # No task is currently scheduled
+        "user_replied": False,
+    }
+    
+    mock_redis_client.get.return_value = ProactiveMessagingService._serialize_state(initial_state)
+    mock_redis_client.keys.return_value = [f"proactive_messaging:user:{user_id}".encode('utf-8')]
+
+    mock_task = MagicMock()
+    mock_task.id = 'new_test_task_id'
+    mock_apply_async.return_value = mock_task
+
+    mock_celery_task = MagicMock()
+    mock_celery_task.request.id = "test_beat_task"
+    await manage_proactive_messages_async(mock_celery_task)
+
+    # ASSERT: A new task should have been scheduled
+    mock_apply_async.assert_called_once()
+    
+    # Verify the user's state was updated with the new task ID
+    args, kwargs = mock_redis_client.set.call_args
+    final_state = json.loads(args[1])
+    assert final_state['scheduled_task_id'] == 'new_test_task_id'
+
+@pytest.mark.asyncio
+@patch('proactive_messaging.send_proactive_message.apply_async')
+async def test_manage_proactive_messages_skips_scheduled_user(mock_apply_async, proactive_service, mock_redis_client):
+    """
+    Test that `manage_proactive_messages` correctly skips a user who already has a task scheduled.
+    """
+    user_id = 456
+    # This user is due, but a task is already scheduled. This can happen if the beat runs
+    # again before a previously scheduled task has been cleared.
+    initial_state = {
+        "cadence": "1h",
+        "last_proactive_message": (datetime.now() - timedelta(hours=2)).isoformat(),
+        "consecutive_outreaches": 1,
+        "scheduled_task_id": "already_existing_task", # A task is already scheduled
+        "user_replied": False,
+    }
+    
+    mock_redis_client.get.return_value = ProactiveMessagingService._serialize_state(initial_state)
+    mock_redis_client.keys.return_value = [f"proactive_messaging:user:{user_id}".encode('utf-8')]
+
+    mock_celery_task = MagicMock()
+    mock_celery_task.request.id = "test_beat_task"
+    await manage_proactive_messages_async(mock_celery_task)
+
+    # ASSERT: No new task should be scheduled
+    mock_apply_async.assert_not_called()
+
+def test_handle_user_message_resets_cadence(proactive_service, mock_redis_client):
+    """Test that handling a user message simply resets the user's state."""
+    user_id = 789
+    # Simulate a user in a high-cadence state
+    mock_redis_client.get.return_value = json.dumps({
+        'cadence': '1d',
+        'consecutive_outreaches': 3,
+        'scheduled_task_id': 'some_old_task'
+    })
+    
+    proactive_service.handle_user_message(user_id)
+    
+    # ASSERT: The only thing that should happen is the state is reset.
+    state_str = mock_redis_client.set.call_args[0][1]
+    state = json.loads(state_str)
+    
+    assert state['cadence'] == CADENCE_LEVELS[0]
+    assert state['consecutive_outreaches'] == 0
+    assert state['scheduled_task_id'] is None
+
+def test_get_next_interval(proactive_service):
+    """Test cadence escalation logic."""
+    assert proactive_service.get_next_interval(CADENCE_LEVELS[0]) == CADENCE_LEVELS[1]
+    assert proactive_service.get_next_interval(CADENCE_LEVELS[1]) == CADENCE_LEVELS[2]
+    assert proactive_service.get_next_interval(CADENCE_LEVELS[-1]) == CADENCE_LEVELS[-1]
+    assert proactive_service.get_next_interval('invalid_cadence') == CADENCE_LEVELS[0]
+
+def test_get_interval_with_jitter(proactive_service):
+    """Test that jitter is applied correctly."""
+    for cadence_config in PROACTIVE_MESSAGING_CADENCES:
+        cadence_name = cadence_config["name"]
+        interval = cadence_config["interval"]
+        jitter = cadence_config["jitter"]
+        
+        results = [proactive_service.get_interval_with_jitter(cadence_name) for _ in range(100)]
+        
+        assert all(interval - jitter <= r <= interval + jitter for r in results)
+        if jitter > 0:
+            assert len(set(results)) > 1
+
+def test_is_within_quiet_hours(proactive_service):
+    """Test checking if time is within quiet hours."""
+    proactive_service.quiet_hours_start = "02:30"
+    proactive_service.quiet_hours_end = "08:00"
+    
+    assert proactive_service.is_within_quiet_hours(datetime(2023, 1, 1, 5, 0)) is True
+    assert proactive_service.is_within_quiet_hours(datetime(2023, 1, 1, 10, 0)) is False
+    assert proactive_service.is_within_quiet_hours(datetime(2023, 1, 1, 2, 30)) is True
+    assert proactive_service.is_within_quiet_hours(datetime(2023, 1, 1, 8, 0)) is True
+
+def test_adjust_for_quiet_hours(proactive_service):
+    """Test adjusting scheduled time for quiet hours."""
+    proactive_service.quiet_hours_start = "02:30"
+    proactive_service.quiet_hours_end = "08:00"
+    
+    scheduled_time = datetime(2023, 1, 1, 5, 0)
+    adjusted_time = proactive_service.adjust_for_quiet_hours(scheduled_time)
+    expected_time = datetime(2023, 1, 1, 8, 5)
+    assert adjusted_time == expected_time
+    
+    scheduled_time_outside = datetime(2023, 1, 1, 10, 0)
+    adjusted_time_outside = proactive_service.adjust_for_quiet_hours(scheduled_time_outside)
+    assert adjusted_time_outside == scheduled_time_outside

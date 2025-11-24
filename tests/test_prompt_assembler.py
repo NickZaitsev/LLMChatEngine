@@ -13,7 +13,7 @@ from uuid import uuid4, UUID
 from typing import List, Dict, Any
 
 from storage.interfaces import Message, Memory
-from memory.manager import MemoryManager, MemoryRecord
+from memory.manager import LlamaIndexMemoryManager as MemoryManager
 from prompt.assembler import PromptAssembler, TokenCounter, Tokenizer
 import config
 
@@ -108,29 +108,17 @@ def sample_memories():
     """Create sample memory records for testing"""
     conv_id = uuid4()
     return [
-        MemoryRecord(
-            id=uuid4(),
-            conversation_id=conv_id,
-            memory_type="episodic",
+        TextNode(
             text='{"summary": "User likes pizza and prefers Italian food", "importance": 0.8}',
-            created_at=datetime.now(timezone.utc),
-            importance=0.8
+            metadata={"user_id": "user123", "conversation_id": str(conv_id)}
         ),
-        MemoryRecord(
-            id=uuid4(), 
-            conversation_id=conv_id,
-            memory_type="episodic",
+        TextNode(
             text='{"summary": "User works as a software engineer", "importance": 0.7}',
-            created_at=datetime.now(timezone.utc),
-            importance=0.7
+            metadata={"user_id": "user123", "conversation_id": str(conv_id)}
         ),
-        MemoryRecord(
-            id=uuid4(),
-            conversation_id=conv_id, 
-            memory_type="episodic",
+        TextNode(
             text='{"summary": "User enjoys hiking and outdoor activities", "importance": 0.6}',
-            created_at=datetime.now(timezone.utc),
-            importance=0.6
+            metadata={"user_id": "user123", "conversation_id": str(conv_id)}
         )
     ]
 
@@ -159,6 +147,8 @@ def prompt_assembler(mock_message_repo, mock_memory_manager, mock_persona_repo, 
     return PromptAssembler(
         message_repo=mock_message_repo,
         memory_manager=mock_memory_manager,
+        conversation_repo=MagicMock(),
+        user_repo=MagicMock(),
         persona_repo=mock_persona_repo,
         tokenizer=mock_tokenizer,
         config=config
@@ -276,13 +266,9 @@ class TestPromptAssembler:
         many_memories = []
         conv_id = uuid4()
         for i in range(10):
-            many_memories.append(MemoryRecord(
-                id=uuid4(),
-                conversation_id=conv_id,
-                memory_type="episodic", 
+            many_memories.append(TextNode(
                 text=f'{{"summary": "Memory {i}", "importance": 0.5}}',
-                created_at=datetime.now(timezone.utc),
-                importance=0.5
+                metadata={"user_id": "user123", "conversation_id": str(conv_id)}
             ))
         
         # Setup mocks
@@ -401,6 +387,8 @@ class TestPromptAssembler:
         assembler = PromptAssembler(
             message_repo=mock_message_repo,
             memory_manager=mock_memory_manager,
+            conversation_repo=MagicMock(),
+            user_repo=MagicMock(),
             persona_repo=mock_persona_repo,
             tokenizer=mock_tokenizer,
             config=config
