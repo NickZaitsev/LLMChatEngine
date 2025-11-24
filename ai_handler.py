@@ -4,7 +4,7 @@ import random
 import sys
 from typing import List, Dict
 
-from config import BOT_PERSONALITY, PROMPT_REPLY_TOKEN_BUDGET, TEMPERATURE
+from config import BOT_PERSONALITY, PROMPT_REPLY_TOKEN_BUDGET, TEMPERATURE, MEMORY_ENABLED
 
 # Import OpenAI clients (v1+)
 try:
@@ -14,6 +14,14 @@ except ImportError:
     OPENAI_AVAILABLE = False
     OpenAI = None
     AzureOpenAI = None
+
+# Import Google Generative AI
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+    genai = None
 
 # Import LM Studio Manager
 try:
@@ -88,9 +96,22 @@ class ModelClient:
                 logger.warning("LMStudioManager not available - model auto-loading disabled")
             
             logger.info("ModelClient initialized with LM Studio provider - Model: %s, Base URL: %s", LMSTUDIO_MODEL, LMSTUDIO_BASE_URL)
+
+        elif provider == "gemini":
+            if not GEMINI_AVAILABLE:
+                raise ImportError("Google Generative AI package not available. Install with: pip install google-generativeai")
+            
+            from config import GEMINI_API_KEY, GEMINI_MODEL
+            if not all([GEMINI_API_KEY, GEMINI_MODEL]):
+                raise ValueError("Gemini provider requires GEMINI_API_KEY and GEMINI_MODEL to be set in .env")
+
+            genai.configure(api_key=GEMINI_API_KEY)
+            self.client = genai.GenerativeModel(GEMINI_MODEL)
+            self.model_name = GEMINI_MODEL
+            logger.info("ModelClient initialized with Gemini provider - Model: %s", GEMINI_MODEL)
             
         else:
-            raise ValueError(f"Unsupported provider: {provider}. Supported providers: 'azure', 'lmstudio'")
+            raise ValueError(f"Unsupported provider: {provider}. Supported providers: 'azure', 'lmstudio', 'gemini'")
     
     def ask(self, messages):
         """Send a message to the LLM and get a response"""
@@ -109,12 +130,39 @@ class ModelClient:
                 content_preview = content[:1000] + "..." if len(content) > 1000 else content
                 logger.debug("  Request Message %d [%s]: %s", i + 1, role, content_preview)
             
-            resp = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=messages
-            )
-            
-            content = resp.choices[0].message.content
+            if self.provider == 'gemini':
+                system_instruction = None
+                if messages and messages[0].get('role') == 'system':
+                    system_instruction = messages[0].get('content')
+                    messages = messages[1:]
+
+                client = self.client
+                
+                # Gemini expects roles 'user' and 'model'
+                gemini_messages = []
+
+                # If a system instruction exists, prepend it as a user/model turn
+                if system_instruction:
+                    gemini_messages.append({"role": "user", "parts": [system_instruction]})
+                    gemini_messages.append({"role": "model", "parts": ["OK."]})
+
+                for msg in messages:
+                    role = "model" if msg["role"] == "assistant" else msg["role"]
+                    # Gemini can throw an error if a user role is followed by another user role.
+                    # This merges consecutive user messages.
+                    if gemini_messages and gemini_messages[-1]['role'] == 'user' and role == 'user':
+                        gemini_messages[-1]['parts'].append(msg["content"])
+                    else:
+                        gemini_messages.append({"role": role, "parts": [msg["content"]]})
+
+                resp = client.generate_content(gemini_messages)
+                content = resp.text
+            else:
+                resp = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=messages
+                )
+                content = resp.choices[0].message.content
             logger.info("Received response from %s provider (%d chars)", self.provider, len(content))
             logger.debug("LLM Response content preview: %s", content[:500] + "..." if len(content) > 500 else content)
             return content
@@ -142,6 +190,11 @@ class ModelClient:
             if self.provider == "lmstudio" and hasattr(self, 'lm_studio_manager') and self.lm_studio_manager:
                 info["auto_load_enabled"] = getattr(self, 'auto_load_model', False)
                 info["max_load_wait"] = getattr(self, 'max_load_wait', 300)
+            
+            # Add Gemini specific info
+            if self.provider == "gemini":
+                # Placeholder for any Gemini-specific info in the future
+                pass
         except Exception:
             pass
             
@@ -289,10 +342,24 @@ class AIHandler:
                         logger.info("Success on retry attempt %d/%d", attempt + 1, self.max_retries)
                     
                     logger.info("Response received (%d chars)", len(response))
+
+                    # Trigger summarization if needed
+                    try:
+                        if MEMORY_ENABLED and self.prompt_assembler:
+                            from config import MAX_ACTIVE_MESSAGES
+                            from memory.tasks import create_conversation_summary
+                            
+                            active_messages_count = await self.prompt_assembler.get_active_message_count(conversation_id)
+                            if active_messages_count > MAX_ACTIVE_MESSAGES:
+                                logger.info(f"Active messages ({active_messages_count}) exceed threshold ({MAX_ACTIVE_MESSAGES}). Triggering summarization.")
+                                create_conversation_summary.delay(conversation_id)
+                    except Exception as e:
+                        logger.error(f"Failed to trigger summarization: {e}")
+
                     return response
                     
                 except asyncio.TimeoutError:
-                    logger.warning("Request timed out on attempt %d/%d after %.1f seconds", 
+                    logger.warning("Request timed out on attempt %d/%d after %.1f seconds",
                                  attempt + 1, self.max_retries, self.request_timeout)
                     
                     if attempt < self.max_retries - 1:

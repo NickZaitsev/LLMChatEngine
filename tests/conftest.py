@@ -18,6 +18,8 @@ from storage.repos import (
     PostgresUserRepo, PostgresPersonaRepo
 )
 from storage import create_storage, Storage
+from storage_conversation_manager import PostgresConversationManager
+from app_context import AppContext
 
 
 @pytest.fixture(scope="session")
@@ -156,10 +158,12 @@ async def sample_conversation(conversation_repo: PostgresConversationRepo, sampl
     )
 
 
+import config
+
 @pytest.fixture
 def sample_embedding():
     """Create a sample embedding vector for testing."""
-    return [0.1] * 384  # 384-dimensional vector with all values 0.1
+    return [0.1] * config.MEMORY_EMBED_DIM
 
 
 # Utility functions for tests
@@ -171,3 +175,36 @@ def generate_uuid() -> str:
 def assert_uuid_string(value: str) -> None:
     """Assert that a string is a valid UUID."""
     uuid.UUID(value)  # Will raise ValueError if invalid
+
+@pytest_asyncio.fixture
+async def app_context(engine) -> "AppContext":
+    """Create an application context for testing with an in-memory SQLite database."""
+    from app_context import AppContext
+    from ai_handler import AIHandler
+    from config import MAX_ACTIVE_MESSAGES, SUMMARIZATION_PROMPT
+
+    # Use the in-memory engine for the test session
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    class MockConfig:
+        MAX_ACTIVE_MESSAGES = 10
+        SUMMARIZATION_PROMPT = "Summarize: {text}"
+
+    # Manually construct the AppContext with the in-memory database
+    context = AppContext()
+    context.conversation_manager = PostgresConversationManager(db_url=None, use_pgvector=False)
+    context.conversation_manager.storage = Storage(
+        messages=PostgresMessageRepo(session_maker),
+        message_history=PostgresMessageHistoryRepo(session_maker),
+        memories=PostgresMemoryRepo(session_maker, use_pgvector=False),
+        conversations=PostgresConversationRepo(session_maker),
+        users=PostgresUserRepo(session_maker),
+        personas=PostgresPersonaRepo(session_maker),
+        engine=engine,
+        session_maker=session_maker,
+        use_pgvector=False
+    )
+    context.ai_handler = AIHandler(prompt_assembler=None)
+    context.config = MockConfig()
+    
+    return context

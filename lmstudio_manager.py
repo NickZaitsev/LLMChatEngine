@@ -5,6 +5,8 @@ import json
 from typing import Optional, Dict, List
 from urllib.parse import urljoin
 
+from config import LMSTUDIO_MAX_LOAD_WAIT
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,7 +62,8 @@ class LMStudioManager:
             return []
     
     async def get_loaded_model(self) -> Optional[str]:
-        """Get the currently loaded model name"""
+        """Get the 
+         name"""
         models = await self.get_available_models()
         
         # In LM Studio, loaded models typically appear in the models list
@@ -77,8 +80,8 @@ class LMStudioManager:
     
     async def is_model_loaded(self, model_name: str) -> bool:
         """Check if a specific model is loaded"""
+
         try:
-            # Try to make a simple completion request to test if model is loaded
             loop = asyncio.get_event_loop()
             test_payload = {
                 "model": model_name,
@@ -86,28 +89,26 @@ class LMStudioManager:
                 "max_tokens": 1,
                 "temperature": 0
             }
-            
+
             response = await loop.run_in_executor(
                 None,
                 lambda: requests.post(
-                    f"{self.api_base}/chat/completions", 
-                    json=test_payload, 
-                    timeout=10
+                    f"{self.api_base}/chat/completions",
+                    json=test_payload,
+                    timeout=LMSTUDIO_MAX_LOAD_WAIT,
                 )
             )
-            
+
             if response.status_code == 200:
                 logger.info("Model %s is loaded and ready", model_name)
                 return True
             else:
                 logger.debug("Model %s test failed: HTTP %d", model_name, response.status_code)
                 return False
-                
-        except Exception as e:
-            logger.debug("Error testing model %s: %s", model_name, e)
+        except Exception:
             return False
     
-    async def load_model(self, model_name: str, wait_for_load: bool = True, max_wait_time: int = 300) -> bool:
+    async def load_model(self, model_name: str, wait_for_load: bool = True, max_wait_time: int = 2) -> bool:
         """
         Load a model into LM Studio
         
@@ -127,101 +128,14 @@ class LMStudioManager:
                 logger.info("Model %s is already loaded", model_name)
                 return True
             
-            # Try LM Studio specific model loading endpoint
-            # Note: LM Studio's API varies by version, so we'll try multiple approaches
-            success = await self._try_load_model_methods(model_name)
-            
-            if not success:
-                logger.error("Failed to load model %s using available methods", model_name)
-                return False
-            
-            if wait_for_load:
-                logger.info("Waiting for model %s to finish loading (max %ds)...", model_name, max_wait_time)
-                start_time = asyncio.get_event_loop().time()
-                
-                while (asyncio.get_event_loop().time() - start_time) < max_wait_time:
-                    if await self.is_model_loaded(model_name):
-                        logger.info("Model %s loaded successfully", model_name)
-                        return True
-                    
-                    await asyncio.sleep(2)
-                
-                logger.warning("Model %s did not load within %d seconds", model_name, max_wait_time)
-                return False
-            
-            return success
+
+            logger.error("Failed to load model %s using available methods", model_name)
+            return False
             
         except Exception as e:
             logger.error("Error loading model %s: %s", model_name, e)
             return False
-    
-    async def _try_load_model_methods(self, model_name: str) -> bool:
-        """Try different methods to load a model"""
-        loop = asyncio.get_event_loop()
-        
-        # Method 1: Try LM Studio's load-model endpoint (if available)
-        try:
-            payload = {"model": model_name}
-            response = await loop.run_in_executor(
-                None,
-                lambda: requests.post(
-                    f"{self.base_url}/api/load-model",
-                    json=payload,
-                    timeout=self.timeout
-                )
-            )
-            
-            if response.status_code in [200, 201, 202]:
-                logger.info("Model loading initiated via /api/load-model")
-                return True
-                
-        except Exception as e:
-            logger.debug("Method 1 failed: %s", e)
-        
-        # Method 2: Try alternative endpoint
-        try:
-            payload = {"model_path": model_name}
-            response = await loop.run_in_executor(
-                None,
-                lambda: requests.post(
-                    f"{self.base_url}/load",
-                    json=payload,
-                    timeout=self.timeout
-                )
-            )
-            
-            if response.status_code in [200, 201, 202]:
-                logger.info("Model loading initiated via /load endpoint")
-                return True
-                
-        except Exception as e:
-            logger.debug("Method 2 failed: %s", e)
-        
-        # Method 3: Try making a request which might trigger auto-loading
-        try:
-            test_payload = {
-                "model": model_name,
-                "messages": [{"role": "user", "content": "test"}],
-                "max_tokens": 1
-            }
-            
-            response = await loop.run_in_executor(
-                None,
-                lambda: requests.post(
-                    f"{self.api_base}/chat/completions",
-                    json=test_payload,
-                    timeout=30  # Longer timeout for potential model loading
-                )
-            )
-            
-            # Even if the request fails, it might trigger model loading
-            logger.info("Attempted to trigger model loading via completion request")
-            return True
-            
-        except Exception as e:
-            logger.debug("Method 3 failed: %s", e)
-        
-        return False
+
     
     async def unload_model(self) -> bool:
         """Unload the currently loaded model"""
@@ -287,17 +201,10 @@ class LMStudioManager:
                 logger.error("LM Studio server is not running")
                 return False
             
-            # Check if model is already loaded
-            if await self.is_model_loaded(model_name):
-                logger.info("Model %s is already loaded and ready", model_name)
-                return True
-            
             if not auto_load:
                 logger.info("Model %s is not loaded and auto_load is disabled", model_name)
                 return False
             
-            # Attempt to load the model
-            logger.info("Model %s not loaded, attempting to load...", model_name)
             success = await self.load_model(model_name, wait_for_load=True)
             
             if success:

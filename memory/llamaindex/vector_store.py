@@ -10,7 +10,11 @@ for upserting, querying, and clearing vector data.
 from typing import List, Any
 import sqlalchemy
 from llama_index.vector_stores.postgres import PGVectorStore
-from llama_index.core.vector_stores import VectorStoreQuery, MetadataFilters
+from llama_index.core.vector_stores import (
+    VectorStoreQuery,
+    MetadataFilters,
+    ExactMatchFilter,
+)
 from sqlalchemy.engine.url import make_url
 from core.abstractions import VectorStore as VectorStoreAbstraction
 import config
@@ -67,16 +71,18 @@ class PgVectorStore(VectorStoreAbstraction):
         """
         import logging
         logger = logging.getLogger(__name__)
-        logger.debug(f"Vector store query: user_id={user_id}, top_k={top_k}, embedding_length={len(query_embedding)}")
+        logger.info(f"==> PGVectorStore querying with user_id='{user_id}', top_k={top_k}")
         try:
-            filters = MetadataFilters.from_dict({"user_id": user_id})
-            logger.debug(f"Created filters: {filters}")
+            filters = MetadataFilters(
+                filters=[ExactMatchFilter(key="user_id", value=str(user_id))]
+            )
+            logger.info(f"Constructed metadata filters: {filters}")
             query_obj = VectorStoreQuery(
                 query_embedding=query_embedding, similarity_top_k=top_k, filters=filters
             )
-            logger.debug(f"Created query object: similarity_top_k={query_obj.similarity_top_k}")
+            logger.info(f"Executing vector store query with top_k={query_obj.similarity_top_k}")
             result = self._store.query(query_obj)
-            logger.debug(f"Query result: {len(result.nodes)} nodes returned")
+            logger.info(f"<== PGVectorStore query returned {len(result.nodes)} nodes")
             return result.nodes
         except Exception as e:
             logger.error(f"Error in vector store query: {e}", exc_info=True)

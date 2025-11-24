@@ -56,6 +56,8 @@ class Conversation:
     title: Optional[str]
     extra_data: Dict[str, Any]
     created_at: datetime
+    summary: Optional[str] = None
+    last_summarized_message_id: Optional[UUID] = None
 
 
 @dataclass
@@ -87,6 +89,12 @@ class MessageRepo(Protocol):
     async def list_messages(self, conversation_id: str, limit: int = 100, offset: int = 0) -> List[Message]: ...
     
     async def delete_messages(self, conversation_id: str) -> int: ...
+
+    async def count_active_messages(self, conversation_id: str, last_summarized_message_id: Optional[UUID]) -> int: ...
+
+    async def fetch_active_messages(self, conversation_id: str, token_budget: int, last_summarized_message_id: Optional[UUID]) -> List[Message]: ...
+
+    async def get_messages_for_summary(self, conversation_id: str, last_summarized_message_id: Optional[UUID]) -> List[Message]: ...
     
     def estimate_tokens(self, text: str) -> int: ...
 
@@ -120,7 +128,7 @@ class ConversationRepo(Protocol):
     
     async def list_conversations(self, user_id: str) -> List[Conversation]: ...
     
-    async def update_conversation(self, conversation_id: str, title: str = None, extra_data: Dict[str, Any] = None) -> Optional[Conversation]: ...
+    async def update_conversation(self, conversation_id: str, title: str = None, extra_data: Dict[str, Any] = None, summary: str = None, last_summarized_message_id: UUID = None) -> Optional[Conversation]: ...
 
 
 class UserRepo(Protocol):
