@@ -113,6 +113,48 @@ LLMChatEngine provides a modular architecture that can be adapted for various ch
 
 The engine can be integrated with various chat platforms through its modular interface design. Current implementation includes Telegram bot support, with extensible architecture for additional platforms.
 
+## Multi-Bot Setup & Usage
+
+The system now supports running multiple AI bots simultaneously, managed by a central Admin Bot.
+
+### 1. Admin Bot Setup
+1.  **Create Admin Bot**: Talk to [@BotFather](https://t.me/BotFather) on Telegram and create a new bot (e.g., `MyAdminBot`). Get the **token**.
+2.  **Get Your User ID**: Talk to [@userinfobot](https://t.me/userinfobot) to get your numerical Telegram User ID (e.g., `123456789`).
+3.  **Generate Encryption Key**: Run the following Python snippet to generate a secure key for token encryption:
+    ```python
+    from cryptography.fernet import Fernet
+    print(Fernet.generate_key().decode())
+    ```
+
+### 2. Configuration
+Add the following to your `.env` file:
+
+```env
+# Admin Bot Configuration
+ADMIN_BOT_TOKEN=your_admin_bot_token_here
+ADMIN_USER_IDS=123456789,987654321  # Comma-separated list of authorized admin IDs
+TOKEN_ENCRYPTION_KEY=your_generated_key_here
+```
+
+### 3. Running the System
+Update your Docker containers:
+```bash
+docker-compose up --build -d
+```
+This will start the `AdminBot` and the `BotManager`.
+
+### 4. Managing Bots
+Open your Admin Bot in Telegram and use these commands:
+
+- **/addbot**: Start a wizard to add a new user bot. You will need:
+    - The new bot's token (from BotFather).
+    - A name for the bot.
+    - A personality/system prompt.
+- **/listbots**: View all running bots and their status.
+- **/setprompt <bot_id>**: Update a bot's personality on the fly.
+- **/togglefeature <bot_id> <feature>**: Enable/disable features (e.g., `VOICE_MESSAGES`, `MEMORY`).
+- **/removebot <bot_id>**: Stop and remove a bot.
+
 ## Development
 
 ### Testing

@@ -8,7 +8,7 @@ Includes optional pgvector support for semantic memory search.
 import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional
-from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, func, Index, JSON
+from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, func, Index, JSON, Boolean
 from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -71,9 +71,165 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan"
     )
+    bot_settings: Mapped[List["UserBotSettings"]] = relationship(
+        "UserBotSettings",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
     
     def __repr__(self) -> str:
         return f"<User(id={self.id}, username='{self.username}')>"
+
+
+class Bot(Base):
+    """
+    Bot model representing Telegram bot configurations.
+    
+    Attributes:
+        id: Unique identifier for the bot
+        token_encrypted: Encrypted Telegram bot token
+        name: Display name of the bot (e.g., "Luna")
+        personality: System prompt personality for the bot
+        is_active: Whether the bot is currently running
+        feature_flags: JSON dict of enabled features
+        llm_config: JSON dict of LLM provider settings
+        created_at: Timestamp when the bot was created
+        updated_at: Timestamp when the bot was last updated
+    """
+    __tablename__ = 'bots'
+    
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), 
+        primary_key=True, 
+        default=uuid.uuid4,
+        doc="Unique identifier for the bot"
+    )
+    token_encrypted: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Encrypted Telegram bot token"
+    )
+    name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        doc="Display name of the bot"
+    )
+    personality: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="System prompt personality for the bot"
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        doc="Whether the bot is currently running"
+    )
+    feature_flags: Mapped[Dict[str, Any]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+        doc="JSON dict of enabled features (proactive_messaging, memory, voice, etc.)"
+    )
+    llm_config: Mapped[Dict[str, Any]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+        doc="JSON dict of LLM provider settings (provider, model, temperature, etc.)"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=func.now(),
+        doc="Timestamp when the bot was created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=func.now(),
+        onupdate=func.now(),
+        doc="Timestamp when the bot was last updated"
+    )
+    
+    # Relationships
+    conversations: Mapped[List["Conversation"]] = relationship(
+        "Conversation", 
+        back_populates="bot",
+        cascade="all, delete-orphan"
+    )
+    user_settings: Mapped[List["UserBotSettings"]] = relationship(
+        "UserBotSettings",
+        back_populates="bot",
+        cascade="all, delete-orphan"
+    )
+    
+    def __repr__(self) -> str:
+        return f"<Bot(id={self.id}, name='{self.name}', is_active={self.is_active})>"
+
+
+class UserBotSettings(Base):
+    """
+    UserBotSettings model for per-user per-bot customization.
+    
+    Attributes:
+        id: Unique identifier for the settings
+        user_id: Foreign key reference to the user
+        bot_id: Foreign key reference to the bot
+        settings: JSON dict of user-specific settings
+        created_at: Timestamp when the settings were created
+        updated_at: Timestamp when the settings were last updated
+    """
+    __tablename__ = 'user_bot_settings'
+    
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), 
+        primary_key=True, 
+        default=uuid.uuid4,
+        doc="Unique identifier for the settings"
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), 
+        ForeignKey('users.id', ondelete='CASCADE'), 
+        nullable=False,
+        doc="Foreign key reference to the user"
+    )
+    bot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), 
+        ForeignKey('bots.id', ondelete='CASCADE'), 
+        nullable=False,
+        doc="Foreign key reference to the bot"
+    )
+    settings: Mapped[Dict[str, Any]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+        doc="JSON dict of user-specific settings (language, preferred_name, notifications, etc.)"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=func.now(),
+        doc="Timestamp when the settings were created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=func.now(),
+        onupdate=func.now(),
+        doc="Timestamp when the settings were last updated"
+    )
+    
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="bot_settings")
+    bot: Mapped["Bot"] = relationship("Bot", back_populates="user_settings")
+    
+    # Unique constraint: one settings record per user-bot pair
+    __table_args__ = (
+        Index('ix_user_bot_settings_user_bot', 'user_id', 'bot_id', unique=True),
+    )
+    
+    def __repr__(self) -> str:
+        return f"<UserBotSettings(id={self.id}, user_id={self.user_id}, bot_id={self.bot_id})>"
 
 
 class Persona(Base):
@@ -132,8 +288,11 @@ class Conversation(Base):
         id: Unique identifier for the conversation
         user_id: Foreign key reference to the user
         persona_id: Foreign key reference to the persona
+        bot_id: Foreign key reference to the bot (nullable for migration)
         title: Optional title for the conversation
-        metadata: Additional conversation metadata stored as JSON
+        extra_data: Additional conversation data stored as JSON
+        summary: The latest summary of the conversation
+        last_summarized_message_id: ID of the last message included in the summary
         created_at: Timestamp when the conversation was created
     """
     __tablename__ = 'conversations'
@@ -155,6 +314,12 @@ class Conversation(Base):
         ForeignKey('personas.id', ondelete='CASCADE'), 
         nullable=False,
         doc="Foreign key reference to the persona"
+    )
+    bot_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), 
+        ForeignKey('bots.id', ondelete='CASCADE'), 
+        nullable=True,  # Nullable for migration compatibility
+        doc="Foreign key reference to the bot"
     )
     title: Mapped[Optional[str]] = mapped_column(
         String(255),
@@ -188,6 +353,7 @@ class Conversation(Base):
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="conversations")
     persona: Mapped["Persona"] = relationship("Persona", back_populates="conversations")
+    bot: Mapped[Optional["Bot"]] = relationship("Bot", back_populates="conversations")
     messages: Mapped[List["Message"]] = relationship(
         "Message",
         back_populates="conversation",
@@ -207,7 +373,7 @@ class Conversation(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Conversation(id={self.id}, title='{self.title}', user_id={self.user_id})>"
+        return f"<Conversation(id={self.id}, title='{self.title}', user_id={self.user_id}, bot_id={self.bot_id})>"
 
 
 class Message(Base):
@@ -219,7 +385,7 @@ class Message(Base):
         conversation_id: Foreign key reference to the conversation
         role: Role of the message sender ("user" | "assistant" | "system")
         content: The message content text
-        metadata: Additional message metadata stored as JSON
+        extra_data: Additional message data stored as JSON
         token_count: Estimated token count for the message
         created_at: Timestamp when the message was created
     """
@@ -395,6 +561,7 @@ class Memory(Base):
     Attributes:
         id: Unique identifier for the memory
         conversation_id: Foreign key reference to the conversation
+        bot_id: Foreign key reference to the bot (for vector isolation)
         memory_type: Type of memory ("summary" | "episodic")
         text: The memory content text
         created_at: Timestamp when the memory was created
@@ -413,6 +580,12 @@ class Memory(Base):
         ForeignKey('conversations.id', ondelete='CASCADE'), 
         nullable=False,
         doc="Foreign key reference to the conversation"
+    )
+    bot_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), 
+        ForeignKey('bots.id', ondelete='CASCADE'), 
+        nullable=True,  # Nullable for migration compatibility
+        doc="Foreign key reference to the bot (for vector isolation)"
     )
     memory_type: Mapped[str] = mapped_column(
         String(50), 
@@ -444,6 +617,7 @@ class Memory(Base):
         __table_args__ = (
             Index('ix_memories_embedding', 'embedding', postgresql_using='ivfflat', postgresql_with={'lists': 100}),
             Index('ix_memories_conversation_type', 'conversation_id', 'memory_type'),
+            Index('ix_memories_bot_id', 'bot_id'),
         )
     else:
         # Fallback for systems without pgvector - store as JSON
@@ -455,6 +629,7 @@ class Memory(Base):
         
         __table_args__ = (
             Index('ix_memories_conversation_type', 'conversation_id', 'memory_type'),
+            Index('ix_memories_bot_id', 'bot_id'),
         )
     
     # Relationships
@@ -469,8 +644,11 @@ class Memory(Base):
 __all__ = [
     'Base',
     'User', 
+    'Bot',
+    'UserBotSettings',
     'Persona',
     'Conversation',
+    'Message',
     'MessageLog',
     'MessageUser',
     'Memory',

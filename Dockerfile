@@ -54,4 +54,4 @@ RUN chown -R bot:bot /app
 USER bot
 
 # Set the command to run the bot
-CMD ["python", "bot.py"]
+CMD ["python", "run_multibot.py"]

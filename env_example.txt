@@ -1,6 +1,11 @@
 # Telegram Bot Configuration
 TELEGRAM_TOKEN=your_telegram_bot_token_here
 
+# Admin Bot Configuration
+ADMIN_BOT_TOKEN=your_admin_bot_token_here
+ADMIN_USER_IDS=123456789,987654321
+TOKEN_ENCRYPTION_KEY=your_generated_key_here
+
 # Database Configuration
 DATABASE_URL=postgresql+asyncpg://ai_bot:your_secure_password@localhost:5432/ai_bot
 DB_PASSWORD=your_secure_password_here
