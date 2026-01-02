@@ -33,6 +33,12 @@ load_dotenv()
 # Telegram Bot Configuration
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 
+# Admin Bot Configuration (for multi-bot management)
+ADMIN_BOT_TOKEN = os.getenv('ADMIN_BOT_TOKEN')
+ADMIN_USER_IDS = [int(x.strip()) for x in os.getenv('ADMIN_USER_IDS', '').split(',') if x.strip()]
+TOKEN_ENCRYPTION_KEY = os.getenv('TOKEN_ENCRYPTION_KEY', '')
+
+
 # Database Configuration
 DATABASE_URL = os.getenv('DATABASE_URL')
 USE_PGVECTOR = os.getenv('USE_PGVECTOR', 'true').lower() in ('true', '1', 'yes', 'on')

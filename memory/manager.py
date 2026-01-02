@@ -37,29 +37,73 @@ class LlamaIndexMemoryManager:
             user_repo: The user repository.
         """
         self._vector_store = vector_store
+"""
+LlamaIndex-based memory manager implementation.
+
+This module provides the `LlamaIndexMemoryManager` class, which orchestrates
+the new memory system using the abstractions for the vector store, embedding
+model, and summarization model.
+"""
+
+from typing import List, Any, Dict
+from llama_index.core.schema import TextNode
+from core.abstractions import VectorStore, EmbeddingModel, SummarizationModel
+from storage.interfaces import MessageRepo, ConversationRepo, UserRepo
+
+class LlamaIndexMemoryManager:
+    """
+    LlamaIndexMemoryManager implementation.
+    """
+
+    def __init__(
+        self,
+        vector_store: VectorStore,
+        embedding_model: EmbeddingModel,
+        summarization_model: SummarizationModel,
+        message_repo: MessageRepo,
+        conversation_repo: ConversationRepo,
+        user_repo: UserRepo,
+    ):
+        """
+        Initialize the LlamaIndexMemoryManager.
+
+        Args:
+            vector_store: The vector store to use.
+            embedding_model: The embedding model to use.
+            summarization_model: The summarization model to use.
+            message_repo: The message repository.
+            conversation_repo: The conversation repository.
+            user_repo: The user repository.
+        """
+        self._vector_store = vector_store
         self._embedding_model = embedding_model
         self._summarization_model = summarization_model
         self._message_repo = message_repo
         self._conversation_repo = conversation_repo
         self._user_repo = user_repo
 
-    async def add_message(self, user_id: str, message: str) -> None:
+    async def add_message(self, user_id: str, message: str, bot_id: str = None) -> None:
         """
         Add a message to the memory.
 
         Args:
             user_id: The ID of the user.
             message: The message to add.
+            bot_id: Optional ID of the bot.
         """
         embedding = await self._embedding_model.get_embedding(message)
+        metadata = {"user_id": user_id}
+        if bot_id:
+            metadata["bot_id"] = str(bot_id)
+            
         node = TextNode(
             text=message,
             embedding=embedding,
-            metadata={"user_id": user_id},
+            metadata=metadata,
         )
         await self._vector_store.upsert([node])
 
-    async def get_context(self, user_id: str, query: str, top_k: int) -> str:
+    async def get_context(self, user_id: str, query: str, top_k: int, bot_id: str = None) -> str:
         """
         Get context for a query.
 
@@ -67,13 +111,14 @@ class LlamaIndexMemoryManager:
             user_id: The ID of the user.
             query: The query to get context for.
             top_k: The number of top results to return.
+            bot_id: Optional ID of the bot.
 
         Returns:
             The context for the query.
         """
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"==> get_context called with user_id='{user_id}', top_k={top_k}")
+        logger.info(f"==> get_context called with user_id='{user_id}', bot_id='{bot_id}', top_k={top_k}")
         try:
             query_embedding = await self._embedding_model.get_embedding(query)
             if not query_embedding:
@@ -82,7 +127,7 @@ class LlamaIndexMemoryManager:
             logger.info(f"Query embedding generated (length: {len(query_embedding)})")
             
             logger.info(f"==> Calling vector_store.query with user_id='{user_id}'")
-            nodes = await self._vector_store.query(query_embedding, top_k, user_id)
+            nodes = await self._vector_store.query(query_embedding, top_k, user_id, bot_id=bot_id)
             logger.info(f"<== Vector store query returned {len(nodes)} nodes")
 
             if not nodes:
@@ -96,13 +141,14 @@ class LlamaIndexMemoryManager:
             logger.error(f"Error in get_context: {e}", exc_info=True)
             return ""
 
-    async def trigger_summarization(self, user_id: str, prompt_template: str) -> None:
+    async def trigger_summarization(self, user_id: str, prompt_template: str, bot_id: str = None) -> None:
         """
         Trigger summarization for a user.
 
         Args:
             user_id: The ID of the user.
             prompt_template: The prompt template to use for summarization.
+            bot_id: Optional ID of the bot.
         """
         # Get user by username (telegram ID) to find the internal user UUID
         user = await self._user_repo.get_user_by_username(user_id)
@@ -110,6 +156,7 @@ class LlamaIndexMemoryManager:
             return  # No user found, so no conversations to summarize
 
         # Use the internal user ID (UUID) to list conversations
+        # TODO: Filter conversations by bot_id if provided
         conversations = await self._conversation_repo.list_conversations(str(user.id))
         if not conversations:
             return
@@ -120,13 +167,14 @@ class LlamaIndexMemoryManager:
         summary = await self._summarization_model.summarize(
             text_to_summarize, prompt_template, user_id=user_id
         )
-        await self.add_message(user_id, f"Summary: {summary}")
+        await self.add_message(user_id, f"Summary: {summary}", bot_id=bot_id)
 
-    async def clear_memories(self, user_id: str) -> None:
+    async def clear_memories(self, user_id: str, bot_id: str = None) -> None:
         """
         Clear all memories for a user.
 
         Args:
             user_id: The ID of the user.
+            bot_id: Optional ID of the bot.
         """
-        await self._vector_store.clear(user_id)
+        await self._vector_store.clear(user_id, bot_id=bot_id)

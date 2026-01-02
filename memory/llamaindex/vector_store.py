@@ -56,7 +56,7 @@ class PgVectorStore(VectorStoreAbstraction):
         self._store.add(nodes)
 
     async def query(
-        self, query_embedding: List[float], top_k: int, user_id: str
+        self, query_embedding: List[float], top_k: int, user_id: str, bot_id: str = None
     ) -> List[Any]:
         """
         Query the vector store for similar nodes.
@@ -65,17 +65,21 @@ class PgVectorStore(VectorStoreAbstraction):
             query_embedding: The query embedding.
             top_k: The number of top results to return.
             user_id: The ID of the user to filter memories for.
+            bot_id: Optional ID of the bot to filter memories for.
 
         Returns:
             A list of similar nodes.
         """
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"==> PGVectorStore querying with user_id='{user_id}', top_k={top_k}")
+        logger.info(f"==> PGVectorStore querying with user_id='{user_id}', bot_id='{bot_id}', top_k={top_k}")
         try:
-            filters = MetadataFilters(
-                filters=[ExactMatchFilter(key="user_id", value=str(user_id))]
-            )
+            filters_list = [ExactMatchFilter(key="user_id", value=str(user_id))]
+            if bot_id:
+                filters_list.append(ExactMatchFilter(key="bot_id", value=str(bot_id)))
+            
+            filters = MetadataFilters(filters=filters_list)
+            
             logger.info(f"Constructed metadata filters: {filters}")
             query_obj = VectorStoreQuery(
                 query_embedding=query_embedding, similarity_top_k=top_k, filters=filters
@@ -88,15 +92,16 @@ class PgVectorStore(VectorStoreAbstraction):
             logger.error(f"Error in vector store query: {e}", exc_info=True)
             raise
 
-    async def clear(self, user_id: str) -> None:
+    async def clear(self, user_id: str, bot_id: str = None) -> None:
         """
-        Clear all nodes for a specific user from the vector store.
+        Clear all nodes for a specific user (and optionally bot) from the vector store.
 
         Args:
             user_id: The ID of the user whose data should be cleared.
+            bot_id: Optional ID of the bot to filter clearing.
         """
         # This is a bit of a hack, as LlamaIndex's PGVectorStore doesn't
         # directly support deleting by user_id. We'll need to add a
         # user_id column to the vector store table and delete based on that.
         # For now, we'll just log a warning.
-        print(f"WARNING: Clearing vector store for user {user_id} is not yet implemented.")
+        print(f"WARNING: Clearing vector store for user {user_id} (bot {bot_id}) is not yet implemented.")

@@ -1,0 +1,573 @@
+"""
+Admin Bot for managing multi-bot configuration.
+
+This bot allows administrators to:
+- Add, edit, and remove user bots
+- Change bot personalities on the fly
+- Toggle feature flags
+- Monitor bot status
+"""
+
+import asyncio
+import logging
+import uuid
+from typing import Optional, Dict, Any
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes
+
+from token_encryption import encrypt_token, decrypt_token
+from features import BotFeature, DEFAULT_FEATURE_FLAGS
+
+logger = logging.getLogger(__name__)
+
+
+# Conversation states for multi-step commands
+(
+    WAITING_TOKEN,
+    WAITING_NAME,
+    WAITING_PERSONALITY,
+    WAITING_EDIT_FIELD,
+    WAITING_EDIT_VALUE,
+) = range(5)
+
+
+class AdminBot:
+    """
+    Admin bot for configuring and managing user bots.
+    
+    This bot is separate from user-facing bots and provides
+    administrative commands for managing the multi-bot system.
+    """
+    
+    def __init__(self, admin_token: str, admin_user_ids: list, db_url: str):
+        """
+        Initialize the admin bot.
+        
+        Args:
+            admin_token: Telegram bot token for admin bot
+            admin_user_ids: List of Telegram user IDs allowed to use admin commands
+            db_url: Database URL for PostgreSQL
+        """
+        self.admin_token = admin_token
+        self.admin_user_ids = set(admin_user_ids)
+        self.db_url = db_url
+        self.application: Optional[Application] = None
+        self.storage = None
+        self._pending_bot_data: Dict[int, Dict[str, Any]] = {}  # user_id -> pending data
+        
+        # Reference to bot manager for hot-reload
+        self.bot_manager = None
+    
+    def set_bot_manager(self, bot_manager):
+        """Set reference to bot manager for hot-reload functionality."""
+        self.bot_manager = bot_manager
+    
+    def _is_admin(self, user_id: int) -> bool:
+        """Check if user is an admin."""
+        return user_id in self.admin_user_ids
+    
+    async def _init_storage(self):
+        """Initialize database storage."""
+        if self.storage is None:
+            from storage import create_storage
+            self.storage = await create_storage(self.db_url)
+            logger.info("Admin bot storage initialized")
+    
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /start command."""
+        user_id = update.effective_user.id
+        
+        if not self._is_admin(user_id):
+            await update.message.reply_text("⛔ You are not authorized to use this bot.")
+            return
+        
+        welcome_text = """🤖 **Admin Bot Control Panel**
+
+Welcome to the multi-bot administration system.
+
+**Available Commands:**
+/addbot - Add a new bot
+/listbots - List all configured bots
+/editbot - Edit bot settings
+/setprompt - Change bot personality
+/togglefeature - Enable/disable features
+/removebot - Deactivate a bot
+/botstatus - Show running status
+/reloadbot - Hot-reload bot config
+/help - Show this help message
+
+Use these commands to manage your bot fleet."""
+        
+        await update.message.reply_text(welcome_text, parse_mode='Markdown')
+    
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /help command."""
+        await self.start_command(update, context)
+    
+    async def addbot_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Start the add bot flow."""
+        user_id = update.effective_user.id
+        
+        if not self._is_admin(user_id):
+            await update.message.reply_text("⛔ You are not authorized to use this bot.")
+            return ConversationHandler.END
+        
+        await self._init_storage()
+        
+        self._pending_bot_data[user_id] = {}
+        
+        await update.message.reply_text(
+            "🤖 **Add New Bot**\n\n"
+            "Please send me the bot token from @BotFather.\n\n"
+            "Send /cancel to abort.",
+            parse_mode='Markdown'
+        )
+        return WAITING_TOKEN
+    
+    async def addbot_token(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Receive bot token."""
+        user_id = update.effective_user.id
+        token = update.message.text.strip()
+        
+        # Validate token format (basic check)
+        if ':' not in token or len(token) < 30:
+            await update.message.reply_text(
+                "❌ Invalid token format. Please send a valid bot token from @BotFather."
+            )
+            return WAITING_TOKEN
+        
+        # Store encrypted token
+        self._pending_bot_data[user_id]['token'] = token
+        
+        # Delete the message containing the token for security
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+        
+        await update.message.reply_text(
+            "✅ Token received (message deleted for security).\n\n"
+            "Now send me the **display name** for this bot (e.g., 'Luna', 'Max'):",
+            parse_mode='Markdown'
+        )
+        return WAITING_NAME
+    
+    async def addbot_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Receive bot name."""
+        user_id = update.effective_user.id
+        name = update.message.text.strip()
+        
+        if len(name) < 1 or len(name) > 100:
+            await update.message.reply_text("❌ Name must be 1-100 characters.")
+            return WAITING_NAME
+        
+        self._pending_bot_data[user_id]['name'] = name
+        
+        await update.message.reply_text(
+            f"✅ Name set to **{name}**.\n\n"
+            "Now send me the **personality prompt** for this bot.\n"
+            "This is the system message that defines how the bot behaves.\n\n"
+            "Example:\n"
+            "_You are Luna, a caring and affectionate AI girlfriend..._",
+            parse_mode='Markdown'
+        )
+        return WAITING_PERSONALITY
+    
+    async def addbot_personality(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Receive bot personality and create the bot."""
+        user_id = update.effective_user.id
+        personality = update.message.text.strip()
+        
+        if len(personality) < 10:
+            await update.message.reply_text("❌ Personality must be at least 10 characters.")
+            return WAITING_PERSONALITY
+        
+        pending = self._pending_bot_data.get(user_id, {})
+        token = pending.get('token')
+        name = pending.get('name')
+        
+        if not token or not name:
+            await update.message.reply_text("❌ Session expired. Please start again with /addbot")
+            return ConversationHandler.END
+        
+        try:
+            # Encrypt token and create bot in database
+            encrypted_token = encrypt_token(token)
+            
+            # Create bot using repository
+            from storage.models import Bot
+            from sqlalchemy import select
+            from sqlalchemy.ext.asyncio import AsyncSession
+            
+            async with self.storage.session_maker() as session:
+                new_bot = Bot(
+                    token_encrypted=encrypted_token,
+                    name=name,
+                    personality=personality,
+                    is_active=True,
+                    feature_flags=DEFAULT_FEATURE_FLAGS.copy(),
+                    llm_config={}  # Will use global config
+                )
+                session.add(new_bot)
+                await session.commit()
+                await session.refresh(new_bot)
+                bot_id = new_bot.id
+            
+            # Clean up pending data
+            del self._pending_bot_data[user_id]
+            
+            # Build feature list for display
+            features_text = "\n".join([
+                f"  • `{f.value}`: ✅" for f in BotFeature
+            ])
+            
+            await update.message.reply_text(
+                f"✅ **Bot Created Successfully!**\n\n"
+                f"**ID:** `{bot_id}`\n"
+                f"**Name:** {name}\n"
+                f"**Status:** Active\n\n"
+                f"**Enabled Features:**\n{features_text}\n\n"
+                f"Use /reloadbot to start the bot, or it will start automatically on next restart.",
+                parse_mode='Markdown'
+            )
+            
+            # Try to hot-reload if bot manager is available
+            if self.bot_manager:
+                try:
+                    await self.bot_manager.start_bot(bot_id)
+                    await update.message.reply_text("🚀 Bot started successfully!")
+                except Exception as e:
+                    logger.error(f"Failed to hot-start bot: {e}")
+                    await update.message.reply_text(f"⚠️ Bot created but couldn't start: {e}")
+            
+        except Exception as e:
+            logger.error(f"Failed to create bot: {e}")
+            await update.message.reply_text(f"❌ Failed to create bot: {e}")
+        
+        return ConversationHandler.END
+    
+    async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Cancel current operation."""
+        user_id = update.effective_user.id
+        if user_id in self._pending_bot_data:
+            del self._pending_bot_data[user_id]
+        
+        await update.message.reply_text("❌ Operation cancelled.")
+        return ConversationHandler.END
+    
+    async def listbots_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """List all configured bots."""
+        user_id = update.effective_user.id
+        
+        if not self._is_admin(user_id):
+            await update.message.reply_text("⛔ You are not authorized to use this bot.")
+            return
+        
+        await self._init_storage()
+        
+        try:
+            from storage.models import Bot
+            from sqlalchemy import select
+            
+            async with self.storage.session_maker() as session:
+                result = await session.execute(select(Bot).order_by(Bot.created_at.desc()))
+                bots = result.scalars().all()
+            
+            if not bots:
+                await update.message.reply_text("📭 No bots configured yet. Use /addbot to add one.")
+                return
+            
+            text = "🤖 **Configured Bots:**\n\n"
+            for bot in bots:
+                status = "🟢 Active" if bot.is_active else "🔴 Inactive"
+                enabled_features = sum(1 for f in BotFeature if bot.feature_flags.get(f.value, False))
+                text += (
+                    f"**`{bot.name}`** ({status})\n"
+                    f"  ID: `{bot.id}`\n"
+                    f"  Features: {enabled_features}/{len(BotFeature)}\n"
+                    f"  Created: {bot.created_at.strftime('%Y-%m-%d')}\n\n"
+                )
+            
+            await update.message.reply_text(text, parse_mode='Markdown')
+            
+        except Exception as e:
+            logger.error(f"Failed to list bots: {e}")
+            await update.message.reply_text(f"❌ Error listing bots: {e}")
+    
+    async def setprompt_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Change bot personality prompt."""
+        user_id = update.effective_user.id
+        
+        if not self._is_admin(user_id):
+            await update.message.reply_text("⛔ You are not authorized to use this bot.")
+            return
+        
+        await self._init_storage()
+        
+        args = context.args
+        if not args:
+            await update.message.reply_text(
+                "Usage: /setprompt <bot_id>\n"
+                "Example: /setprompt 12345678-1234-1234-1234-123456789abc"
+            )
+            return
+        
+        bot_id = args[0]
+        
+        try:
+            from storage.models import Bot
+            from sqlalchemy import select
+            
+            async with self.storage.session_maker() as session:
+                result = await session.execute(select(Bot).where(Bot.id == uuid.UUID(bot_id)))
+                bot = result.scalar_one_or_none()
+            
+            if not bot:
+                await update.message.reply_text(f"❌ Bot not found: {bot_id}")
+                return
+            
+            # Store bot_id for next message
+            self._pending_bot_data[user_id] = {'edit_bot_id': bot_id, 'edit_field': 'personality'}
+            
+            await update.message.reply_text(
+                f"📝 **Editing: {bot.name}**\n\n"
+                f"Current personality:\n_{bot.personality[:200]}{'...' if len(bot.personality) > 200 else ''}_\n\n"
+                "Send the new personality prompt (or /cancel):",
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to get bot: {e}")
+            await update.message.reply_text(f"❌ Error: {e}")
+    
+    async def togglefeature_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Toggle a feature for a bot."""
+        user_id = update.effective_user.id
+        
+        if not self._is_admin(user_id):
+            await update.message.reply_text("⛔ You are not authorized to use this bot.")
+            return
+        
+        await self._init_storage()
+        
+        args = context.args
+        if len(args) < 2:
+            features_list = "\n".join([f"  • {f.value}" for f in BotFeature])
+            await update.message.reply_text(
+                f"Usage: /togglefeature <bot_id> <feature>\n\n"
+                f"Available features:\n{features_list}"
+            )
+            return
+        
+        bot_id = args[0]
+        feature_name = args[1].lower()
+        
+        # Validate feature
+        valid_features = [f.value for f in BotFeature]
+        if feature_name not in valid_features:
+            await update.message.reply_text(f"❌ Invalid feature: {feature_name}")
+            return
+        
+        try:
+            from storage.models import Bot
+            from sqlalchemy import select
+            
+            async with self.storage.session_maker() as session:
+                result = await session.execute(select(Bot).where(Bot.id == uuid.UUID(bot_id)))
+                bot = result.scalar_one_or_none()
+                
+                if not bot:
+                    await update.message.reply_text(f"❌ Bot not found: {bot_id}")
+                    return
+                
+                # Toggle the feature
+                current_value = bot.feature_flags.get(feature_name, False)
+                new_value = not current_value
+                
+                # Update feature flags
+                new_flags = bot.feature_flags.copy()
+                new_flags[feature_name] = new_value
+                bot.feature_flags = new_flags
+                
+                await session.commit()
+                
+                status = "✅ Enabled" if new_value else "❌ Disabled"
+                await update.message.reply_text(
+                    f"🔧 **`{bot.name}`**\n\n"
+                    f"Feature `{feature_name}`: {status}\n\n"
+                    f"Use /reloadbot {bot_id} to apply changes.",
+                    parse_mode='Markdown'
+                )
+                
+        except Exception as e:
+            logger.error(f"Failed to toggle feature: {e}")
+            await update.message.reply_text(f"❌ Error: {e}")
+    
+    async def botstatus_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show status of all bots."""
+        user_id = update.effective_user.id
+        
+        if not self._is_admin(user_id):
+            await update.message.reply_text("⛔ You are not authorized to use this bot.")
+            return
+        
+        await self._init_storage()
+        
+        try:
+            from storage.models import Bot
+            from sqlalchemy import select
+            
+            async with self.storage.session_maker() as session:
+                result = await session.execute(select(Bot))
+                bots = result.scalars().all()
+            
+            if not bots:
+                await update.message.reply_text("📭 No bots configured.")
+                return
+            
+            text = "📊 **Bot Status Report**\n\n"
+            
+            for bot in bots:
+                db_status = "🟢" if bot.is_active else "🔴"
+                
+                # Check if running in bot manager
+                running_status = "⚪ Unknown"
+                if self.bot_manager:
+                    if bot.id in self.bot_manager.bots:
+                        running_status = "🟢 Running"
+                    else:
+                        running_status = "🔴 Stopped"
+                
+                text += (
+                    f"**{bot.name}**\n"
+                    f"  DB Status: {db_status} {'Active' if bot.is_active else 'Inactive'}\n"
+                    f"  Runtime: {running_status}\n\n"
+                )
+            
+            await update.message.reply_text(text, parse_mode='Markdown')
+            
+        except Exception as e:
+            logger.error(f"Failed to get status: {e}")
+            await update.message.reply_text(f"❌ Error: {e}")
+    
+    async def reloadbot_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Hot-reload a bot's configuration."""
+        user_id = update.effective_user.id
+        
+        if not self._is_admin(user_id):
+            await update.message.reply_text("⛔ You are not authorized to use this bot.")
+            return
+        
+        args = context.args
+        if not args:
+            await update.message.reply_text("Usage: /reloadbot <bot_id>")
+            return
+        
+        bot_id = args[0]
+        
+        if not self.bot_manager:
+            await update.message.reply_text("⚠️ Bot manager not available. Restart required.")
+            return
+        
+        try:
+            bot_uuid = uuid.UUID(bot_id)
+            await self.bot_manager.reload_bot_config(bot_uuid)
+            await update.message.reply_text(f"✅ Bot `{bot_id}` reloaded successfully!", parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Failed to reload bot: {e}")
+            await update.message.reply_text(f"❌ Failed to reload: {e}")
+    
+    async def removebot_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Deactivate a bot."""
+        user_id = update.effective_user.id
+        
+        if not self._is_admin(user_id):
+            await update.message.reply_text("⛔ You are not authorized to use this bot.")
+            return
+        
+        await self._init_storage()
+        
+        args = context.args
+        if not args:
+            await update.message.reply_text("Usage: /removebot <bot_id>")
+            return
+        
+        bot_id = args[0]
+        
+        try:
+            from storage.models import Bot
+            from sqlalchemy import select
+            
+            async with self.storage.session_maker() as session:
+                result = await session.execute(select(Bot).where(Bot.id == uuid.UUID(bot_id)))
+                bot = result.scalar_one_or_none()
+                
+                if not bot:
+                    await update.message.reply_text(f"❌ Bot not found: {bot_id}")
+                    return
+                
+                bot.is_active = False
+                await session.commit()
+                
+                await update.message.reply_text(
+                    f"✅ Bot **`{bot.name}`** has been deactivated.\n\n"
+                    "The bot will stop on next restart, or use /reloadbot to stop it now.",
+                    parse_mode='Markdown'
+                )
+                
+                # Try to stop if manager available
+                if self.bot_manager and bot.id in self.bot_manager.bots:
+                    await self.bot_manager.stop_bot(bot.id)
+                    await update.message.reply_text("Bot stopped successfully.")
+                    
+        except Exception as e:
+            logger.error(f"Failed to remove bot: {e}")
+            await update.message.reply_text(f"❌ Error: {e}")
+    
+    def build_application(self) -> Application:
+        """Build the Telegram application with handlers."""
+        self.application = Application.builder().token(self.admin_token).build()
+        
+        # Add conversation handler for addbot
+        addbot_handler = ConversationHandler(
+            entry_points=[CommandHandler('addbot', self.addbot_start)],
+            states={
+                WAITING_TOKEN: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.addbot_token)],
+                WAITING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.addbot_name)],
+                WAITING_PERSONALITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.addbot_personality)],
+            },
+            fallbacks=[CommandHandler('cancel', self.cancel)],
+        )
+        
+        self.application.add_handler(addbot_handler)
+        self.application.add_handler(CommandHandler('start', self.start_command))
+        self.application.add_handler(CommandHandler('help', self.help_command))
+        self.application.add_handler(CommandHandler('listbots', self.listbots_command))
+        self.application.add_handler(CommandHandler('setprompt', self.setprompt_command))
+        self.application.add_handler(CommandHandler('togglefeature', self.togglefeature_command))
+        self.application.add_handler(CommandHandler('botstatus', self.botstatus_command))
+        self.application.add_handler(CommandHandler('reloadbot', self.reloadbot_command))
+        self.application.add_handler(CommandHandler('removebot', self.removebot_command))
+        
+        return self.application
+    
+    async def run(self):
+        """Run the admin bot."""
+        app = self.build_application()
+        
+        logger.info("Starting Admin Bot...")
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling()
+        
+        # Keep running
+        while True:
+            await asyncio.sleep(1)
+    
+    async def stop(self):
+        """Stop the admin bot."""
+        if self.application:
+            await self.application.updater.stop()
+            await self.application.stop()
+            await self.application.shutdown()
