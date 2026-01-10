@@ -140,6 +140,12 @@ class BotManager:
                 
                 if hasattr(bot_instance, '_initialize_lmstudio_model'):
                     await bot_instance._initialize_lmstudio_model()
+                
+                # Start the message dispatcher for consuming messages from Redis
+                dispatcher_task = None
+                if hasattr(bot_instance, 'message_dispatcher') and bot_instance.message_dispatcher:
+                    dispatcher_task = asyncio.create_task(bot_instance.message_dispatcher.start_dispatching())
+                    logger.info(f"Message dispatcher started for bot {config.name}")
 
                 await app.initialize()
                 await app.start()
@@ -152,6 +158,17 @@ class BotManager:
             except Exception as e:
                 logger.error(f"Bot {bot_id} crashed: {e}")
             finally:
+                # Stop message dispatcher if running
+                if dispatcher_task and not dispatcher_task.done():
+                    if hasattr(bot_instance, 'message_dispatcher') and bot_instance.message_dispatcher:
+                        await bot_instance.message_dispatcher.stop_dispatching()
+                    dispatcher_task.cancel()
+                    try:
+                        await dispatcher_task
+                    except asyncio.CancelledError:
+                        pass
+                    logger.info(f"Message dispatcher stopped for bot {config.name}")
+                
                 if bot_id in self.applications:
                     try:
                         await app.updater.stop()
