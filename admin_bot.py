@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
     WAITING_PERSONALITY,
     WAITING_EDIT_FIELD,
     WAITING_EDIT_VALUE,
-) = range(5)
+    WAITING_NEW_PERSONALITY,
+) = range(6)
 
 
 class AdminBot:
@@ -295,13 +296,13 @@ Use these commands to manage your bot fleet."""
             logger.error(f"Failed to list bots: {e}")
             await update.message.reply_text(f"❌ Error listing bots: {e}")
     
-    async def setprompt_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Change bot personality prompt."""
+    async def setprompt_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Start the setprompt flow."""
         user_id = update.effective_user.id
         
         if not self._is_admin(user_id):
             await update.message.reply_text("⛔ You are not authorized to use this bot.")
-            return
+            return ConversationHandler.END
         
         await self._init_storage()
         
@@ -311,7 +312,7 @@ Use these commands to manage your bot fleet."""
                 "Usage: /setprompt <bot_id>\n"
                 "Example: /setprompt 12345678-1234-1234-1234-123456789abc"
             )
-            return
+            return ConversationHandler.END
         
         bot_id = args[0]
         
@@ -325,10 +326,10 @@ Use these commands to manage your bot fleet."""
             
             if not bot:
                 await update.message.reply_text(f"❌ Bot not found: {bot_id}")
-                return
+                return ConversationHandler.END
             
             # Store bot_id for next message
-            self._pending_bot_data[user_id] = {'edit_bot_id': bot_id, 'edit_field': 'personality'}
+            self._pending_bot_data[user_id] = {'edit_bot_id': bot_id, 'bot_name': bot.name}
             
             await update.message.reply_text(
                 f"📝 **Editing: {bot.name}**\n\n"
@@ -336,10 +337,70 @@ Use these commands to manage your bot fleet."""
                 "Send the new personality prompt (or /cancel):",
                 parse_mode='Markdown'
             )
+            return WAITING_NEW_PERSONALITY
             
         except Exception as e:
             logger.error(f"Failed to get bot: {e}")
             await update.message.reply_text(f"❌ Error: {e}")
+            return ConversationHandler.END
+    
+    async def receive_new_personality(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Receive and save the new personality prompt."""
+        user_id = update.effective_user.id
+        new_personality = update.message.text.strip()
+        
+        if len(new_personality) < 10:
+            await update.message.reply_text("❌ Personality must be at least 10 characters. Please try again or /cancel.")
+            return WAITING_NEW_PERSONALITY
+        
+        pending = self._pending_bot_data.get(user_id, {})
+        bot_id = pending.get('edit_bot_id')
+        bot_name = pending.get('bot_name', 'Unknown')
+        
+        if not bot_id:
+            await update.message.reply_text("❌ Session expired. Please start again with /setprompt <bot_id>")
+            return ConversationHandler.END
+        
+        try:
+            from storage.models import Bot
+            from sqlalchemy import select
+            
+            async with self.storage.session_maker() as session:
+                result = await session.execute(select(Bot).where(Bot.id == uuid.UUID(bot_id)))
+                bot = result.scalar_one_or_none()
+                
+                if not bot:
+                    await update.message.reply_text(f"❌ Bot not found: {bot_id}")
+                    return ConversationHandler.END
+                
+                # Update personality in database
+                bot.personality = new_personality
+                await session.commit()
+            
+            # Clean up pending data
+            del self._pending_bot_data[user_id]
+            
+            await update.message.reply_text(
+                f"✅ **Personality updated for {bot_name}!**\n\n"
+                f"New personality:\n_{new_personality[:200]}{'...' if len(new_personality) > 200 else ''}_\n\n"
+                f"Use /reloadbot {bot_id} to apply changes to the running bot.",
+                parse_mode='Markdown'
+            )
+            
+            # Try to hot-reload if bot manager is available
+            if self.bot_manager:
+                try:
+                    await self.bot_manager.reload_bot_config(uuid.UUID(bot_id))
+                    await update.message.reply_text("🔄 Bot config reloaded automatically!")
+                except Exception as e:
+                    logger.error(f"Failed to hot-reload bot: {e}")
+                    await update.message.reply_text(f"⚠️ Personality saved but hot-reload failed: {e}")
+            
+        except Exception as e:
+            logger.error(f"Failed to update personality: {e}")
+            await update.message.reply_text(f"❌ Error updating personality: {e}")
+        
+        return ConversationHandler.END
     
     async def togglefeature_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Toggle a feature for a bot."""
@@ -415,35 +476,43 @@ Use these commands to manage your bot fleet."""
         await self._init_storage()
         
         try:
-            from storage.models import Bot
-            from sqlalchemy import select
+            from storage.models import Bot, Conversation
+            from sqlalchemy import select, func
             
             async with self.storage.session_maker() as session:
                 result = await session.execute(select(Bot))
                 bots = result.scalars().all()
-            
-            if not bots:
-                await update.message.reply_text("📭 No bots configured.")
-                return
-            
-            text = "📊 **Bot Status Report**\n\n"
-            
-            for bot in bots:
-                db_status = "🟢" if bot.is_active else "🔴"
                 
-                # Check if running in bot manager
-                running_status = "⚪ Unknown"
-                if self.bot_manager:
-                    if bot.id in self.bot_manager.bots:
-                        running_status = "🟢 Running"
-                    else:
-                        running_status = "🔴 Stopped"
+                if not bots:
+                    await update.message.reply_text("📭 No bots configured.")
+                    return
                 
-                text += (
-                    f"**{bot.name}**\n"
-                    f"  DB Status: {db_status} {'Active' if bot.is_active else 'Inactive'}\n"
-                    f"  Runtime: {running_status}\n\n"
-                )
+                text = "📊 **Bot Status Report**\n\n"
+                
+                for bot in bots:
+                    db_status = "🟢" if bot.is_active else "🔴"
+                    
+                    # Check if running in bot manager
+                    running_status = "⚪ Unknown"
+                    if self.bot_manager:
+                        if bot.id in self.bot_manager.bots:
+                            running_status = "🟢 Running"
+                        else:
+                            running_status = "🔴 Stopped"
+                    
+                    # Count unique users for this bot
+                    user_count_result = await session.execute(
+                        select(func.count(func.distinct(Conversation.user_id)))
+                        .where(Conversation.bot_id == bot.id)
+                    )
+                    user_count = user_count_result.scalar() or 0
+                    
+                    text += (
+                        f"**{bot.name}**\n"
+                        f"  DB Status: {db_status} {'Active' if bot.is_active else 'Inactive'}\n"
+                        f"  Runtime: {running_status}\n"
+                        f"  👥 Users: {user_count}\n\n"
+                    )
             
             await update.message.reply_text(text, parse_mode='Markdown')
             
@@ -541,10 +610,20 @@ Use these commands to manage your bot fleet."""
         )
         
         self.application.add_handler(addbot_handler)
+        
+        # Add conversation handler for setprompt
+        setprompt_handler = ConversationHandler(
+            entry_points=[CommandHandler('setprompt', self.setprompt_start)],
+            states={
+                WAITING_NEW_PERSONALITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.receive_new_personality)],
+            },
+            fallbacks=[CommandHandler('cancel', self.cancel)],
+        )
+        self.application.add_handler(setprompt_handler)
+        
         self.application.add_handler(CommandHandler('start', self.start_command))
         self.application.add_handler(CommandHandler('help', self.help_command))
         self.application.add_handler(CommandHandler('listbots', self.listbots_command))
-        self.application.add_handler(CommandHandler('setprompt', self.setprompt_command))
         self.application.add_handler(CommandHandler('togglefeature', self.togglefeature_command))
         self.application.add_handler(CommandHandler('botstatus', self.botstatus_command))
         self.application.add_handler(CommandHandler('reloadbot', self.reloadbot_command))
