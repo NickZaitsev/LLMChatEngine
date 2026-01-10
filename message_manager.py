@@ -5,6 +5,7 @@ import time
 import json
 import redis
 import uuid
+import traceback
 from datetime import datetime
 from config import MIN_TYPING_SPEED, MAX_TYPING_SPEED, MAX_DELAY, RANDOM_OFFSET_MIN, RANDOM_OFFSET_MAX, MESSAGE_QUEUE_MAX_RETRIES, MESSAGE_QUEUE_LOCK_TIMEOUT, MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL, MESSAGE_QUEUE_DISPATCHER_INTERVAL
 import textwrap
@@ -171,7 +172,7 @@ class MessageQueueManager:
         
         return safe_parts
     
-    async def enqueue_message(self, user_id: int, chat_id: int, text: str, message_type: str = "regular", bot=None, typing_manager=None):
+    async def enqueue_message(self, user_id: int, chat_id: int, text: str, message_type: str = "regular", bot=None, typing_manager=None, bot_token: str = None):
         """
         Enqueue a message for a user in their Redis list. If the message needs to be split,
         split it first and enqueue each part as a separate message to maintain order.
@@ -183,6 +184,7 @@ class MessageQueueManager:
             message_type: Type of message ("regular" or "proactive")
             bot: Telegram bot instance (for backward compatibility)
             typing_manager: TypingIndicatorManager instance (for backward compatibility)
+            bot_token: Optional bot token for multi-bot support
         """
         try:
             # Validate inputs
@@ -221,7 +223,8 @@ class MessageQueueManager:
                     "message_type": message_type,
                     "retry_count": 0,
                     "part_index": i,
-                    "total_parts": total_parts
+                    "total_parts": total_parts,
+                    "bot_token": bot_token
                 }
                 
                 # Serialize message data
@@ -731,7 +734,22 @@ class MessageDispatcher:
             
             # Send the message part
             try:
-                await send_ai_response(chat_id=chat_id, text=text, bot=self.bot, typing_manager=self.typing_manager, is_first_message=is_first_message)
+                # Use bot_token from message if available, otherwise fallback to dispatcher's bot
+                bot_to_use = self.bot
+                bot_token = message.get("bot_token")
+                
+                if bot_token:
+                    try:
+                        bot_to_use = Bot(token=bot_token)
+                    except Exception as e:
+                        logger.error("Failed to create bot instance from token for user %s: %s", user_id, e)
+                        return False
+                
+                if not bot_to_use:
+                    logger.error("No bot instance available to send message for user %s", user_id)
+                    return False
+                    
+                await send_ai_response(chat_id=chat_id, text=text, bot=bot_to_use, typing_manager=self.typing_manager, is_first_message=is_first_message)
             except Exception as e:
                 logger.error("Error sending message part %d/%d for user %s: %s", part_index + 1, total_parts, user_id, e)
                 return False
@@ -820,7 +838,14 @@ async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'Typing
             # Wait for the calculated delay without typing indicator
             await asyncio.sleep(delay)
 
-    await bot.send_message(chat_id=chat_id, text=text)
+    try:
+        logger.info("Sending message to chat %s: '%s...'", chat_id, text[:50])
+        await bot.send_message(chat_id=chat_id, text=text)
+        logger.info("Successfully sent message to chat %s", chat_id)
+    except Exception as e:
+        logger.error("Failed to send message to chat %s: %s", chat_id, e)
+        logger.error(traceback.format_exc())
+        raise
 
 
 async def generate_ai_response(
