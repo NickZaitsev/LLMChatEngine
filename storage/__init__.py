@@ -162,10 +162,10 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
             autocommit=False
         )
         
-        # Create all tables
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database schema created/updated successfully")
+        # Tables should be created via Alembic migrations
+        # async with engine.begin() as conn:
+        #     await conn.run_sync(Base.metadata.create_all)
+        # logger.info("Database schema created/updated successfully")
         
         # Initialize repositories
         messages_repo = PostgresMessageRepo(session_maker)
