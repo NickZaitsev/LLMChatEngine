@@ -560,7 +560,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         """
         try:
             last_memorized_id = getattr(conversation, 'last_memorized_message_id', None)
-            active_count = await self.conversation_manager.message_repo.count_active_messages(
+            active_count = await self.conversation_manager.storage.messages.count_active_messages(
                 conversation_id, last_memorized_id
             )
             
@@ -592,7 +592,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             from memory.memory_chunker import MemoryChunker
             from config import MEMORY_EXTRACTION_PROMPT, MEMORY_MAX_FACTS_PER_CHUNK, MEMORY_DEDUP_THRESHOLD
             
-            messages = await self.conversation_manager.message_repo.get_messages_for_summary(
+            messages = await self.conversation_manager.storage.messages.get_messages_for_summary(
                 conversation_id, last_memorized_id
             )
             if not messages:
@@ -612,7 +612,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             # Update last_memorized_message_id
             if messages:
                 last_msg_id = messages[-1].id
-                await self.conversation_manager.conversation_repo.update_conversation(
+                await self.conversation_manager.storage.conversations.update_conversation(
                     conversation_id, last_memorized_message_id=last_msg_id
                 )
         except Exception as e:
