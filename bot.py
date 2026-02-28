@@ -17,7 +17,9 @@ from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                     MESSAGE_QUEUE_REDIS_URL,
                     MESSAGE_QUEUE_MAX_RETRIES,
                     MESSAGE_QUEUE_LOCK_TIMEOUT,
-                    LMSTUDIO_BASE_URL, MEMORY_EMBED_DIM)
+                    LMSTUDIO_BASE_URL, MEMORY_EMBED_DIM,
+                    MEMORY_EMBEDDING_PROVIDER, GEMINI_EMBEDDING_MODEL,
+                    MEMORY_CHUNK_SIZE)
 from memory.llamaindex.embedding import LMStudioEmbeddingModel
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
@@ -393,6 +395,8 @@ Use /help to see all available commands!"""
         existing_conversation = await self.conversation_manager.get_conversation_async(user_id)
         if existing_conversation:
             await self.conversation_manager.clear_conversation_async(user_id)
+            if self.memory_manager:
+                await self.memory_manager.clear_memories(str(user_id))
             logger.info("Cleared conversation for user %s", user_id)
             conversation_cleared = "✅ Conversation history cleared!\n"
         
@@ -548,6 +552,72 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         # Schedule dispatch based on adaptive timeout
         await self.buffer_manager.schedule_dispatch(user_id, self._dispatch_buffered_message)
         
+    async def _maybe_trigger_memory_extraction(self, user_id: int, conversation_id: str, conversation) -> None:
+        """
+        Check if enough messages have accumulated to trigger memory extraction.
+        If MEMORY_CHUNK_SIZE * 2 messages have been added since last extraction,
+        dispatch a Celery task to extract and store memories.
+        """
+        try:
+            last_memorized_id = getattr(conversation, 'last_memorized_message_id', None)
+            active_count = await self.conversation_manager.message_repo.count_active_messages(
+                conversation_id, last_memorized_id
+            )
+            
+            threshold = MEMORY_CHUNK_SIZE * 2  # message pairs = chunk_size * 2 individual messages
+            if active_count >= threshold:
+                logger.info(
+                    "Memory extraction threshold reached for user %s: %d messages (threshold: %d)",
+                    user_id, active_count, threshold
+                )
+                # Try to dispatch via Celery
+                try:
+                    from memory.tasks import extract_memories
+                    extract_memories.delay(str(user_id), conversation_id)
+                    logger.info("Dispatched extract_memories Celery task for user %s", user_id)
+                except Exception as celery_err:
+                    logger.warning(
+                        "Celery dispatch failed for extract_memories (user %s): %s. "
+                        "Running extraction inline.",
+                        user_id, celery_err
+                    )
+                    # Fallback: run extraction inline if Celery is down
+                    await self._run_inline_memory_extraction(user_id, conversation_id, last_memorized_id)
+        except Exception as e:
+            logger.error("Error checking memory extraction for user %s: %s", user_id, e, exc_info=True)
+
+    async def _run_inline_memory_extraction(self, user_id: int, conversation_id: str, last_memorized_id) -> None:
+        """Fallback inline memory extraction when Celery is not available."""
+        try:
+            from memory.memory_chunker import MemoryChunker
+            from config import MEMORY_EXTRACTION_PROMPT, MEMORY_MAX_FACTS_PER_CHUNK, MEMORY_DEDUP_THRESHOLD
+            
+            messages = await self.conversation_manager.message_repo.get_messages_for_summary(
+                conversation_id, last_memorized_id
+            )
+            if not messages:
+                return
+            
+            chunker = MemoryChunker(
+                ai_handler=self.ai_handler,
+                extraction_prompt=MEMORY_EXTRACTION_PROMPT,
+                max_facts=MEMORY_MAX_FACTS_PER_CHUNK,
+            )
+            facts = await chunker.extract_facts(messages)
+            if facts:
+                self.memory_manager._dedup_threshold = MEMORY_DEDUP_THRESHOLD
+                stored = await self.memory_manager.extract_and_store_memories(str(user_id), facts)
+                logger.info("Inline memory extraction stored %d facts for user %s", stored, user_id)
+            
+            # Update last_memorized_message_id
+            if messages:
+                last_msg_id = messages[-1].id
+                await self.conversation_manager.conversation_repo.update_conversation(
+                    conversation_id, last_memorized_message_id=last_msg_id
+                )
+        except Exception as e:
+            logger.error("Inline memory extraction failed for user %s: %s", user_id, e, exc_info=True)
+
     async def _dispatch_buffered_message(self, user_id: int) -> None:
         """Dispatch buffered messages for a user"""
         logger.info("Dispatching buffered messages for user %s", user_id)
@@ -601,6 +671,13 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                     logger.error("Failed to add response to history for user %s: %s", user_id, e)
                     # If we can't store the response, we still want to send it to the user
                     cleaned_ai_response = clean_ai_response(ai_response) if 'cleaned_ai_response' not in locals() else cleaned_ai_response
+                
+                # Check if we should trigger memory extraction
+                if self.memory_manager and conversation_id:
+                    try:
+                        await self._maybe_trigger_memory_extraction(user_id, conversation_id, conversation)
+                    except Exception as e:
+                        logger.error("Failed to check memory extraction for user %s: %s", user_id, e)
         except Exception as e:
             logger.error("Error getting AI response for user %s: %s", user_id, e)
             return  # Exit early if we couldn't get an AI response
@@ -732,9 +809,16 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                 embed_dim=MEMORY_EMBED_DIM  # Placeholder, will be dynamic later
             )
             
-            # 2. Initialize EmbeddingModel
-
-            embedding_model = LMStudioEmbeddingModel(MEMORY_EMBED_MODEL)
+            # 2. Initialize EmbeddingModel based on configured provider
+            if MEMORY_EMBEDDING_PROVIDER == 'gemini':
+                from memory.llamaindex.gemini import GeminiEmbeddingModel
+                embedding_model = GeminiEmbeddingModel(model_name=GEMINI_EMBEDDING_MODEL)
+                logger.info("Using Gemini embedding model: %s", GEMINI_EMBEDDING_MODEL)
+            elif MEMORY_EMBEDDING_PROVIDER == 'lmstudio':
+                embedding_model = LMStudioEmbeddingModel(MEMORY_EMBED_MODEL)
+                logger.info("Using LMStudio embedding model: %s", MEMORY_EMBED_MODEL)
+            else:
+                raise ValueError(f"Unsupported embedding provider: {MEMORY_EMBEDDING_PROVIDER}")
 
             # 3. Initialize SummarizationModel
             summarizer = LlamaIndexSummarizer(

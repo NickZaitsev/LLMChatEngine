@@ -58,6 +58,7 @@ class Conversation:
     created_at: datetime
     summary: Optional[str] = None
     last_summarized_message_id: Optional[UUID] = None
+    last_memorized_message_id: Optional[UUID] = None
 
 
 @dataclass
@@ -128,7 +129,7 @@ class ConversationRepo(Protocol):
     
     async def list_conversations(self, user_id: str) -> List[Conversation]: ...
     
-    async def update_conversation(self, conversation_id: str, title: str = None, extra_data: Dict[str, Any] = None, summary: str = None, last_summarized_message_id: UUID = None) -> Optional[Conversation]: ...
+    async def update_conversation(self, conversation_id: str, title: str = None, extra_data: Dict[str, Any] = None, summary: str = None, last_summarized_message_id: UUID = None, last_memorized_message_id: UUID = None) -> Optional[Conversation]: ...
 
 
 class UserRepo(Protocol):

@@ -108,3 +108,79 @@ async def create_conversation_summary_async(conversation_id: str):
     )
 
     logger.info(f"Successfully summarized conversation {conversation_id}. Last message ID: {last_message_id}")
+
+
+@celery_app.task(name='memory.tasks.extract_memories')
+def extract_memories(user_id: str, conversation_id: str):
+    """
+    Celery task to extract and store memory facts from a conversation chunk.
+    """
+    logger.info(f"Starting memory extraction task for user_id: {user_id}, conversation_id: {conversation_id}")
+    try:
+        asyncio.run(extract_memories_async(user_id, conversation_id))
+    except Exception as e:
+        logger.error(f"Error in memory extraction task: {e}", exc_info=True)
+        raise
+
+
+async def extract_memories_async(user_id: str, conversation_id: str):
+    """
+    Async implementation of memory extraction.
+    Fetches unprocessed messages, extracts facts via MemoryChunker,
+    stores them via the memory manager with deduplication,
+    and updates last_memorized_message_id.
+    """
+    from config import MEMORY_EXTRACTION_PROMPT, MEMORY_MAX_FACTS_PER_CHUNK, MEMORY_DEDUP_THRESHOLD
+    from memory.memory_chunker import MemoryChunker
+
+    app_context = await get_app_context()
+    conversation_repo = app_context.conversation_manager.storage.conversations
+    message_repo = app_context.conversation_manager.storage.messages
+    ai_handler = app_context.ai_handler
+    memory_manager = app_context.memory_manager
+
+    if not memory_manager:
+        logger.error("Memory manager not available for extraction task")
+        return
+
+    # 1. Fetch the conversation to get last_memorized_message_id
+    conversation = await conversation_repo.get_conversation(conversation_id)
+    if not conversation:
+        logger.error(f"Conversation {conversation_id} not found")
+        return
+
+    last_memorized_id = getattr(conversation, 'last_memorized_message_id', None)
+
+    # 2. Fetch unprocessed messages
+    messages = await message_repo.get_messages_for_summary(
+        conversation_id, last_memorized_id
+    )
+    if not messages:
+        logger.info(f"No new messages to process for memory extraction (conversation {conversation_id})")
+        return
+
+    logger.info(f"Processing {len(messages)} messages for memory extraction")
+
+    # 3. Extract facts using MemoryChunker
+    chunker = MemoryChunker(
+        ai_handler=ai_handler,
+        extraction_prompt=MEMORY_EXTRACTION_PROMPT,
+        max_facts=MEMORY_MAX_FACTS_PER_CHUNK,
+    )
+    facts = await chunker.extract_facts(messages)
+
+    if not facts:
+        logger.info(f"No facts extracted from conversation {conversation_id}")
+    else:
+        # 4. Store facts with deduplication
+        memory_manager._dedup_threshold = MEMORY_DEDUP_THRESHOLD
+        stored_count = await memory_manager.extract_and_store_memories(user_id, facts)
+        logger.info(f"Extracted and stored {stored_count} memory facts for user {user_id}")
+
+    # 5. Update last_memorized_message_id
+    last_msg_id = messages[-1].id
+    await conversation_repo.update_conversation(
+        conversation_id=conversation_id,
+        last_memorized_message_id=last_msg_id
+    )
+    logger.info(f"Updated last_memorized_message_id to {last_msg_id} for conversation {conversation_id}")

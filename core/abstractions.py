@@ -27,13 +27,14 @@ class VectorStore(ABC):
         pass
 
     @abstractmethod
-    async def query(self, query_embedding: List[float], top_k: int) -> List[Any]:
+    async def query(self, query_embedding: List[float], top_k: int, user_id: str) -> List[Any]:
         """
         Query the vector store for similar nodes.
 
         Args:
             query_embedding: The query embedding.
             top_k: The number of top results to return.
+            user_id: The ID of the user to filter memories for.
 
         Returns:
             A list of similar nodes.
