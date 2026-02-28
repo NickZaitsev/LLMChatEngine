@@ -44,6 +44,7 @@ class Memory:
     memory_type: str
     text: str
     created_at: datetime
+    bot_id: Optional[UUID] = None
     embedding: Optional[List[float]] = None
 
 
@@ -56,6 +57,7 @@ class Conversation:
     title: Optional[str]
     extra_data: Dict[str, Any]
     created_at: datetime
+    bot_id: Optional[UUID] = None
     summary: Optional[str] = None
     last_summarized_message_id: Optional[UUID] = None
     last_memorized_message_id: Optional[UUID] = None
@@ -76,6 +78,31 @@ class Persona:
     user_id: UUID
     name: str
     config: Dict[str, Any]
+
+
+@dataclass
+class Bot:
+    """Data class representing a bot configuration"""
+    id: UUID
+    token_encrypted: str
+    name: str
+    personality: str
+    is_active: bool
+    feature_flags: Dict[str, Any]
+    llm_config: Dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass
+class UserBotSettings:
+    """Data class representing per-user per-bot settings"""
+    id: UUID
+    user_id: UUID
+    bot_id: UUID
+    settings: Dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
 
 
 class MessageRepo(Protocol):
@@ -150,3 +177,27 @@ class PersonaRepo(Protocol):
     async def get_persona(self, persona_id: str) -> Optional[Persona]: ...
     
     async def list_personas(self, user_id: str) -> List[Persona]: ...
+
+
+class BotRepo(Protocol):
+    """Protocol for bot repository operations"""
+    
+    async def create_bot(self, token_encrypted: str, name: str, personality: str, feature_flags: Dict[str, Any] = None, llm_config: Dict[str, Any] = None) -> Bot: ...
+    
+    async def get_bot(self, bot_id: str) -> Optional[Bot]: ...
+    
+    async def list_bots(self, is_active: Optional[bool] = None) -> List[Bot]: ...
+    
+    async def update_bot(self, bot_id: str, name: str = None, personality: str = None, is_active: bool = None, feature_flags: Dict[str, Any] = None, llm_config: Dict[str, Any] = None) -> Optional[Bot]: ...
+    
+    async def delete_bot(self, bot_id: str) -> bool: ...
+
+
+class UserBotSettingsRepo(Protocol):
+    """Protocol for user bot settings repository operations"""
+    
+    async def get_or_create_settings(self, user_id: str, bot_id: str) -> UserBotSettings: ...
+    
+    async def get_settings(self, user_id: str, bot_id: str) -> Optional[UserBotSettings]: ...
+    
+    async def update_settings(self, user_id: str, bot_id: str, settings: Dict[str, Any]) -> UserBotSettings: ...

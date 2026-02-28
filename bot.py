@@ -691,13 +691,15 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             if 'cleaned_ai_response' in locals():
                 # Enqueue message instead of sending directly
                 if self.message_queue_manager:
+                    bot_token = self.bot_config.token if hasattr(self, 'bot_config') and self.bot_config else TELEGRAM_TOKEN
                     await self.message_queue_manager.enqueue_message(
                         user_id=user_id,
                         chat_id=chat_id,
                         text=cleaned_ai_response,
                         message_type="regular",
                         bot=bot,  # For backward compatibility
-                        typing_manager=self.typing_manager  # For backward compatibility
+                        typing_manager=self.typing_manager,  # For backward compatibility
+                        bot_token=bot_token
                     )
                     logger.info("Response enqueued for user %s", user_id)
                 else:
@@ -856,6 +858,11 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 
             # 6. Set PromptAssembler in AIHandler
             self.ai_handler.set_prompt_assembler(self.prompt_assembler)
+            
+            # 7. Set personality in PromptAssembler for multi-bot support
+            if hasattr(self.ai_handler, 'personality'):
+                self.prompt_assembler.personality = self.ai_handler.personality
+                
             logger.info("PromptAssembler integrated with AIHandler.")
 
             self._memory_initialized = True

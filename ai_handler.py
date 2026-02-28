@@ -135,7 +135,7 @@ class ModelClient:
                 if messages and messages[0].get('role') == 'system':
                     system_instruction = messages[0].get('content')
                     messages = messages[1:]
-
+ 
                 client = self.client
                 
                 # Gemini expects roles 'user' and 'model'
@@ -320,13 +320,11 @@ class AIHandler:
             logger.info("Sending %d messages to LLM", len(messages))
             
             # Log the actual request content for debugging
-            logger.debug("LLM Request Messages:")
+            logger.info("LLM Request Messages (Detailed):")
             for i, msg in enumerate(messages):
                 role = msg.get("role", "unknown")
                 content = msg.get("content", "")
-                # Truncate very long content for readability
-                content_preview = content[:500] + "..." if len(content) > 500 else content
-                logger.debug("  Message %d [%s]: %s", i + 1, role, content_preview)
+                logger.info("  Message %d [%s]: %s", i + 1, role, content)
             
             # Retry logic with exponential backoff and proper timeout
             for attempt in range(self.max_retries):
@@ -442,6 +440,8 @@ class AIHandler:
     def update_personality(self, new_personality: str) -> None:
         """Update the bot personality"""
         self.personality = new_personality
+        if hasattr(self, 'prompt_assembler') and self.prompt_assembler:
+            self.prompt_assembler.personality = new_personality
     
     def get_provider_info(self) -> Dict:
         """Get information about the current LLM provider"""

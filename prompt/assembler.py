@@ -139,6 +139,7 @@ class PromptAssembler:
         self.memory_token_budget_ratio = self.config.get("memory_token_budget_ratio", 0.4)
         self.truncation_length = self.config.get("truncation_length", 200)
         self.include_system_template = self.config.get("include_system_template", True)
+        self.personality = None  # Dynamic personality for multi-bot support
         
         logger.info(f"PromptAssembler initialized with max_memory_items={self.max_memory_items}")
     
@@ -226,8 +227,9 @@ class PromptAssembler:
 
         # 1. Add system template if enabled
         if self.include_system_template:
-            system_message = {"role": "system", "content": config.BOT_PERSONALITY}
-            system_tokens = self.token_counter.count_tokens(config.BOT_PERSONALITY)
+            personality_to_use = self.personality or config.BOT_PERSONALITY
+            system_message = {"role": "system", "content": personality_to_use}
+            system_tokens = self.token_counter.count_tokens(personality_to_use)
             messages.append(system_message)
             token_counts["system_tokens"] += system_tokens
             logger.debug(f"Added system template: {system_tokens} tokens")
@@ -288,6 +290,9 @@ class PromptAssembler:
             recent_messages = await self.message_repo.fetch_active_messages(
                 conversation_id, remaining_history_budget, last_summarized_id
             )
+            logger.info(f"Retrieved {len(recent_messages)} active messages for conversation {conversation_id}")
+            for i, msg in enumerate(recent_messages):
+                logger.info(f"  Active Message {i+1} [{msg.role}]: {msg.content[:100]}...")
             
             # Use all recent messages as-is
             # The current user message should be included as the last message in the prompt

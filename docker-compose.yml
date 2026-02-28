@@ -1,12 +1,15 @@
-
 services:
   ai-girlfriend-bot:
     build: .
     container_name: ai-girlfriend-bot
     restart: unless-stopped
+    command: python run_multibot.py
     env_file: .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:-ai_bot_pass}@postgres:5432/ai_bot
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
+      - ADMIN_BOT_TOKEN=${ADMIN_BOT_TOKEN}
+      - ADMIN_USER_IDS=${ADMIN_USER_IDS}
     depends_on:
       postgres:
         condition: service_healthy
@@ -31,7 +34,7 @@ services:
     networks:
       - backup_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ai_bot -d ai_bot"]
+      test: [ "CMD-SHELL", "pg_isready -U ai_bot -d ai_bot" ]
       interval: 5s
       timeout: 3s
       retries: 3
@@ -128,6 +131,7 @@ volumes:
   redis_data:
   celery_beat_schedule:
   celery_worker_state:
+
 
 networks:
   backup_network:

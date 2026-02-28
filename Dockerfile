@@ -58,4 +58,4 @@ RUN mkdir -p /var/lib/celery/beat_schedule /var/lib/celery/worker_state && \
 USER bot
 
 # Set the command to run the bot
-CMD ["python", "bot.py"]
+CMD ["python", "run_multibot.py"]
