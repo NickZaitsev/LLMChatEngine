@@ -975,7 +975,8 @@ class PostgresConversationRepo:
         title: str = None,
         extra_data: Dict[str, Any] = None,
         summary: str = None,
-        last_summarized_message_id: UUID = None
+        last_summarized_message_id: UUID = None,
+        last_memorized_message_id: UUID = None
     ) -> Optional[Conversation]:
         """
         Update an existing conversation.
@@ -1001,6 +1002,8 @@ class PostgresConversationRepo:
                 conversation.summary = summary
             if last_summarized_message_id is not None:
                 conversation.last_summarized_message_id = last_summarized_message_id
+            if last_memorized_message_id is not None:
+                conversation.last_memorized_message_id = last_memorized_message_id
 
             await session.commit()
             await session.refresh(conversation)
@@ -1013,7 +1016,8 @@ class PostgresConversationRepo:
                 extra_data=conversation.extra_data,
                 created_at=conversation.created_at,
                 summary=conversation.summary,
-                last_summarized_message_id=conversation.last_summarized_message_id
+                last_summarized_message_id=conversation.last_summarized_message_id,
+                last_memorized_message_id=getattr(conversation, 'last_memorized_message_id', None)
             )
 
 
