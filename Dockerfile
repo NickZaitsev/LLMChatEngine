@@ -50,6 +50,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Change ownership of the app directory to the non-root user
 RUN chown -R bot:bot /app
 
+# Create celery directories and set ownership
+RUN mkdir -p /var/lib/celery/beat_schedule /var/lib/celery/worker_state && \
+    chown -R bot:bot /var/lib/celery
+
 # Switch to the non-root user
 USER bot
 

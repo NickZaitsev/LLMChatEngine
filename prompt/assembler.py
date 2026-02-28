@@ -274,6 +274,10 @@ class PromptAssembler:
                             messages.append(memory_message)
                             token_counts["memory_tokens"] = memory_message_tokens
                             remaining_history_budget -= memory_message_tokens
+                            # Track which memory items were included
+                            for line in context.split("\n"):
+                                if line.strip():
+                                    included_memory_ids.append(line.strip()[:64])
                             logger.info(f"Added memories to prompt: {memory_message_tokens} tokens")
         except ValueError as e:
             logger.warning(f"Failed to retrieve memories due to a value error: {e}")
