@@ -26,6 +26,8 @@ COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
 
 # Pre-cache tiktoken models to avoid runtime downloads
+ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken_cache
+RUN mkdir -p $TIKTOKEN_CACHE_DIR
 RUN python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 
 
@@ -40,6 +42,10 @@ RUN useradd --create-home --shell /bin/bash bot
 
 # Copy the virtual environment from the builder stage
 COPY --from=builder /opt/venv /opt/venv
+
+# Copy the tiktoken cache from the builder stage
+COPY --from=builder /opt/tiktoken_cache /app/tiktoken_cache
+ENV TIKTOKEN_CACHE_DIR=/app/tiktoken_cache
 
 # Copy the application code
 COPY . .

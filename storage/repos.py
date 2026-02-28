@@ -34,13 +34,26 @@ from .models import (
 )
 
 # Try to import tiktoken for accurate token counting
+TIKTOKEN_AVAILABLE = False
+_encoding = None
+
 try:
     import tiktoken
+    # Don't initialize encoding at top level to avoid crash if download fails
     TIKTOKEN_AVAILABLE = True
-    _encoding = tiktoken.get_encoding("cl100k_base")  # GPT-3.5/GPT-4 encoding
 except ImportError:
-    TIKTOKEN_AVAILABLE = False
-    _encoding = None
+    pass
+
+def get_tiktoken_encoding():
+    """Lazy initialization of tiktoken encoding to avoid crash if internet is down during import"""
+    global _encoding
+    if TIKTOKEN_AVAILABLE and _encoding is None:
+        try:
+            # This can trigger a download if not cached
+            _encoding = tiktoken.get_encoding("cl100k_base")
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to load tiktoken encoding: {e}")
+    return _encoding
 
 logger = logging.getLogger(__name__)
 
@@ -64,12 +77,14 @@ class TokenEstimator:
         if not text:
             return 0
             
-        if TIKTOKEN_AVAILABLE and _encoding:
-            try:
-                return len(_encoding.encode(text))
-            except Exception as e:
-                logger.warning(f"Failed to use tiktoken for token estimation: {e}")
-                # Fall through to heuristic
+        if TIKTOKEN_AVAILABLE:
+            encoding = get_tiktoken_encoding()
+            if encoding:
+                try:
+                    return len(encoding.encode(text))
+                except Exception as e:
+                    logger.warning(f"Failed to use tiktoken for token estimation: {e}")
+                    # Fall through to heuristic
         
         # Heuristic: ~4 characters per token for mixed content
         return max(1, len(text) // 4)
