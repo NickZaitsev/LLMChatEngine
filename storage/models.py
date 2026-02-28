@@ -174,9 +174,15 @@ class Conversation(Base):
     )
     last_summarized_message_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey('messages.id', ondelete='SET NULL'),
+        ForeignKey('messages.id', ondelete='SET NULL', use_alter=True, name='fk_conv_last_summarized_msg'),
         nullable=True,
         doc="ID of the last message included in the summary"
+    )
+    last_memorized_message_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey('messages.id', ondelete='SET NULL', use_alter=True, name='fk_conv_last_memorized_msg'),
+        nullable=True,
+        doc="ID of the last message processed for memory extraction"
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -204,6 +210,10 @@ class Conversation(Base):
     last_summarized_message: Mapped[Optional["Message"]] = relationship(
         "Message",
         foreign_keys=[last_summarized_message_id]
+    )
+    last_memorized_message: Mapped[Optional["Message"]] = relationship(
+        "Message",
+        foreign_keys=[last_memorized_message_id]
     )
 
     def __repr__(self) -> str:

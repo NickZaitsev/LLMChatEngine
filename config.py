@@ -89,6 +89,28 @@ MEMORY_EMBED_MODEL = os.getenv('MEMORY_EMBED_MODEL', 'text-embedding-qwen3-embed
 MEMORY_EMBED_DIM = int(os.getenv('MEMORY_EMBED_DIM', '1024'))
 VECTOR_STORE_TABLE_NAME = os.getenv('VECTOR_STORE_TABLE_NAME', 'llama_pg_vector_store')
 MEMORY_CHUNK_OVERLAP = int(os.getenv('MEMORY_CHUNK_OVERLAP', '20'))
+MEMORY_CHUNK_SIZE = int(os.getenv('MEMORY_CHUNK_SIZE', '5'))  # Number of message pairs before triggering extraction
+MEMORY_DEDUP_THRESHOLD = float(os.getenv('MEMORY_DEDUP_THRESHOLD', '0.85'))  # Cosine similarity threshold for dedup
+MEMORY_MAX_FACTS_PER_CHUNK = int(os.getenv('MEMORY_MAX_FACTS_PER_CHUNK', '5'))  # Max facts to extract per chunk
+
+# Memory extraction prompt for LLM-based fact distillation
+MEMORY_EXTRACTION_PROMPT = os.getenv('MEMORY_EXTRACTION_PROMPT', """Given the following conversation between a user and an AI assistant, extract key facts about the user. Focus on:
+- Personal preferences (food, music, hobbies, etc.)
+- Personal information (name, location, job, family, etc.)
+- Important events (birthdays, trips, milestones)
+- Opinions and feelings
+- Goals and plans
+- Relationship context
+
+For each fact, provide:
+1. The fact itself (one clear sentence)
+2. A category: preference, personal_info, event, opinion, relationship, goal
+
+Output ONLY a JSON array, no other text: [{{"fact": "...", "category": "..."}}, ...]
+If there are no meaningful facts to extract, output an empty array: []
+
+Conversation:
+{text}""")
 
 # Typing Simulation Configuration
 MIN_TYPING_SPEED = int(os.getenv('MIN_TYPING_SPEED', '10'))  # characters per second
