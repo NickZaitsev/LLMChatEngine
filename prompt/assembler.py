@@ -264,7 +264,8 @@ class PromptAssembler:
                     context = await self.memory_manager.get_context(
                         user_id=user.username,
                         query=last_user_message.content,
-                        top_k=self.max_memory_items
+                        top_k=self.max_memory_items,
+                        bot_id=str(conversation.bot_id) if conversation.bot_id else None
                     )
                     if context:
                         memory_content = f"### Memory Context\n{context}"

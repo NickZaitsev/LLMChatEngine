@@ -19,11 +19,11 @@ from config import (
     PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE, MESSAGE_QUEUE_REDIS_URL,
     TELEGRAM_TOKEN, MEMORY_ENABLED,
     VECTOR_STORE_TABLE_NAME, MEMORY_EMBED_MODEL, MEMORY_EMBED_DIM,
-    MEMORY_EMBEDDING_PROVIDER, LMSTUDIO_BASE_URL, GEMINI_EMBEDDING_MODEL
+    MEMORY_EMBEDDING_PROVIDER, LMSTUDIO_BASE_URL, GEMINI_EMBEDDING_MODEL,
+    MEMORY_RETRIEVAL_EXPAND_NEIGHBORS
 )
 from memory.manager import LlamaIndexMemoryManager
 from memory.llamaindex.vector_store import PgVectorStore
-from memory.llamaindex.summarizer import LlamaIndexSummarizer
 from message_manager import MessageQueueManager, TypingIndicatorManager
 from llama_index.llms.lmstudio import LMStudio
 from prompt.assembler import PromptAssembler
@@ -108,15 +108,10 @@ class AppContext:
                     embed_dim=MEMORY_EMBED_DIM
                 )
 
-                summarization_model = LlamaIndexSummarizer(ai_handler=self.ai_handler)
-
                 self.memory_manager = LlamaIndexMemoryManager(
                     vector_store=vector_store,
                     embedding_model=embedding_model,
-                    summarization_model=summarization_model,
-                    message_repo=self.conversation_manager.storage.messages,
-                    conversation_repo=self.conversation_manager.storage.conversations,
-                    user_repo=self.conversation_manager.storage.users
+                    expand_neighbors=MEMORY_RETRIEVAL_EXPAND_NEIGHBORS,
                 )
                 logger.info("LlamaIndexMemoryManager initialized.")
             else:

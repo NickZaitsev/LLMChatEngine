@@ -1,5 +1,10 @@
 """
-Celery tasks for memory management, including conversation summarization.
+Celery tasks for memory management.
+
+Includes:
+- create_conversation_summary: Summarises a conversation (unchanged).
+- extract_memories: Chunks and embeds conversation fragments (rewritten:
+  no LLM fact extraction, uses AdaptiveChunker + batch embed).
 """
 
 import logging
@@ -110,43 +115,55 @@ async def create_conversation_summary_async(conversation_id: str):
     logger.info(f"Successfully summarized conversation {conversation_id}. Last message ID: {last_message_id}")
 
 
+# -----------------------------------------------------------------------
+# Memory extraction — adaptive chunking + direct embedding (no LLM)
+# -----------------------------------------------------------------------
+
 @celery_app.task(name='memory.tasks.extract_memories')
 def extract_memories(user_id: str, conversation_id: str):
     """
-    Celery task to extract and store memory facts from a conversation chunk.
+    Celery task to chunk and embed conversation fragments.
+
+    This is the rewritten version: no LLM fact extraction.
+    Messages are grouped into adaptive token-aware chunks and embedded
+    directly into pgvector.
     """
-    logger.info(f"Starting memory extraction task for user_id: {user_id}, conversation_id: {conversation_id}")
+    logger.info(
+        "Starting memory chunk-embed task for user_id: %s, conversation_id: %s",
+        user_id, conversation_id,
+    )
     try:
         asyncio.run(extract_memories_async(user_id, conversation_id))
     except Exception as e:
-        logger.error(f"Error in memory extraction task: {e}", exc_info=True)
+        logger.error("Error in memory chunk-embed task: %s", e, exc_info=True)
         raise
 
 
 async def extract_memories_async(user_id: str, conversation_id: str):
     """
-    Async implementation of memory extraction.
-    Fetches unprocessed messages, extracts facts via MemoryChunker,
-    stores them via the memory manager with deduplication,
-    and updates last_memorized_message_id.
+    Async implementation of memory chunking + embedding.
+
+    1. Fetch unprocessed messages (after last_memorized_message_id).
+    2. Run AdaptiveChunker to group them into token-aware chunks.
+    3. Batch-embed and store via the memory manager.
+    4. Update last_memorized_message_id.
     """
-    from config import MEMORY_EXTRACTION_PROMPT, MEMORY_MAX_FACTS_PER_CHUNK, MEMORY_DEDUP_THRESHOLD
-    from memory.memory_chunker import MemoryChunker
+    from config import MEMORY_CHUNK_MAX_MESSAGES, MEMORY_CHUNK_TARGET_TOKENS
+    from memory.adaptive_chunker import AdaptiveChunker
 
     app_context = await get_app_context()
     conversation_repo = app_context.conversation_manager.storage.conversations
     message_repo = app_context.conversation_manager.storage.messages
-    ai_handler = app_context.ai_handler
     memory_manager = app_context.memory_manager
 
     if not memory_manager:
-        logger.error("Memory manager not available for extraction task")
+        logger.error("Memory manager not available for chunk-embed task")
         return
 
     # 1. Fetch the conversation to get last_memorized_message_id
     conversation = await conversation_repo.get_conversation(conversation_id)
     if not conversation:
-        logger.error(f"Conversation {conversation_id} not found")
+        logger.error("Conversation %s not found", conversation_id)
         return
 
     last_memorized_id = getattr(conversation, 'last_memorized_message_id', None)
@@ -156,31 +173,42 @@ async def extract_memories_async(user_id: str, conversation_id: str):
         conversation_id, last_memorized_id
     )
     if not messages:
-        logger.info(f"No new messages to process for memory extraction (conversation {conversation_id})")
+        logger.info(
+            "No new messages to process for memory chunking (conversation %s)",
+            conversation_id,
+        )
         return
 
-    logger.info(f"Processing {len(messages)} messages for memory extraction")
+    logger.info("Processing %d messages for memory chunking", len(messages))
 
-    # 3. Extract facts using MemoryChunker
-    chunker = MemoryChunker(
-        ai_handler=ai_handler,
-        extraction_prompt=MEMORY_EXTRACTION_PROMPT,
-        max_facts=MEMORY_MAX_FACTS_PER_CHUNK,
+    # 3. Create adaptive chunks
+    chunker = AdaptiveChunker(
+        max_messages=MEMORY_CHUNK_MAX_MESSAGES,
+        target_tokens=MEMORY_CHUNK_TARGET_TOKENS,
     )
-    facts = await chunker.extract_facts(messages)
+    chunks = chunker.create_chunks(messages)
 
-    if not facts:
-        logger.info(f"No facts extracted from conversation {conversation_id}")
+    if not chunks:
+        logger.info("No complete turns to chunk in conversation %s", conversation_id)
     else:
-        # 4. Store facts with deduplication
-        memory_manager._dedup_threshold = MEMORY_DEDUP_THRESHOLD
-        stored_count = await memory_manager.extract_and_store_memories(user_id, facts)
-        logger.info(f"Extracted and stored {stored_count} memory facts for user {user_id}")
+        # 4. Batch-embed and store
+        stored_count = await memory_manager.store_conversation_chunks(
+            user_id=user_id,
+            chunks=chunks,
+            conversation_id=conversation_id,
+            bot_id=str(conversation.bot_id) if conversation.bot_id else None,
+        )
+        logger.info(
+            "Stored %d conversation chunk(s) for user %s", stored_count, user_id
+        )
 
     # 5. Update last_memorized_message_id
     last_msg_id = messages[-1].id
     await conversation_repo.update_conversation(
         conversation_id=conversation_id,
-        last_memorized_message_id=last_msg_id
+        last_memorized_message_id=last_msg_id,
     )
-    logger.info(f"Updated last_memorized_message_id to {last_msg_id} for conversation {conversation_id}")
+    logger.info(
+        "Updated last_memorized_message_id to %s for conversation %s",
+        last_msg_id, conversation_id,
+    )

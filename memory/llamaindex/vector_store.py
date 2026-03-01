@@ -190,3 +190,62 @@ class PgVectorStore(VectorStoreAbstraction):
         except Exception as e:
             logger.error(f"Error finding similar vectors: {e}", exc_info=True)
             return []
+
+    async def fetch_neighbors(
+        self,
+        conversation_id: str,
+        chunk_index: int,
+        user_id: str,
+        radius: int = 1,
+    ) -> List[dict]:
+        """
+        Fetch chunks adjacent to a given chunk_index in the same conversation.
+
+        Used for "embed small, retrieve larger" pattern — when a small chunk
+        matches a query, also return its neighboring chunks for richer context.
+
+        Args:
+            conversation_id: The conversation the chunk belongs to.
+            chunk_index: The 0-based index of the matched chunk.
+            user_id: The user ID to scope the query.
+            radius: How many neighbors on each side (1 = ±1 chunk).
+
+        Returns:
+            List of dicts with 'text' and 'first_timestamp' keys,
+            ordered by chunk_index ascending.
+        """
+        try:
+            table_name = self._store.table_name
+
+            def _fetch():
+                with self._store._session() as session:
+                    sql = (
+                        f'SELECT text_, metadata_ FROM public."data_{table_name}" '
+                        f"WHERE metadata_->>'conversation_id' = :conv_id "
+                        f"AND metadata_->>'user_id' = :uid "
+                        f"AND CAST(metadata_->>'chunk_index' AS INTEGER) "
+                        f"BETWEEN :min_idx AND :max_idx "
+                        f"ORDER BY CAST(metadata_->>'chunk_index' AS INTEGER)"
+                    )
+                    result = session.execute(sql_text(sql), {
+                        "conv_id": str(conversation_id),
+                        "uid": str(user_id),
+                        "min_idx": max(0, chunk_index - radius),
+                        "max_idx": chunk_index + radius,
+                    })
+                    rows = []
+                    for row in result:
+                        meta = row.metadata_ if hasattr(row, 'metadata_') else {}
+                        rows.append({
+                            "text": row.text_ if hasattr(row, 'text_') else "",
+                            "first_timestamp": meta.get("first_timestamp", "") if isinstance(meta, dict) else "",
+                        })
+                    return rows
+
+            return await asyncio.to_thread(_fetch)
+        except Exception as e:
+            logger.error(
+                "Error fetching neighbors for conversation %s, chunk %d: %s",
+                conversation_id, chunk_index, e, exc_info=True,
+            )
+            return []

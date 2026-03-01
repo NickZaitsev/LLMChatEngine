@@ -19,7 +19,9 @@ from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                     MESSAGE_QUEUE_LOCK_TIMEOUT,
                     LMSTUDIO_BASE_URL, MEMORY_EMBED_DIM,
                     MEMORY_EMBEDDING_PROVIDER, GEMINI_EMBEDDING_MODEL,
-                    MEMORY_CHUNK_SIZE)
+                    MEMORY_TRIGGER_EVERY_N_MESSAGES,
+                    MEMORY_CHUNK_MAX_MESSAGES, MEMORY_CHUNK_TARGET_TOKENS,
+                    MEMORY_RETRIEVAL_EXPAND_NEIGHBORS)
 from memory.llamaindex.embedding import LMStudioEmbeddingModel
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
@@ -46,7 +48,6 @@ if MEMORY_ENABLED:
     try:
         from memory.manager import LlamaIndexMemoryManager
         from memory.llamaindex.vector_store import PgVectorStore
-        from memory.llamaindex.summarizer import LlamaIndexSummarizer
         from prompt.assembler import PromptAssembler
         from llama_index.llms.lmstudio import LMStudio
         MEMORY_IMPORTS_AVAILABLE = True
@@ -88,6 +89,8 @@ class AIGirlfriendBot:
         self.application = None
         self.pending_clear_confirmation = set()
         self._storage_initialized = False
+        self.bot_id = None  # Will be set by multibot_adapter in multi-bot mode
+        self.bot_config = None # Will be set by multibot_adapter in multi-bot mode
         
         # Initialize memory and prompt components
         self.memory_manager = None
@@ -554,9 +557,8 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         
     async def _maybe_trigger_memory_extraction(self, user_id: int, conversation_id: str, conversation) -> None:
         """
-        Check if enough messages have accumulated to trigger memory extraction.
-        If MEMORY_CHUNK_SIZE * 2 messages have been added since last extraction,
-        dispatch a Celery task to extract and store memories.
+        Check if enough messages have accumulated to trigger memory chunking.
+        Uses adaptive chunking with direct embedding (no LLM calls).
         """
         try:
             last_memorized_id = getattr(conversation, 'last_memorized_message_id', None)
@@ -564,33 +566,31 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                 conversation_id, last_memorized_id
             )
             
-            threshold = MEMORY_CHUNK_SIZE * 2  # message pairs = chunk_size * 2 individual messages
-            if active_count >= threshold:
+            if active_count >= MEMORY_TRIGGER_EVERY_N_MESSAGES:
                 logger.info(
-                    "Memory extraction threshold reached for user %s: %d messages (threshold: %d)",
-                    user_id, active_count, threshold
+                    "Memory chunking threshold reached for user %s: %d messages (threshold: %d)",
+                    user_id, active_count, MEMORY_TRIGGER_EVERY_N_MESSAGES
                 )
                 # Try to dispatch via Celery
                 try:
                     from memory.tasks import extract_memories
                     extract_memories.delay(str(user_id), conversation_id)
-                    logger.info("Dispatched extract_memories Celery task for user %s", user_id)
+                    logger.info("Dispatched memory chunk-embed Celery task for user %s", user_id)
                 except Exception as celery_err:
                     logger.warning(
-                        "Celery dispatch failed for extract_memories (user %s): %s. "
-                        "Running extraction inline.",
+                        "Celery dispatch failed for chunk-embed (user %s): %s. "
+                        "Running inline.",
                         user_id, celery_err
                     )
-                    # Fallback: run extraction inline if Celery is down
+                    # Fallback: run inline if Celery is down
                     await self._run_inline_memory_extraction(user_id, conversation_id, last_memorized_id)
         except Exception as e:
-            logger.error("Error checking memory extraction for user %s: %s", user_id, e, exc_info=True)
+            logger.error("Error checking memory chunking for user %s: %s", user_id, e, exc_info=True)
 
     async def _run_inline_memory_extraction(self, user_id: int, conversation_id: str, last_memorized_id) -> None:
-        """Fallback inline memory extraction when Celery is not available."""
+        """Fallback inline memory chunk-embed when Celery is not available."""
         try:
-            from memory.memory_chunker import MemoryChunker
-            from config import MEMORY_EXTRACTION_PROMPT, MEMORY_MAX_FACTS_PER_CHUNK, MEMORY_DEDUP_THRESHOLD
+            from memory.adaptive_chunker import AdaptiveChunker
             
             messages = await self.conversation_manager.storage.messages.get_messages_for_summary(
                 conversation_id, last_memorized_id
@@ -598,16 +598,19 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             if not messages:
                 return
             
-            chunker = MemoryChunker(
-                ai_handler=self.ai_handler,
-                extraction_prompt=MEMORY_EXTRACTION_PROMPT,
-                max_facts=MEMORY_MAX_FACTS_PER_CHUNK,
+            chunker = AdaptiveChunker(
+                max_messages=MEMORY_CHUNK_MAX_MESSAGES,
+                target_tokens=MEMORY_CHUNK_TARGET_TOKENS,
             )
-            facts = await chunker.extract_facts(messages)
-            if facts:
-                self.memory_manager._dedup_threshold = MEMORY_DEDUP_THRESHOLD
-                stored = await self.memory_manager.extract_and_store_memories(str(user_id), facts)
-                logger.info("Inline memory extraction stored %d facts for user %s", stored, user_id)
+            chunks = chunker.create_chunks(messages)
+            if chunks:
+                stored = await self.memory_manager.store_conversation_chunks(
+                    user_id=str(user_id),
+                    chunks=chunks,
+                    conversation_id=conversation_id,
+                    bot_id=str(self.bot_id) if self.bot_id else None,
+                )
+                logger.info("Inline memory chunking stored %d chunk(s) for user %s", stored, user_id)
             
             # Update last_memorized_message_id
             if messages:
@@ -616,7 +619,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                     conversation_id, last_memorized_message_id=last_msg_id
                 )
         except Exception as e:
-            logger.error("Inline memory extraction failed for user %s: %s", user_id, e, exc_info=True)
+            logger.error("Inline memory chunking failed for user %s: %s", user_id, e, exc_info=True)
 
     async def _dispatch_buffered_message(self, user_id: int) -> None:
         """Dispatch buffered messages for a user"""
@@ -641,7 +644,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         conversation_history = await self.conversation_manager.get_formatted_conversation_async(user_id)
         
         # Get conversation ID for PromptAssembler
-        conversation = await self.conversation_manager._ensure_user_and_conversation(user_id)
+        conversation = await self.conversation_manager._ensure_user_and_conversation(user_id, bot_id=self.bot_id)
         conversation_id = str(conversation.id) if conversation else None
         
         # Notify proactive messaging service that the user has sent a message.
@@ -808,7 +811,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             vector_store = PgVectorStore(
                 db_url=DATABASE_URL,
                 table_name=VECTOR_STORE_TABLE_NAME,
-                embed_dim=MEMORY_EMBED_DIM  # Placeholder, will be dynamic later
+                embed_dim=MEMORY_EMBED_DIM
             )
             
             # 2. Initialize EmbeddingModel based on configured provider
@@ -822,19 +825,11 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             else:
                 raise ValueError(f"Unsupported embedding provider: {MEMORY_EMBEDDING_PROVIDER}")
 
-            # 3. Initialize SummarizationModel
-            summarizer = LlamaIndexSummarizer(
-                ai_handler=self.ai_handler
-            )
-
-            # 4. Initialize LlamaIndexMemoryManager
+            # 3. Initialize LlamaIndexMemoryManager (no LLM extraction needed)
             self.memory_manager = LlamaIndexMemoryManager(
                 vector_store=vector_store,
                 embedding_model=embedding_model,
-                summarization_model=summarizer,
-                message_repo=storage.messages,
-                conversation_repo=storage.conversations,
-                user_repo=storage.users
+                expand_neighbors=MEMORY_RETRIEVAL_EXPAND_NEIGHBORS,
             )
             logger.info("LlamaIndexMemoryManager initialized successfully")
 

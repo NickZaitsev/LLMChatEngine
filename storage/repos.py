@@ -858,8 +858,9 @@ class PostgresConversationRepo:
         self, 
         user_id: str, 
         persona_id: str, 
-        title: str = None, 
-        extra_data: Dict[str, Any] = None
+        bot_id: Optional[str] = None, 
+        title: Optional[str] = None, 
+        extra_data: Optional[Dict[str, Any]] = None
     ) -> Conversation:
         """
         Create a new conversation.
@@ -879,6 +880,7 @@ class PostgresConversationRepo:
         try:
             user_uuid = UUID(user_id)
             persona_uuid = UUID(persona_id)
+            bot_uuid = UUID(bot_id) if bot_id else None
         except ValueError as e:
             raise ValueError(f"Invalid UUID format: {e}") from e
         
@@ -887,6 +889,7 @@ class PostgresConversationRepo:
                 conversation_model = ConversationModel(
                     user_id=user_uuid,
                     persona_id=persona_uuid,
+                    bot_id=bot_uuid,
                     title=title,
                     extra_data=extra_data
                 )
@@ -899,11 +902,13 @@ class PostgresConversationRepo:
                     id=conversation_model.id,
                     user_id=conversation_model.user_id,
                     persona_id=conversation_model.persona_id,
+                    bot_id=conversation_model.bot_id,
                     title=conversation_model.title,
                     extra_data=conversation_model.extra_data,
                     created_at=conversation_model.created_at,
                     summary=conversation_model.summary,
-                    last_summarized_message_id=conversation_model.last_summarized_message_id
+                    last_summarized_message_id=conversation_model.last_summarized_message_id,
+                    last_memorized_message_id=getattr(conversation_model, 'last_memorized_message_id', None)
                 )
                 
             except IntegrityError as e:
@@ -947,7 +952,7 @@ class PostgresConversationRepo:
                 last_summarized_message_id=conversation.last_summarized_message_id
             )
     
-    async def list_conversations(self, user_id: str) -> List[Conversation]:
+    async def list_conversations(self, user_id: str, bot_id: Optional[str] = None) -> List[Conversation]:
         """
         List all conversations for a user.
         
@@ -963,8 +968,16 @@ class PostgresConversationRepo:
             raise ValueError(f"Invalid user_id format: {user_id}") from e
         
         async with self.session_maker() as session:
+            conditions = [ConversationModel.user_id == user_uuid]
+            if bot_id:
+                try:
+                    bot_uuid = UUID(bot_id)
+                    conditions.append(ConversationModel.bot_id == bot_uuid)
+                except ValueError:
+                    logger.warning(f"Invalid bot_id format in list_conversations: {bot_id}")
+            
             stmt = select(ConversationModel).where(
-                ConversationModel.user_id == user_uuid
+                and_(*conditions)
             ).order_by(desc(ConversationModel.created_at))
             
             result = await session.execute(stmt)
@@ -975,11 +988,13 @@ class PostgresConversationRepo:
                     id=conv.id,
                     user_id=conv.user_id,
                     persona_id=conv.persona_id,
+                    bot_id=conv.bot_id,
                     title=conv.title,
                     extra_data=conv.extra_data,
                     created_at=conv.created_at,
                     summary=conv.summary,
-                    last_summarized_message_id=conv.last_summarized_message_id
+                    last_summarized_message_id=conv.last_summarized_message_id,
+                    last_memorized_message_id=getattr(conv, 'last_memorized_message_id', None)
                 )
                 for conv in conversations
             ]
@@ -987,11 +1002,11 @@ class PostgresConversationRepo:
     async def update_conversation(
         self,
         conversation_id: str,
-        title: str = None,
-        extra_data: Dict[str, Any] = None,
-        summary: str = None,
-        last_summarized_message_id: UUID = None,
-        last_memorized_message_id: UUID = None
+        title: Optional[str] = None,
+        extra_data: Optional[Dict[str, Any]] = None,
+        summary: Optional[str] = None,
+        last_summarized_message_id: Optional[UUID] = None,
+        last_memorized_message_id: Optional[UUID] = None
     ) -> Optional[Conversation]:
         """
         Update an existing conversation.

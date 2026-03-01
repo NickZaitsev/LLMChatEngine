@@ -61,7 +61,7 @@ class PostgresConversationManager:
             self.storage = None
             logger.info("Storage connection closed")
     
-    async def _ensure_user_and_conversation(self, user_id: int) -> Conversation:
+    async def _ensure_user_and_conversation(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> Conversation:
         """
         Ensure user and conversation exist, creating them if needed.
         
@@ -75,8 +75,9 @@ class PostgresConversationManager:
             raise RuntimeError("Storage not initialized. Call initialize() first.")
         
         # Check cache first
-        if user_id in self._conversation_cache:
-            return self._conversation_cache[user_id]
+        cache_key = (user_id, bot_id)
+        if cache_key in self._conversation_cache:
+            return self._conversation_cache[cache_key]
         
         # Check if user exists
         user = await self.storage.users.get_user_by_username(str(user_id))
@@ -92,7 +93,7 @@ class PostgresConversationManager:
         self._user_cache[user_id] = user
         
         # Check for existing conversation
-        conversations = await self.storage.conversations.list_conversations(str(user.id))
+        conversations = await self.storage.conversations.list_conversations(str(user.id), bot_id=str(bot_id) if bot_id else None)
         if conversations:
             # Use the most recent conversation
             conversation = conversations[0] # Already sorted by creation time DESC
@@ -113,13 +114,14 @@ class PostgresConversationManager:
             conversation = await self.storage.conversations.create_conversation(
                 user_id=str(user.id),
                 persona_id=str(persona.id),
+                bot_id=str(bot_id) if bot_id else None,
                 title=f"Chat with {user.username}",
                 extra_data={"auto_created": True}
             )
             logger.info("Created new conversation for user %d", user_id)
         
         # Cache conversation
-        self._conversation_cache[user_id] = conversation
+        self._conversation_cache[cache_key] = conversation
         return conversation
     
     # Public async methods for direct use from async contexts

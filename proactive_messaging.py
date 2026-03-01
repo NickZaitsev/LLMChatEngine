@@ -27,6 +27,7 @@ from config import (
     PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES,
     PROACTIVE_MESSAGING_PROMPT,
     PROACTIVE_MESSAGING_RESTART_DELAY_MAX,
+    TELEGRAM_TOKEN
 )
 
 # Import AppContext for shared services
@@ -362,7 +363,8 @@ class ProactiveMessagingService:
             'consecutive_outreaches': 0,
             'last_proactive_message': datetime.now(),
             'scheduled_task_id': None,
-            'user_replied': False
+            'user_replied': False,
+            'is_active': True
         })
         self._set_user_state(user_id, user_state)
         
@@ -448,6 +450,26 @@ async def send_proactive_message_async(task, user_id: int):
         return
         
     app_context = await get_app_context()
+    
+    # Get conversation to find the correct bot_id
+    conversation = await app_context.conversation_manager._ensure_user_and_conversation(user_id)
+    bot_token = TELEGRAM_TOKEN  # Default
+    
+    if conversation and conversation.bot_id:
+        try:
+            from storage.models import Bot
+            from sqlalchemy import select
+            from token_encryption import decrypt_token
+            
+            async with app_context.conversation_manager.storage.session_maker() as session:
+                result = await session.execute(select(Bot).where(Bot.id == conversation.bot_id))
+                bot_record = result.scalar_one_or_none()
+                if bot_record:
+                    bot_token = decrypt_token(bot_record.token_encrypted)
+                    logger.info(f"Using custom bot token for user {user_id} (bot: {bot_record.name})")
+        except Exception as e:
+            logger.error(f"Failed to retrieve bot token for user {user_id}: {e}")
+            # Fallback to default token
 
     try:
         # Generate and send the message...
@@ -476,6 +498,7 @@ async def send_proactive_message_async(task, user_id: int):
                     chat_id=user_id,
                     text=cleaned_response,
                     message_type="proactive",
+                    bot_token=bot_token
                 )
                 logger.info(f"Proactive message successfully generated and enqueued for user {user_id} [{task_id}]")
         else:
@@ -548,6 +571,10 @@ async def manage_proactive_messages_async(task):
                 state = proactive_messaging_service._get_user_state(user_id)
 
                 logger.info(f"Processing user {user_id} with state: {state}")
+
+                if not state.get('is_active', True):
+                    logger.info(f"Skipping user {user_id}: user is marked as inactive/blocked.")
+                    continue
 
                 if state.get('scheduled_task_id'):
                     logger.debug(f"Skipping user {user_id}: task {state['scheduled_task_id']} is already scheduled.")

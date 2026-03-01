@@ -32,6 +32,7 @@ task_routes = {
     'proactive_messaging.send_proactive_message': {'queue': 'proactive_messaging'},
     'proactive_messaging.manage_proactive_messages': {'queue': 'proactive_messaging'},
     'memory.tasks.create_conversation_summary': {'queue': 'memory_tasks'},
+    'memory.tasks.extract_memories': {'queue': 'memory_tasks'},
 }
 
 # Task Queues

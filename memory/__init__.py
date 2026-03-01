@@ -1,16 +1,19 @@
 """
-Memory management package for AI girlfriend bot.
+Memory management package for AI chat bot.
 
-This package provides episodic memory creation, summarization, embedding, 
-and semantic retrieval capabilities.
+This package provides:
+- Adaptive conversation chunking (token-aware, turn-based)
+- Direct embedding of conversation fragments (no LLM extraction)
+- Semantic retrieval with neighbor expansion
 """
 
 from .manager import LlamaIndexMemoryManager
-from .llamaindex.summarizer import LlamaIndexSummarizer
+from .adaptive_chunker import AdaptiveChunker, ConversationChunk
 
 __all__ = [
     'LlamaIndexMemoryManager',
-    'LlamaIndexSummarizer'
+    'AdaptiveChunker',
+    'ConversationChunk',
 ]
 
-__version__ = '1.0.0'
+__version__ = '2.0.0'

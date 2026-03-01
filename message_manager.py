@@ -12,6 +12,7 @@ import textwrap
 import re
 from typing import Dict, Set, Optional, Any
 from telegram import Bot
+from telegram.error import Forbidden, BadRequest
 from config import TELEGRAM_TOKEN
 
 logger = logging.getLogger(__name__)
@@ -750,7 +751,16 @@ class MessageDispatcher:
                     return False
                     
                 await send_ai_response(chat_id=chat_id, text=text, bot=bot_to_use, typing_manager=self.typing_manager, is_first_message=is_first_message)
-            except Exception as e:
+            except (Forbidden, BadRequest) as e:
+                error_msg = str(e).lower()
+                if isinstance(e, Forbidden) or "chat not found" in error_msg or "user is deactivated" in error_msg or "bot was blocked" in error_msg:
+                    logger.warning("Permanent error sending message to user %s: %s. Disabling proactive messaging.", user_id, e)
+                    try:
+                        await self._disable_proactive_messaging_for_user(user_id)
+                    except Exception as disable_error:
+                        logger.error("Failed to disable proactive messaging for user %s: %s", user_id, disable_error)
+                    return True # Return True to pretend it was processed so it is NOT retried
+                
                 logger.error("Error sending message part %d/%d for user %s: %s", part_index + 1, total_parts, user_id, e)
                 return False
             
@@ -788,6 +798,32 @@ class MessageDispatcher:
                 
         except Exception as e:
             logger.error("Error handling failed message for user %s: %s", message.get("user_id", "unknown"), e)
+
+
+    async def _disable_proactive_messaging_for_user(self, user_id: int):
+        """Disable proactive messaging for a user due to permanent error (blocked/chat not found)."""
+        try:
+            state_key = f"proactive_messaging:user:{user_id}"
+            state_json = self.redis_client.get(state_key)
+            if state_json:
+                state = json.loads(state_json)
+                state['is_active'] = False
+                state['last_error'] = "Permanent failure (Chat not found / Forbidden)"
+                state['error_time'] = datetime.now().isoformat()
+                self.redis_client.set(state_key, json.dumps(state, default=str))
+                logger.info("Proactive messaging disabled for user %s in Redis", user_id)
+            else:
+                # Create a minimal state to mark as inactive
+                state = {
+                    'is_active': False, 
+                    'user_id': user_id,
+                    'last_error': "Permanent failure (Chat not found / Forbidden)",
+                    'error_time': datetime.now().isoformat()
+                }
+                self.redis_client.set(state_key, json.dumps(state, default=str))
+                logger.info("Created inactive state for user %s in Redis", user_id)
+        except Exception as e:
+            logger.error("Error while trying to disable proactive messaging in Redis for user %s: %s", user_id, e)
 
 
 async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'TypingIndicatorManager' = None, is_first_message: bool = True):
