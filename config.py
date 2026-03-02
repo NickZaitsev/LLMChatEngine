@@ -110,12 +110,14 @@ MAX_DELAY = int(os.getenv('MAX_DELAY', '5'))  # maximum delay in seconds
 RANDOM_OFFSET_MIN = float(os.getenv('RANDOM_OFFSET_MIN', '0.1'))  # minimum random offset in seconds
 RANDOM_OFFSET_MAX = float(os.getenv('RANDOM_OFFSET_MAX', '0.5'))  # maximum random offset in seconds
 INDICATE_TYPING_DURING_DELAY = os.getenv('INDICATE_TYPING_DURING_DELAY', 'false').lower() in ('true', '1', 'yes', 'on')
+REDIS_URL = os.getenv('REDIS_URL', 'redis://redis:6379/0')
+
 # Proactive Messaging Configuration
 PROACTIVE_MESSAGING_ENABLED = os.getenv('PROACTIVE_MESSAGING_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
-PROACTIVE_MESSAGING_REDIS_URL = os.getenv('PROACTIVE_MESSAGING_REDIS_URL', 'redis://redis:6379/0')
+PROACTIVE_MESSAGING_REDIS_URL = os.getenv('PROACTIVE_MESSAGING_REDIS_URL', REDIS_URL)
 
 # Message Queue Configuration
-MESSAGE_QUEUE_REDIS_URL = os.getenv('MESSAGE_QUEUE_REDIS_URL', 'redis://redis:6379/0')
+MESSAGE_QUEUE_REDIS_URL = os.getenv('MESSAGE_QUEUE_REDIS_URL', REDIS_URL)
 MESSAGE_QUEUE_MAX_RETRIES = int(os.getenv('MESSAGE_QUEUE_MAX_RETRIES', '3'))
 MESSAGE_QUEUE_LOCK_TIMEOUT = int(os.getenv('MESSAGE_QUEUE_LOCK_TIMEOUT', '30'))
 MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL = int(os.getenv('MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL', '10'))

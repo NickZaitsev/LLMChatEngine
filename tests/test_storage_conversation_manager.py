@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+import uuid
 
 import pytest
 
@@ -24,19 +25,22 @@ async def test_ensure_user_and_conversation_refreshes_cached_conversation():
 
 
 @pytest.mark.asyncio
-async def test_clear_conversation_does_not_delete_shared_user_history():
+async def test_clear_conversation_deletes_default_bot_user_history():
     manager = PostgresConversationManager("postgresql://u:p@h:5432/db", use_pgvector=False)
     conversation = SimpleNamespace(id="conv-1")
 
     manager.storage = MagicMock()
     manager.storage.messages.delete_messages = AsyncMock(return_value=4)
-    manager.storage.message_history.clear_user_history = AsyncMock()
+    manager.storage.message_history.clear_user_history = AsyncMock(return_value=3)
     manager._ensure_user_and_conversation = AsyncMock(return_value=conversation)
 
     await manager.clear_conversation_async(123)
 
     manager.storage.messages.delete_messages.assert_awaited_once_with("conv-1")
-    manager.storage.message_history.clear_user_history.assert_not_called()
+    manager.storage.message_history.clear_user_history.assert_awaited_once_with(
+        uuid.uuid5(uuid.NAMESPACE_OID, "telegram_user_123"),
+        bot_id=None,
+    )
 
 
 @pytest.mark.asyncio

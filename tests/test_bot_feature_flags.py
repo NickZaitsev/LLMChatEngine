@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from bot import AIGirlfriendBot
-from features import BotFeature, DEFAULT_FEATURE_FLAGS
+from features import BotFeature, DEFAULT_FEATURE_FLAGS, has_feature, get_enabled_features
 
 
 @pytest.fixture
@@ -171,3 +171,9 @@ async def test_settings_callback_respects_feature_flag(bot_instance):
     await bot_instance.handle_callback_query(update, context)
 
     query.edit_message_text.assert_awaited_once_with("❌ User settings are disabled for this bot.")
+
+
+def test_feature_helpers_handle_missing_flag_dict():
+    assert has_feature(None, BotFeature.MEMORY) is True
+    enabled = get_enabled_features(None)
+    assert BotFeature.MEMORY in enabled

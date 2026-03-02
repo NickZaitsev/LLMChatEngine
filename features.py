@@ -6,7 +6,7 @@ and provides utilities for checking feature availability.
 """
 
 from enum import Enum
-from typing import Dict, Any, TYPE_CHECKING
+from typing import Dict, Any, TYPE_CHECKING, Optional
 from functools import wraps
 
 if TYPE_CHECKING:
@@ -46,7 +46,7 @@ DEFAULT_FEATURE_FLAGS: Dict[str, bool] = {
 }
 
 
-def has_feature(feature_flags: Dict[str, Any], feature: BotFeature) -> bool:
+def has_feature(feature_flags: Optional[Dict[str, Any]], feature: BotFeature) -> bool:
     """
     Check if a feature is enabled in the given feature flags dict.
     
@@ -57,6 +57,7 @@ def has_feature(feature_flags: Dict[str, Any], feature: BotFeature) -> bool:
     Returns:
         True if the feature is enabled, False otherwise
     """
+    feature_flags = feature_flags or {}
     return feature_flags.get(feature.value, DEFAULT_FEATURE_FLAGS.get(feature.value, False))
 
 
@@ -104,7 +105,7 @@ def require_feature(feature: BotFeature):
     return decorator
 
 
-def get_enabled_features(feature_flags: Dict[str, Any]) -> list:
+def get_enabled_features(feature_flags: Optional[Dict[str, Any]]) -> list:
     """
     Get a list of all enabled features.
     
@@ -120,7 +121,7 @@ def get_enabled_features(feature_flags: Dict[str, Any]) -> list:
     ]
 
 
-def get_disabled_features(feature_flags: Dict[str, Any]) -> list:
+def get_disabled_features(feature_flags: Optional[Dict[str, Any]]) -> list:
     """
     Get a list of all disabled features.
     

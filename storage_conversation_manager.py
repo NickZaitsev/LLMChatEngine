@@ -331,14 +331,12 @@ class PostgresConversationManager:
             # Actually delete all messages from the database
             deleted_count = await self.storage.messages.delete_messages(str(conversation.id))
             
-            # Clear bot-scoped user history when bot_id is available.
-            user_history_deleted_count = 0
-            if bot_id is not None:
-                user_uuid = uuid.uuid5(uuid.NAMESPACE_OID, f"telegram_user_{user_id}")
-                user_history_deleted_count = await self.storage.message_history.clear_user_history(
-                    user_uuid,
-                    bot_id=bot_id,
-                )
+            # Message history is bot-aware now, including the default single-bot path.
+            user_uuid = uuid.uuid5(uuid.NAMESPACE_OID, f"telegram_user_{user_id}")
+            user_history_deleted_count = await self.storage.message_history.clear_user_history(
+                user_uuid,
+                bot_id=bot_id,
+            )
             logger.info(
                 "Clear operation completed for user %d: %d messages deleted from conversation table, %d messages deleted from user history table",
                 user_id,
