@@ -497,7 +497,7 @@ class PostgresMessageHistoryRepo:
         """
         self.session_maker = session_maker
     
-    async def save_message(self, user_id: UUID, role: str, content: str) -> tuple[MessageLog, MessageUser]:
+    async def save_message(self, user_id: UUID, role: str, content: str, bot_id: Optional[UUID] = None) -> tuple[MessageLog, MessageUser]:
         """
         Save a message to both messages_log and messages_user tables.
         
@@ -515,14 +515,16 @@ class PostgresMessageHistoryRepo:
                 message_log_model = MessageLogModel(
                     user_id=user_id,
                     role=role,
-                    content=content
+                    content=content,
+                    bot_id=bot_id,
                 )
                 
                 # Create user message entry (can be cleared)
                 message_user_model = MessageUserModel(
                     user_id=user_id,
                     role=role,
-                    content=content
+                    content=content,
+                    bot_id=bot_id,
                 )
                 
                 session.add(message_log_model)
@@ -536,7 +538,8 @@ class PostgresMessageHistoryRepo:
                     user_id=message_log_model.user_id,
                     role=message_log_model.role,
                     content=message_log_model.content,
-                    created_at=message_log_model.created_at
+                    created_at=message_log_model.created_at,
+                    bot_id=message_log_model.bot_id,
                 )
                 
                 message_user = MessageUser(
@@ -544,7 +547,8 @@ class PostgresMessageHistoryRepo:
                     user_id=message_user_model.user_id,
                     role=message_user_model.role,
                     content=message_user_model.content,
-                    created_at=message_user_model.created_at
+                    created_at=message_user_model.created_at,
+                    bot_id=message_user_model.bot_id,
                 )
                 
                 # Reduced logging - let the caller handle detailed logging
@@ -558,7 +562,7 @@ class PostgresMessageHistoryRepo:
                 logger.error("Failed to save message to history tables: %s", e)
                 raise
     
-    async def get_user_history(self, user_id: UUID, limit: int = 100) -> List[MessageUser]:
+    async def get_user_history(self, user_id: UUID, limit: int = 100, bot_id: Optional[UUID] = None) -> List[MessageUser]:
         """
         Get user message history from messages_user table.
         
@@ -573,7 +577,10 @@ class PostgresMessageHistoryRepo:
             try:
                 stmt = select(MessageUserModel).where(
                     MessageUserModel.user_id == user_id
-                ).order_by(MessageUserModel.created_at).limit(limit)
+                )
+                if bot_id is not None:
+                    stmt = stmt.where(MessageUserModel.bot_id == bot_id)
+                stmt = stmt.order_by(MessageUserModel.created_at).limit(limit)
                 
                 result = await session.execute(stmt)
                 messages = result.scalars().all()
@@ -584,7 +591,8 @@ class PostgresMessageHistoryRepo:
                         user_id=msg.user_id,
                         role=msg.role,
                         content=msg.content,
-                        created_at=msg.created_at
+                        created_at=msg.created_at,
+                        bot_id=msg.bot_id,
                     )
                     for msg in messages
                 ]
@@ -593,7 +601,7 @@ class PostgresMessageHistoryRepo:
                 logger.error("Failed to get user history: %s", e)
                 return []
     
-    async def clear_user_history(self, user_id: UUID) -> int:
+    async def clear_user_history(self, user_id: UUID, bot_id: Optional[UUID] = None) -> int:
         """
         Clear user message history from messages_user table only.
         
@@ -608,6 +616,8 @@ class PostgresMessageHistoryRepo:
                 stmt = delete(MessageUserModel).where(
                     MessageUserModel.user_id == user_id
                 )
+                if bot_id is not None:
+                    stmt = stmt.where(MessageUserModel.bot_id == bot_id)
                 
                 result = await session.execute(stmt)
                 await session.commit()
@@ -1044,6 +1054,7 @@ class PostgresConversationRepo:
                 id=conversation.id,
                 user_id=conversation.user_id,
                 persona_id=conversation.persona_id,
+                bot_id=conversation.bot_id,
                 title=conversation.title,
                 extra_data=conversation.extra_data,
                 created_at=conversation.created_at,

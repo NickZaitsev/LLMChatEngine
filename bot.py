@@ -144,6 +144,11 @@ class AIGirlfriendBot:
         """Return the runtime bot name for this instance."""
         return self.bot_name
 
+    def _buffer_route_key(self, user_id: int) -> str:
+        """Build a per-bot buffer routing key."""
+        bot_key = str(self.bot_id) if self.bot_id else "default"
+        return f"{user_id}:{bot_key}"
+
     def _feature_enabled(self, feature: BotFeature) -> bool:
         """Check whether a feature is enabled for this bot instance."""
         if self.bot_config:
@@ -636,22 +641,23 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         message_preview = (user_message[:MESSAGE_PREVIEW_LENGTH] + "..."
                           if len(user_message) > MESSAGE_PREVIEW_LENGTH else user_message)
         logger.info("Message from user %s: '%s' (%d chars)", user_id, message_preview, len(user_message))
-        
+        route_key = self._buffer_route_key(user_id)
+
         # Store chat context for buffered dispatch
-        self.user_chat_context[user_id] = (chat_id, context.bot)
+        self.user_chat_context[route_key] = (user_id, chat_id, context.bot)
 
         if not self._feature_enabled(BotFeature.BUFFER_MANAGER):
             await self._generate_and_send_response(user_id, chat_id, context.bot, user_message)
             return
 
         # Set user context in buffer manager for typing indicators
-        self.buffer_manager.set_user_context(user_id, context.bot, chat_id)
+        self.buffer_manager.set_user_context(route_key, context.bot, chat_id)
 
         # Add message to buffer instead of processing directly
-        await self.buffer_manager.add_message(user_id, user_message)
+        await self.buffer_manager.add_message(route_key, user_message)
 
         # Schedule dispatch based on adaptive timeout
-        await self.buffer_manager.schedule_dispatch(user_id, self._dispatch_buffered_message)
+        await self.buffer_manager.schedule_dispatch(route_key, self._dispatch_buffered_message)
         
     async def _maybe_trigger_memory_extraction(self, user_id: int, conversation_id: str, conversation) -> None:
         """
@@ -719,22 +725,25 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         except Exception as e:
             logger.error("Inline memory chunking failed for user %s: %s", user_id, e, exc_info=True)
 
-    async def _dispatch_buffered_message(self, user_id: int) -> None:
+    async def _dispatch_buffered_message(self, route_key: str) -> None:
         """Dispatch buffered messages for a user"""
-        logger.info("Dispatching buffered messages for user %s", user_id)
+        if route_key not in self.user_chat_context and isinstance(route_key, int):
+            route_key = self._buffer_route_key(route_key)
+
+        logger.info("Dispatching buffered messages for route %s", route_key)
         
         # Get chat context
-        if user_id not in self.user_chat_context:
-            logger.error("No chat context found for user %s", user_id)
+        if route_key not in self.user_chat_context:
+            logger.error("No chat context found for route %s", route_key)
             return
             
-        chat_id, bot = self.user_chat_context[user_id]
+        user_id, chat_id, bot = self.user_chat_context[route_key]
         
         # Get concatenated message from buffer
-        user_message = await self.buffer_manager.dispatch_buffer(user_id)
+        user_message = await self.buffer_manager.dispatch_buffer(route_key)
         
         if not user_message:
-            logger.debug("No buffered messages to dispatch for user %s", user_id)
+            logger.debug("No buffered messages to dispatch for route %s", route_key)
             return
 
         await self._generate_and_send_response(user_id, chat_id, bot, user_message)

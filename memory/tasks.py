@@ -41,13 +41,13 @@ async def create_conversation_summary_async(conversation_id: str):
     app_context = await get_app_context()
     conversation_repo = app_context.conversation_manager.storage.conversations
     message_repo = app_context.conversation_manager.storage.messages
-    ai_handler = app_context.ai_handler
-
     # 1. Fetch the conversation
     conversation = await conversation_repo.get_conversation(conversation_id)
     if not conversation:
         logger.error(f"Conversation with ID {conversation_id} not found.")
         return
+
+    ai_handler, _ = await app_context.get_ai_runtime_for_bot(conversation.bot_id)
 
     # 2. Fetch messages to summarize
     messages_to_summarize = await message_repo.get_messages_for_summary(

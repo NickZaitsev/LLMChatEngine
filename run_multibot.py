@@ -108,8 +108,19 @@ async def main():
         except asyncio.CancelledError:
             await bot_manager.stop_all()
     
-    admin_task = asyncio.create_task(run_admin())
-    bots_task = asyncio.create_task(run_bots())
+    admin_task = asyncio.create_task(run_admin(), name="admin_bot")
+    bots_task = asyncio.create_task(run_bots(), name="bot_manager")
+
+    def monitor_task(task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            logger.error("Background task %s crashed: %s", task.get_name(), error)
+            shutdown_event.set()
+
+    admin_task.add_done_callback(monitor_task)
+    bots_task.add_done_callback(monitor_task)
     
     logger.info("Multi-bot system started")
     logger.info("Press Ctrl+C to stop")

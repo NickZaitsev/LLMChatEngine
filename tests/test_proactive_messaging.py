@@ -2,9 +2,15 @@ import asyncio
 import pytest
 import json
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
-from proactive_messaging import ProactiveMessagingService, manage_proactive_messages_async, CADENCE_LEVELS, PROACTIVE_MESSAGING_CADENCES
+from proactive_messaging import (
+    ProactiveMessagingService,
+    manage_proactive_messages_async,
+    send_proactive_message_async,
+    CADENCE_LEVELS,
+    PROACTIVE_MESSAGING_CADENCES,
+)
 from config import PROACTIVE_MESSAGING_QUIET_HOURS_START, PROACTIVE_MESSAGING_QUIET_HOURS_END
 
 @pytest.fixture
@@ -86,6 +92,7 @@ async def test_manage_proactive_messages_skips_scheduled_user(mock_apply_async, 
         "last_proactive_message": (datetime.now() - timedelta(hours=2)).isoformat(),
         "consecutive_outreaches": 1,
         "scheduled_task_id": "already_existing_task", # A task is already scheduled
+        "scheduled_time": (datetime.now() + timedelta(minutes=5)).isoformat(),
         "user_replied": False,
         "bot_id": bot_id,
     }
@@ -99,6 +106,39 @@ async def test_manage_proactive_messages_skips_scheduled_user(mock_apply_async, 
 
     # ASSERT: No new task should be scheduled
     mock_apply_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch('proactive_messaging.send_proactive_message.apply_async')
+async def test_manage_proactive_messages_reschedules_stale_task(mock_apply_async, proactive_service, mock_redis_client):
+    user_id = 457
+    bot_id = "33333333-3333-3333-3333-333333333333"
+    stale_time = datetime.now() - timedelta(hours=2)
+    initial_state = {
+        "cadence": "1h",
+        "last_proactive_message": (datetime.now() - timedelta(hours=3)).isoformat(),
+        "consecutive_outreaches": 1,
+        "scheduled_task_id": "stale-task",
+        "scheduled_time": stale_time.isoformat(),
+        "user_replied": False,
+        "bot_id": bot_id,
+    }
+
+    mock_redis_client.get.return_value = ProactiveMessagingService._serialize_state(initial_state)
+    mock_redis_client.keys.return_value = [f"proactive_messaging:user:{user_id}:{bot_id}".encode("utf-8")]
+
+    mock_task = MagicMock()
+    mock_task.id = "replacement-task"
+    mock_apply_async.return_value = mock_task
+
+    mock_celery_task = MagicMock()
+    mock_celery_task.request.id = "test_beat_task"
+    await manage_proactive_messages_async(mock_celery_task)
+
+    mock_apply_async.assert_called_once()
+    final_state = json.loads(mock_redis_client.set.call_args[0][1])
+    assert final_state["scheduled_task_id"] == "replacement-task"
+    assert final_state["scheduled_time"] is not None
 
 def test_handle_user_message_resets_cadence(proactive_service, mock_redis_client):
     """Test that handling a user message simply resets the user's state."""
@@ -233,3 +273,73 @@ def test_adjust_for_quiet_hours(proactive_service):
     scheduled_time_outside = datetime(2023, 1, 1, 10, 0)
     adjusted_time_outside = proactive_service.adjust_for_quiet_hours(scheduled_time_outside)
     assert adjusted_time_outside == scheduled_time_outside
+
+
+@pytest.mark.asyncio
+async def test_send_proactive_message_uses_bot_scoped_ai_runtime(proactive_service):
+    user_id = 321
+    bot_id = "11111111-1111-1111-1111-111111111111"
+    task = MagicMock()
+    task.request.id = "task-123"
+
+    proactive_service._get_user_state = MagicMock(return_value={
+        "scheduled_task_id": "task-123",
+        "cadence": CADENCE_LEVELS[0],
+        "consecutive_outreaches": 0,
+        "bot_id": bot_id,
+    })
+    proactive_service._set_user_state = MagicMock()
+
+    conversation = MagicMock()
+    conversation.id = "conv-1"
+    conversation.bot_id = None
+
+    app_context = MagicMock()
+    app_context.get_ai_runtime_for_bot = AsyncMock(return_value=("bot-scoped-ai", None))
+    app_context.conversation_manager.get_formatted_conversation_async = AsyncMock(return_value=[])
+    app_context.conversation_manager._ensure_user_and_conversation = AsyncMock(return_value=conversation)
+    app_context.conversation_manager.add_message_async = AsyncMock()
+    app_context.message_queue_manager.enqueue_message = AsyncMock()
+    app_context.typing_manager = MagicMock()
+
+    with patch("proactive_messaging.get_app_context", AsyncMock(return_value=app_context)), \
+         patch("proactive_messaging.generate_ai_response", AsyncMock(return_value="Hello there")), \
+         patch("proactive_messaging.clean_ai_response", return_value="Hello there"), \
+         patch("proactive_messaging.Bot"):
+        await send_proactive_message_async(task, user_id, bot_id=bot_id)
+
+    app_context.get_ai_runtime_for_bot.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_proactive_message_does_not_advance_state_on_failure(proactive_service):
+    user_id = 654
+    bot_id = "11111111-1111-1111-1111-111111111111"
+    task = MagicMock()
+    task.request.id = "task-999"
+
+    proactive_service._get_user_state = MagicMock(return_value={
+        "scheduled_task_id": "task-999",
+        "scheduled_time": datetime.now(),
+        "cadence": CADENCE_LEVELS[0],
+        "consecutive_outreaches": 1,
+        "bot_id": bot_id,
+    })
+    proactive_service._set_user_state = MagicMock()
+
+    conversation = MagicMock()
+    conversation.id = "conv-1"
+    conversation.bot_id = None
+
+    app_context = MagicMock()
+    app_context.get_ai_runtime_for_bot = AsyncMock(return_value=("bot-scoped-ai", None))
+    app_context.conversation_manager._ensure_user_and_conversation = AsyncMock(return_value=conversation)
+    app_context.conversation_manager.get_formatted_conversation_async = AsyncMock(return_value=[])
+
+    with patch("proactive_messaging.get_app_context", AsyncMock(return_value=app_context)), \
+         patch("proactive_messaging.generate_ai_response", AsyncMock(side_effect=RuntimeError("llm failed"))), \
+         patch("proactive_messaging.Bot"):
+        with pytest.raises(RuntimeError):
+            await send_proactive_message_async(task, user_id, bot_id=bot_id)
+
+    proactive_service._set_user_state.assert_not_called()

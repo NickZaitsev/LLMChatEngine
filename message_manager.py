@@ -643,7 +643,8 @@ class MessageDispatcher:
             user_id: User ID
         """
         # Create a task for lock renewal
-        lock_renewal_task = asyncio.create_task(self._renew_lock_periodically(user_id, bot_id))
+        lock_lost_event = asyncio.Event()
+        lock_renewal_task = asyncio.create_task(self._renew_lock_periodically(user_id, bot_id, lock_lost_event))
         
         try:
             queue_key = self._queue_key(user_id, bot_id)
@@ -653,6 +654,10 @@ class MessageDispatcher:
             # Process all messages in the queue
             message_count = 0
             while self.running:
+                if lock_lost_event.is_set():
+                    logger.warning("Stopping queue processing for user %s bot %s because dispatcher lock was lost", user_id, bot_id)
+                    break
+
                 try:
                     # BLPOP blocks until a message is available or times out
                     result = self.redis_client.blpop([queue_key], timeout=1)
@@ -711,7 +716,7 @@ class MessageDispatcher:
             except asyncio.CancelledError:
                 pass
     
-    async def _renew_lock_periodically(self, user_id: int, bot_id: str = None):
+    async def _renew_lock_periodically(self, user_id: int, bot_id: str = None, lock_lost_event: asyncio.Event = None):
         """
         Periodically renew the lock for a user queue.
         
@@ -724,6 +729,8 @@ class MessageDispatcher:
                 lock_renewed = self.renew_lock(user_id, bot_id)
                 if not lock_renewed:
                     logger.warning("Failed to renew lock for user %s bot %s", user_id, bot_id)
+                    if lock_lost_event:
+                        lock_lost_event.set()
                     # If we can't renew the lock, we should stop processing
                     break
         except asyncio.CancelledError:
@@ -731,6 +738,8 @@ class MessageDispatcher:
             pass
         except Exception as e:
             logger.error("Error in lock renewal task for user %s bot %s: %s", user_id, bot_id, e)
+            if lock_lost_event:
+                lock_lost_event.set()
     
     async def process_message(self, message: Dict[str, Any]) -> bool:
         """

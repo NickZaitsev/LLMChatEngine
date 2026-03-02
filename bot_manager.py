@@ -185,6 +185,8 @@ class BotManager:
             except Exception as e:
                 logger.error(f"Bot {bot_id} crashed: {e}")
             finally:
+                self.bots.pop(bot_id, None)
+                self._tasks.pop(bot_id, None)
                 if bot_id in self.applications:
                     try:
                         await app.updater.stop()
@@ -192,6 +194,9 @@ class BotManager:
                         await app.shutdown()
                     except Exception:
                         pass
+                    self.applications.pop(bot_id, None)
+                if not self.bots and self._shared_dispatcher_task:
+                    await self._stop_shared_dispatcher()
         
         self._tasks[bot_id] = asyncio.create_task(run_bot())
         logger.info(f"Started bot: {config.name}")
@@ -219,11 +224,10 @@ class BotManager:
                 await self._tasks[bot_id]
             except asyncio.CancelledError:
                 pass
-            del self._tasks[bot_id]
+            self._tasks.pop(bot_id, None)
         
         # Remove application
-        if bot_id in self.applications:
-            del self.applications[bot_id]
+        self.applications.pop(bot_id, None)
 
         if not self.bots and self._shared_dispatcher_task:
             await self._stop_shared_dispatcher()

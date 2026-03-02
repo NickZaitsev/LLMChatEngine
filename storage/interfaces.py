@@ -24,6 +24,7 @@ class MessageLog:
     role: str
     content: str
     created_at: datetime
+    bot_id: Optional[UUID] = None
 
 
 @dataclass
@@ -34,6 +35,7 @@ class MessageUser:
     role: str
     content: str
     created_at: datetime
+    bot_id: Optional[UUID] = None
 
 
 @dataclass
@@ -130,11 +132,11 @@ class MessageRepo(Protocol):
 class MessageHistoryRepo(Protocol):
     """Protocol for message history repository operations"""
     
-    async def save_message(self, user_id: UUID, role: str, content: str) -> tuple[MessageLog, MessageUser]: ...
+    async def save_message(self, user_id: UUID, role: str, content: str, bot_id: Optional[UUID] = None) -> tuple[MessageLog, MessageUser]: ...
     
-    async def get_user_history(self, user_id: UUID, limit: int = 100) -> List[MessageUser]: ...
+    async def get_user_history(self, user_id: UUID, limit: int = 100, bot_id: Optional[UUID] = None) -> List[MessageUser]: ...
     
-    async def clear_user_history(self, user_id: UUID) -> int: ...
+    async def clear_user_history(self, user_id: UUID, bot_id: Optional[UUID] = None) -> int: ...
 
 
 class MemoryRepo(Protocol):

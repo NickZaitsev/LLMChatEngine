@@ -500,11 +500,18 @@ class MessageLog(Base):
         default=func.now(),
         doc="Timestamp when the message was created"
     )
+    bot_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey('bots.id', ondelete='CASCADE'),
+        nullable=True,
+        doc="Optional bot ID for multi-bot history isolation"
+    )
     
     # Indexes for efficient querying
     __table_args__ = (
         Index('ix_messages_log_user_id', 'user_id'),
         Index('ix_messages_log_created_at', 'created_at'),
+        Index('ix_messages_log_user_bot', 'user_id', 'bot_id'),
     )
     
     def __repr__(self) -> str:
@@ -552,11 +559,18 @@ class MessageUser(Base):
         default=func.now(),
         doc="Timestamp when the message was created"
     )
+    bot_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey('bots.id', ondelete='CASCADE'),
+        nullable=True,
+        doc="Optional bot ID for multi-bot history isolation"
+    )
     
     # Indexes for efficient querying
     __table_args__ = (
         Index('ix_messages_user_user_id', 'user_id'),
         Index('ix_messages_user_created_at', 'created_at'),
+        Index('ix_messages_user_user_bot', 'user_id', 'bot_id'),
     )
     
     def __repr__(self) -> str:

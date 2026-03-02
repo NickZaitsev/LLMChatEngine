@@ -77,7 +77,12 @@ class PostgresConversationManager:
         # Check cache first
         cache_key = (user_id, bot_id)
         if cache_key in self._conversation_cache:
-            return self._conversation_cache[cache_key]
+            cached_conversation = self._conversation_cache[cache_key]
+            refreshed_conversation = await self.storage.conversations.get_conversation(str(cached_conversation.id))
+            if refreshed_conversation:
+                self._conversation_cache[cache_key] = refreshed_conversation
+                return refreshed_conversation
+            del self._conversation_cache[cache_key]
         
         # Check if user exists
         user = await self.storage.users.get_user_by_username(str(user_id))
@@ -145,7 +150,7 @@ class PostgresConversationManager:
         """Clear conversation history for a user (async version)."""
         await self._clear_conversation_async(user_id, bot_id=bot_id)
     
-    async def save_message_to_history(self, user_id: int, role: str, content: str) -> tuple[MessageLog, MessageUser]:
+    async def save_message_to_history(self, user_id: int, role: str, content: str, bot_id: Optional[uuid.UUID] = None) -> tuple[MessageLog, MessageUser]:
         """
         Save a message to both message history tables.
         
@@ -164,9 +169,9 @@ class PostgresConversationManager:
         # We'll use a consistent UUID namespace for Telegram user IDs
         user_uuid = uuid.uuid5(uuid.NAMESPACE_OID, f"telegram_user_{user_id}")
         
-        return await self.storage.message_history.save_message(user_uuid, role, content)
+        return await self.storage.message_history.save_message(user_uuid, role, content, bot_id=bot_id)
     
-    async def get_user_history(self, user_id: int, limit: int = 100) -> List[MessageUser]:
+    async def get_user_history(self, user_id: int, limit: int = 100, bot_id: Optional[uuid.UUID] = None) -> List[MessageUser]:
         """
         Get user message history from messages_user table.
         
@@ -183,7 +188,7 @@ class PostgresConversationManager:
         # Convert Telegram user ID (integer) to UUID for the database
         user_uuid = uuid.uuid5(uuid.NAMESPACE_OID, f"telegram_user_{user_id}")
         
-        return await self.storage.message_history.get_user_history(user_uuid, limit)
+        return await self.storage.message_history.get_user_history(user_uuid, limit, bot_id=bot_id)
     
     def add_message(self, user_id: int, role: str, content: str) -> None:
         """
@@ -240,7 +245,7 @@ class PostgresConversationManager:
         
         # Also save to message history tables
         try:
-            await self.save_message_to_history(user_id, role, content)
+            await self.save_message_to_history(user_id, role, content, bot_id=bot_id)
         except Exception as e:
             logger.error("Failed to save message to history tables: %s", e)
         
@@ -326,14 +331,20 @@ class PostgresConversationManager:
             # Actually delete all messages from the database
             deleted_count = await self.storage.messages.delete_messages(str(conversation.id))
             
-            # Also clear messages from messages_user table and get the count
-            # Convert Telegram user ID (integer) to UUID for the database
-            user_uuid = uuid.uuid5(uuid.NAMESPACE_OID, f"telegram_user_{user_id}")
-            user_history_deleted_count = await self.storage.message_history.clear_user_history(user_uuid)
-            
-            # Log a single consolidated message with both counts
-            logger.info("Clear operation completed for user %d: %d messages deleted from conversation table, %d messages deleted from user history table", 
-                       user_id, deleted_count, user_history_deleted_count)
+            # Clear bot-scoped user history when bot_id is available.
+            user_history_deleted_count = 0
+            if bot_id is not None:
+                user_uuid = uuid.uuid5(uuid.NAMESPACE_OID, f"telegram_user_{user_id}")
+                user_history_deleted_count = await self.storage.message_history.clear_user_history(
+                    user_uuid,
+                    bot_id=bot_id,
+                )
+            logger.info(
+                "Clear operation completed for user %d: %d messages deleted from conversation table, %d messages deleted from user history table",
+                user_id,
+                deleted_count,
+                user_history_deleted_count,
+            )
             
             # Remove from cache to clear any cached data
             cache_key = (user_id, bot_id)

@@ -1,7 +1,7 @@
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Callable, Any
+from typing import List, Dict, Optional, Callable, Any, Hashable
 from config import (
     BUFFER_SHORT_MESSAGE_TIMEOUT,
     BUFFER_LONG_MESSAGE_TIMEOUT,
@@ -112,72 +112,81 @@ class BufferManager:
         self.typing_manager = None # Will be set by the bot
         self.bot_instances: Dict[int, Any] = {}  # Map user_id to bot instance
         self.chat_ids: Dict[int, int] = {}  # Map user_id to chat_id
+
+    @staticmethod
+    def _route_key(user_key: Hashable) -> Hashable:
+        """Normalize routing keys for buffer isolation."""
+        return user_key
     
     def set_typing_manager(self, typing_manager) -> None:
         """Set the typing manager instance"""
         self.typing_manager = typing_manager
     
-    def set_user_context(self, user_id: int, bot, chat_id: int) -> None:
+    def set_user_context(self, user_id: Hashable, bot, chat_id: int) -> None:
         """Set the bot instance and chat ID for a user"""
-        self.bot_instances[user_id] = bot
-        self.chat_ids[user_id] = chat_id
+        route_key = self._route_key(user_id)
+        self.bot_instances[route_key] = bot
+        self.chat_ids[route_key] = chat_id
     
-    async def _start_typing_indicator(self, user_id: int) -> None:
+    async def _start_typing_indicator(self, user_id: Hashable) -> None:
         """Start typing indicator for a user when messages are buffered"""
+        route_key = self._route_key(user_id)
         # Cancel any existing typing indicator for this user
-        await self._stop_typing_indicator(user_id)
+        await self._stop_typing_indicator(route_key)
         
         # Only start typing indicator if we have the required components
         if (self.typing_manager and
-            user_id in self.bot_instances and
-            user_id in self.chat_ids):
+            route_key in self.bot_instances and
+            route_key in self.chat_ids):
             
-            bot = self.bot_instances[user_id]
-            chat_id = self.chat_ids[user_id]
+            bot = self.bot_instances[route_key]
+            chat_id = self.chat_ids[route_key]
             
             # Create and start typing indicator task
             async def _typing_task():
                 try:
                     await self.typing_manager.start_typing(bot, chat_id)
-                    logger.debug(f"Started typing indicator for buffered messages from user {user_id}")
+                    logger.debug(f"Started typing indicator for buffered messages from user {route_key}")
                 except Exception as e:
-                    logger.error(f"Failed to start typing indicator for user {user_id}: {e}")
+                    logger.error(f"Failed to start typing indicator for user {route_key}: {e}")
             
             task = asyncio.create_task(_typing_task())
-            self.typing_indicators[user_id] = task
+            self.typing_indicators[route_key] = task
     
-    async def _stop_typing_indicator(self, user_id: int) -> None:
+    async def _stop_typing_indicator(self, user_id: Hashable) -> None:
         """Stop typing indicator for a user"""
-        if user_id in self.typing_indicators:
-            task = self.typing_indicators[user_id]
+        route_key = self._route_key(user_id)
+        if route_key in self.typing_indicators:
+            task = self.typing_indicators[route_key]
             if not task.done():
                 task.cancel()
                 try:
                     await task
                 except asyncio.CancelledError:
                     pass
-            del self.typing_indicators[user_id]
+            del self.typing_indicators[route_key]
         
         # Stop the actual typing indicator if typing manager is available
-        if self.typing_manager and user_id in self.chat_ids:
-            chat_id = self.chat_ids[user_id]
+        if self.typing_manager and route_key in self.chat_ids:
+            chat_id = self.chat_ids[route_key]
             # Create task to stop typing indicator
             async def _stop_typing_task():
                 try:
                     await self.typing_manager.stop_typing(chat_id)
-                    logger.debug(f"Stopped typing indicator for user {user_id}")
+                    logger.debug(f"Stopped typing indicator for user {route_key}")
                 except Exception as e:
-                    logger.error(f"Failed to stop typing indicator for user {user_id}: {e}")
+                    logger.error(f"Failed to stop typing indicator for user {route_key}: {e}")
             
             await _stop_typing_task()
     
-    def get_user_buffer(self, user_id: int) -> UserBuffer:
+    def get_user_buffer(self, user_id: Hashable) -> UserBuffer:
         """Get or create a buffer for a user"""
-        if user_id not in self.user_buffers:
-            self.user_buffers[user_id] = UserBuffer(user_id)
-            logger.debug(f"Created new buffer for user {user_id}")
+        route_key = self._route_key(user_id)
+        if route_key not in self.user_buffers:
+            self.user_buffers[route_key] = UserBuffer(route_key)
+            logger.debug(f"Created new buffer for user {route_key}")
         
-        return self.user_buffers[user_id]
+        return self.user_buffers[route_key]
     
     async def add_message(self, user_id: int, message: str) -> None:
         """Add a message to a user's buffer"""

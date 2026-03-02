@@ -117,3 +117,25 @@ async def test_handle_message_bypasses_buffer_when_feature_disabled(bot_instance
     )
     bot_instance.buffer_manager.add_message.assert_not_called()
     bot_instance.buffer_manager.schedule_dispatch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_message_uses_bot_scoped_buffer_route(bot_instance):
+    route_bot_id = uuid.uuid4()
+    bot_instance.bot_id = route_bot_id
+
+    update = MagicMock()
+    update.effective_user.id = 12345
+    update.effective_chat.id = 67890
+    update.message.text = "hello"
+
+    context = MagicMock()
+    context.bot = MagicMock()
+
+    await bot_instance.handle_message(update, context)
+
+    expected_route = f"12345:{route_bot_id}"
+    assert expected_route in bot_instance.user_chat_context
+    bot_instance.buffer_manager.set_user_context.assert_called_once_with(expected_route, context.bot, 67890)
+    bot_instance.buffer_manager.add_message.assert_awaited_once_with(expected_route, "hello")
+    bot_instance.buffer_manager.schedule_dispatch.assert_awaited_once_with(expected_route, bot_instance._dispatch_buffered_message)

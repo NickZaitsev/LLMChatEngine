@@ -1,10 +1,12 @@
 """
 Integration tests for multi-bot architecture.
 """
+import asyncio
 import pytest
 import uuid
 from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime
+from types import SimpleNamespace
 
 from storage.models import Bot, UserBotSettings
 from features import BotFeature, DEFAULT_FEATURE_FLAGS
@@ -13,6 +15,7 @@ from bot_manager import BotManager
 from admin_bot import AdminBot
 from memory.llamaindex.vector_store import PgVectorStore
 from llama_index.core.vector_stores import VectorStoreQuery
+from storage_conversation_manager import PostgresConversationManager
 
 @pytest.fixture
 def mock_bot_config():
@@ -266,3 +269,90 @@ def test_admin_bot_pending_data_is_scoped_per_chat():
 
     assert admin._pending_bot_data[(1, 100)] == {"flow": "addbot"}
     assert admin._pending_bot_data[(1, 200)] == {"flow": "setprompt"}
+
+
+@pytest.mark.asyncio
+async def test_run_multibot_sets_shutdown_when_background_task_crashes():
+    import run_multibot
+
+    shutdown_event = asyncio.Event()
+    task = asyncio.get_running_loop().create_future()
+    task.set_exception(RuntimeError("boom"))
+    task.set_name = lambda name: None
+    task.get_name = lambda: "admin_bot"
+
+    logger = MagicMock()
+
+    def monitor_task(task_obj):
+        if task_obj.cancelled():
+            return
+        error = task_obj.exception()
+        if error is not None:
+            logger.error("Background task %s crashed: %s", task_obj.get_name(), error)
+            shutdown_event.set()
+
+    monitor_task(task)
+
+    assert shutdown_event.is_set()
+    logger.error.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_admin_togglefeature_uses_default_feature_values():
+    admin = AdminBot("token", [1], "postgresql://u:p@h:5432/db")
+    admin.storage = MagicMock()
+
+    bot_id = uuid.uuid4()
+    bot_record = SimpleNamespace(
+        id=bot_id,
+        name="TestBot",
+        feature_flags={},
+    )
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: bot_record))
+    session.commit = AsyncMock()
+    admin.storage.session_maker.return_value.__aenter__ = AsyncMock(return_value=session)
+    admin.storage.session_maker.return_value.__aexit__ = AsyncMock(return_value=None)
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.message.reply_text = AsyncMock()
+
+    context = MagicMock()
+    context.args = [str(bot_id), BotFeature.MEMORY.value]
+
+    await admin.togglefeature_command(update, context)
+
+    assert bot_record.feature_flags[BotFeature.MEMORY.value] is False
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_bot_manager_removes_crashed_bot_from_running_state(mock_bot_config):
+    manager = BotManager("postgresql://u:p@h:5432/db")
+    manager.bot_configs[mock_bot_config.id] = mock_bot_config
+    original_create_task = asyncio.create_task
+
+    mock_app = MagicMock()
+    mock_app.initialize = AsyncMock(side_effect=RuntimeError("startup failure"))
+    mock_app.start = AsyncMock()
+    mock_app.updater.start_polling = AsyncMock()
+    mock_app.updater.stop = AsyncMock()
+    mock_app.stop = AsyncMock()
+    mock_app.shutdown = AsyncMock()
+
+    bot_instance = MagicMock()
+    bot_instance._initialize_storage = AsyncMock()
+    bot_instance._initialize_memory_components = AsyncMock()
+    bot_instance._initialize_lmstudio_model = AsyncMock()
+
+    with patch("bot_manager.MessageDispatcher"), \
+         patch("bot_manager.asyncio.create_task", side_effect=lambda coro: original_create_task(coro)), \
+         patch("multibot_adapter.create_bot_with_config", return_value=bot_instance), \
+         patch("multibot_adapter.build_application_for_bot", return_value=mock_app):
+        await manager.start_bot(mock_bot_config.id)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    assert mock_bot_config.id not in manager.bots
+    assert mock_bot_config.id not in manager.applications

@@ -270,5 +270,34 @@ class TestMessageDispatcher:
                 # Verify sadd was called to add users to active set
                 assert mock_sadd.call_count == 3
 
+    @pytest.mark.asyncio
+    async def test_process_user_queue_stops_when_lock_is_lost(self):
+        mock_bot_class = Mock()
+        mock_bot_class.return_value = Mock()
+        mock_typing_manager_class = Mock()
+        mock_typing_manager_class.return_value = Mock()
+
+        with patch('redis.Redis.ping') as mock_ping, \
+             patch('message_manager.Bot', new=mock_bot_class), \
+             patch('message_manager.TypingIndicatorManager', new=mock_typing_manager_class):
+            mock_ping.return_value = True
+            dispatcher = MessageDispatcher(self.redis_url)
+            dispatcher.running = True
+
+            async def fake_renew(user_id, bot_id=None, lock_lost_event=None):
+                lock_lost_event.set()
+
+            dispatcher._renew_lock_periodically = fake_renew
+
+            with patch.object(dispatcher.redis_client, 'blpop') as mock_blpop, \
+                 patch.object(dispatcher.redis_client, 'srem') as mock_srem, \
+                 patch.object(dispatcher, 'process_message', new=AsyncMock()) as mock_process_message:
+                mock_blpop.return_value = None
+
+                await dispatcher.process_user_queue(self.user_id)
+
+                assert mock_blpop.call_count <= 1
+                mock_process_message.assert_not_called()
+
 if __name__ == "__main__":
     pytest.main([__file__])

@@ -235,6 +235,23 @@ class ProactiveMessagingService:
             return False
         return scheduled_time < datetime.now()
 
+    def is_stale_scheduled_task(self, state: dict, now: Optional[datetime] = None) -> bool:
+        """
+        Determine whether a scheduled task marker is stale and should be cleared.
+        """
+        if not state.get("scheduled_task_id"):
+            return False
+
+        if now is None:
+            now = datetime.now()
+
+        scheduled_time = state.get("scheduled_time")
+        if not scheduled_time:
+            return True
+
+        stale_after = scheduled_time + timedelta(seconds=PROACTIVE_MESSAGING_RESTART_DELAY_MAX)
+        return now > stale_after
+
     
     
     def parse_time(self, time_str: str) -> tuple:
@@ -380,6 +397,7 @@ class ProactiveMessagingService:
             'consecutive_outreaches': 0,
             'last_proactive_message': datetime.now(),
             'scheduled_task_id': None,
+            'scheduled_time': None,
             'user_replied': False,
             'is_active': True,
             'bot_id': normalized_bot_id or user_state.get('bot_id')
@@ -400,6 +418,7 @@ class ProactiveMessagingService:
         user_state = self._get_user_state(user_id, bot_id=normalized_bot_id)
         user_state['user_replied'] = replied
         user_state['scheduled_task_id'] = None
+        user_state['scheduled_time'] = None
         if normalized_bot_id:
             user_state['bot_id'] = normalized_bot_id
         self._set_user_state(user_id, user_state, bot_id=normalized_bot_id)
@@ -444,6 +463,15 @@ def send_proactive_message(self, user_id: int, bot_id: Optional[str] = None):
             raise self.retry(exc=e, countdown=60, max_retries=3)
         except self.MaxRetriesExceededError:
             logger.error(f"Max retries exceeded for task {task_id} for user {user_id} bot {bot_id}")
+            try:
+                normalized_bot_id = proactive_messaging_service._normalize_bot_id(bot_id)
+                user_state = proactive_messaging_service._get_user_state(user_id, bot_id=normalized_bot_id)
+                user_state['scheduled_task_id'] = None
+                user_state['scheduled_time'] = None
+                user_state['last_error'] = str(e)
+                proactive_messaging_service._set_user_state(user_id, user_state, bot_id=normalized_bot_id)
+            except Exception as state_error:
+                logger.error("Failed to clear proactive task state after max retries for user %s bot %s: %s", user_id, bot_id, state_error)
     
     logger.info(f"Completed Celery task send_proactive_message [{task_id}] for user {user_id} bot {bot_id}")
 
@@ -491,12 +519,12 @@ async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str]
     if conversation and conversation.bot_id:
         resolved_bot_id = conversation.bot_id
         try:
-            from storage.models import Bot
+            from storage.models import Bot as BotModel
             from sqlalchemy import select
             from token_encryption import decrypt_token
             
             async with app_context.conversation_manager.storage.session_maker() as session:
-                result = await session.execute(select(Bot).where(Bot.id == conversation.bot_id))
+                result = await session.execute(select(BotModel).where(BotModel.id == conversation.bot_id))
                 bot_record = result.scalar_one_or_none()
                 if bot_record:
                     bot_token = decrypt_token(bot_record.token_encrypted)
@@ -505,7 +533,9 @@ async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str]
             logger.error(f"Failed to retrieve bot token for user {user_id}: {e}")
             # Fallback to default token
 
+    success = False
     try:
+        task_ai_handler, _ = await app_context.get_ai_runtime_for_bot(resolved_bot_id)
         typing_bot = Bot(token=bot_token)
         # Generate and send the message...
         conversation_history = await app_context.conversation_manager.get_formatted_conversation_async(
@@ -519,7 +549,7 @@ async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str]
         conversation_id = str(conversation.id) if conversation else None
         
         ai_response = await generate_ai_response(
-            ai_handler=app_context.ai_handler,
+            ai_handler=task_ai_handler,
             typing_manager=app_context.typing_manager,
             bot=typing_bot,
             chat_id=user_id,
@@ -547,6 +577,7 @@ async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str]
                     bot_token=bot_token,
                     bot_id=str(resolved_bot_id) if resolved_bot_id else None
                 )
+                success = True
                 logger.info(f"Proactive message successfully generated and enqueued for user {user_id} bot {resolved_bot_id} [{task_id}]")
         else:
             logger.error(f"AI response was empty for proactive message to user {user_id} bot {resolved_bot_id} [{task_id}]")
@@ -556,30 +587,30 @@ async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str]
         # The sync task's retry logic will handle this.
         raise
     finally:
-        # CRITICAL: Update state AFTER sending.
-        # This signals that the outreach was completed and the user has not yet replied.
-        user_state = proactive_messaging_service._get_user_state(user_id, bot_id=resolved_bot_id or normalized_bot_id)
-        
-        # Determine the next cadence level
-        current_cadence = user_state.get('cadence', CADENCE_LEVELS[0])
-        next_cadence = proactive_messaging_service.get_next_interval(current_cadence)
+        if success:
+            # CRITICAL: Update state only after a successful send/enqueue.
+            user_state = proactive_messaging_service._get_user_state(user_id, bot_id=resolved_bot_id or normalized_bot_id)
 
-        # Update the state
-        user_state['last_proactive_message'] = datetime.now()
-        user_state['consecutive_outreaches'] = user_state.get('consecutive_outreaches', 0) + 1
-        user_state['user_replied'] = False
-        user_state['cadence'] = next_cadence
-        user_state['scheduled_task_id'] = None  # Clear the task ID
-        if resolved_bot_id:
-            user_state['bot_id'] = str(resolved_bot_id)
+            current_cadence = user_state.get('cadence', CADENCE_LEVELS[0])
+            next_cadence = proactive_messaging_service.get_next_interval(current_cadence)
 
-        proactive_messaging_service._set_user_state(user_id, user_state, bot_id=resolved_bot_id or normalized_bot_id)
-        
-        logger.info(
-            f"Updated user {user_id} bot {resolved_bot_id} state post-outreach. "
-            f"New cadence: {next_cadence}. "
-            f"Consecutive outreaches: {user_state['consecutive_outreaches']}."
-        )
+            user_state['last_proactive_message'] = datetime.now()
+            user_state['consecutive_outreaches'] = user_state.get('consecutive_outreaches', 0) + 1
+            user_state['user_replied'] = False
+            user_state['cadence'] = next_cadence
+            user_state['scheduled_task_id'] = None
+            user_state['scheduled_time'] = None
+            user_state['last_error'] = None
+            if resolved_bot_id:
+                user_state['bot_id'] = str(resolved_bot_id)
+
+            proactive_messaging_service._set_user_state(user_id, user_state, bot_id=resolved_bot_id or normalized_bot_id)
+
+            logger.info(
+                f"Updated user {user_id} bot {resolved_bot_id} state post-outreach. "
+                f"New cadence: {next_cadence}. "
+                f"Consecutive outreaches: {user_state['consecutive_outreaches']}."
+            )
 
 
 @celery_app.task(bind=True)
@@ -626,8 +657,20 @@ async def manage_proactive_messages_async(task):
                     continue
 
                 if state.get('scheduled_task_id'):
-                    logger.debug(f"Skipping user {user_id} bot {bot_id}: task {state['scheduled_task_id']} is already scheduled.")
-                    continue
+                    if proactive_messaging_service.is_stale_scheduled_task(state, now):
+                        logger.warning(
+                            "Clearing stale proactive task for user %s bot %s: task=%s scheduled_time=%s",
+                            user_id,
+                            bot_id,
+                            state.get('scheduled_task_id'),
+                            state.get('scheduled_time'),
+                        )
+                        state['scheduled_task_id'] = None
+                        state['scheduled_time'] = None
+                        proactive_messaging_service._set_user_state(user_id, state, bot_id=bot_id)
+                    else:
+                        logger.debug(f"Skipping user {user_id} bot {bot_id}: task {state['scheduled_task_id']} is already scheduled.")
+                        continue
 
                 current_cadence_name = state.get('cadence', CADENCE_LEVELS[0])
                 if proactive_messaging_service.should_switch_to_long_term_mode(user_id, bot_id=bot_id):
@@ -656,6 +699,7 @@ async def manage_proactive_messages_async(task):
                     )
                     
                     state['scheduled_task_id'] = new_task.id
+                    state['scheduled_time'] = scheduled_time
                     proactive_messaging_service._set_user_state(user_id, state, bot_id=bot_id)
                     
                     logger.info(

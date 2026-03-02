@@ -9,7 +9,8 @@ across the application, particularly in Celery tasks.
 
 import asyncio
 import logging
-from typing import Optional
+import uuid
+from typing import Optional, Tuple
 from memory.llamaindex.embedding import LMStudioEmbeddingModel
 from memory.llamaindex.gemini import GeminiEmbeddingModel
 from llama_index.llms.lmstudio import LMStudio
@@ -219,6 +220,58 @@ class AppContext:
 
         logger.info("AppContext initialization complete.")
         return self
+
+    async def get_ai_runtime_for_bot(self, bot_id: Optional[uuid.UUID] = None) -> Tuple[AIHandler, Optional[PromptAssembler]]:
+        """
+        Build a bot-scoped AI runtime for background tasks.
+
+        The live bot process already has per-bot AIHandler/PromptAssembler instances.
+        Celery tasks run through AppContext, so they need an explicit per-bot clone
+        to avoid falling back to the default provider/model/personality.
+        """
+        await self.initialize()
+
+        prompt_assembler = None
+        if self.conversation_manager and self.conversation_manager.storage:
+            prompt_config = {
+                "max_memory_items": PROMPT_MAX_MEMORY_ITEMS,
+                "memory_token_budget_ratio": PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
+                "truncation_length": PROMPT_TRUNCATION_LENGTH,
+                "include_system_template": PROMPT_INCLUDE_SYSTEM_TEMPLATE
+            }
+            prompt_assembler = PromptAssembler(
+                message_repo=self.conversation_manager.storage.messages,
+                memory_manager=self.memory_manager,
+                conversation_repo=self.conversation_manager.storage.conversations,
+                user_repo=self.conversation_manager.storage.users,
+                persona_repo=self.conversation_manager.storage.personas,
+                config=prompt_config
+            )
+
+        ai_handler = AIHandler(prompt_assembler=prompt_assembler)
+
+        if not bot_id:
+            return ai_handler, prompt_assembler
+
+        try:
+            from storage.models import Bot as BotModel
+            from sqlalchemy import select
+
+            async with self.conversation_manager.storage.session_maker() as session:
+                result = await session.execute(
+                    select(BotModel).where(BotModel.id == bot_id)
+                )
+                bot_record = result.scalar_one_or_none()
+
+            if bot_record:
+                ai_handler.update_personality(bot_record.personality)
+                ai_handler.apply_llm_config(bot_record.llm_config or {})
+            else:
+                logger.warning("Bot config not found for task runtime: %s", bot_id)
+        except Exception as e:
+            logger.error("Failed to build bot-scoped AI runtime for %s: %s", bot_id, e)
+
+        return ai_handler, prompt_assembler
 
 # Global instance of the AppContext
 app_context = AppContext()

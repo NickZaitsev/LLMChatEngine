@@ -17,7 +17,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes
 
 from token_encryption import encrypt_token, decrypt_token
-from features import BotFeature, DEFAULT_FEATURE_FLAGS
+from features import BotFeature, DEFAULT_FEATURE_FLAGS, has_feature
 
 logger = logging.getLogger(__name__)
 
@@ -287,7 +287,7 @@ Use these commands to manage your bot fleet."""
             text = "🤖 **Configured Bots:**\n\n"
             for bot in bots:
                 status = "🟢 Active" if bot.is_active else "🔴 Inactive"
-                enabled_features = sum(1 for f in BotFeature if bot.feature_flags.get(f.value, False))
+                enabled_features = sum(1 for f in BotFeature if has_feature(bot.feature_flags or {}, f))
                 text += (
                     f"**`{bot.name}`** ({status})\n"
                     f"  ID: `{bot.id}`\n"
@@ -448,7 +448,8 @@ Use these commands to manage your bot fleet."""
                     return
                 
                 # Toggle the feature
-                current_value = bot.feature_flags.get(feature_name, False)
+                feature = BotFeature(feature_name)
+                current_value = has_feature(bot.feature_flags or {}, feature)
                 new_value = not current_value
                 
                 # Update feature flags
@@ -499,7 +500,7 @@ Use these commands to manage your bot fleet."""
                 await update.message.reply_text(f"❌ Bot not found: {bot_id}")
                 return
 
-            enabled_features = [f.value for f in BotFeature if bot.feature_flags.get(f.value, False)]
+            enabled_features = [f.value for f in BotFeature if has_feature(bot.feature_flags or {}, f)]
             features_text = ", ".join(enabled_features) if enabled_features else "None"
 
             await update.message.reply_text(
