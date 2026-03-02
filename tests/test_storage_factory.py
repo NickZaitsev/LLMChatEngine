@@ -36,6 +36,7 @@ class TestStorageFactory:
         assert storage.conversations is not None
         assert storage.users is not None
         assert storage.personas is not None
+        assert storage.user_settings is not None
         assert storage.use_pgvector == False
         
         # Test health check
@@ -73,6 +74,7 @@ class TestStorageFactory:
         assert storage.conversations is not None
         assert storage.users is not None
         assert storage.personas is not None
+        assert storage.user_settings is not None
         
         # Test that repositories have expected methods
         assert hasattr(storage.messages, 'append_message')
@@ -82,6 +84,7 @@ class TestStorageFactory:
         assert hasattr(storage.conversations, 'create_conversation')
         assert hasattr(storage.users, 'create_user')
         assert hasattr(storage.personas, 'create_persona')
+        assert hasattr(storage.user_settings, 'get_or_create_settings')
     
     async def test_storage_close(self):
         """Test storage cleanup"""
@@ -278,8 +281,8 @@ class TestStorageIntegration:
         )
         
         # Store memories with similar embeddings in both conversations
-        similar_embedding = [0.9, 0.1] + [0.0] * 382
-        different_embedding = [0.1, 0.9] + [0.0] * 382
+        similar_embedding = [0.9, 0.1] + [0.0] * (MEMORY_EMBED_DIM - 2)
+        different_embedding = [0.1, 0.9] + [0.0] * (MEMORY_EMBED_DIM - 2)
         
         await storage.memories.store_memory(
             str(conv1.id), "Discussion about cats", similar_embedding
@@ -292,7 +295,7 @@ class TestStorageIntegration:
         )
         
         # Search for similar memories
-        query_embedding = [0.8, 0.2] + [0.0] * 382
+        query_embedding = [0.8, 0.2] + [0.0] * (MEMORY_EMBED_DIM - 2)
         results = await storage.memories.search_memories(
             query_embedding=query_embedding,
             top_k=5,

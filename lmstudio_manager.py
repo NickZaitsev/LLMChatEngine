@@ -200,6 +200,11 @@ class LMStudioManager:
             if not await self.is_server_running():
                 logger.error("LM Studio server is not running")
                 return False
+
+            # Respect already-loaded models even when auto-load is disabled.
+            if await self.is_model_loaded(model_name):
+                logger.info("Model %s is already loaded", model_name)
+                return True
             
             if not auto_load:
                 logger.info("Model %s is not loaded and auto_load is disabled", model_name)

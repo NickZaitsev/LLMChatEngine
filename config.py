@@ -3,6 +3,9 @@ import re
 import warnings
 from dotenv import load_dotenv
 
+# Load environment variables before reading config values.
+load_dotenv()
+
 # Constants
 DEFAULT_BOT_NAME = 'Luna'
 DEFAULT_PROVIDER = 'azure'
@@ -26,9 +29,6 @@ DEFAULT_BOT_PERSONALITY = (
     "You are romantic but not overly sexual. You respond with warmth and empathy."
 )
 
-
-# Load environment variables
-load_dotenv()
 
 # Telegram Bot Configuration
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')

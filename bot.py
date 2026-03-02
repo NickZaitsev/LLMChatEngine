@@ -253,8 +253,9 @@ class AIGirlfriendBot:
         keyboard = [
             [InlineKeyboardButton("💕 Start Chatting", callback_data="start_chat")],
             [InlineKeyboardButton("ℹ️ About Me", callback_data="about")],
-            [InlineKeyboardButton("⚙️ Settings", callback_data="settings")]
         ]
+        if self._feature_enabled(BotFeature.USER_SETTINGS):
+            keyboard.append([InlineKeyboardButton("⚙️ Settings", callback_data="settings")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         welcome_text = f"""🌸 Welcome to {self._get_bot_name()}! 🌸
@@ -588,6 +589,9 @@ Ready to start chatting? Just send me a message! 💕"""
             await query.edit_message_text(about_text)
         
         elif query.data == "settings":
+            if not self._feature_enabled(BotFeature.USER_SETTINGS):
+                await query.edit_message_text("❌ User settings are disabled for this bot.")
+                return
             settings_text = """⚙️ Settings ⚙️
 
 You can customize my behavior with these commands:

@@ -152,3 +152,22 @@ async def test_memory_extraction_skips_duplicate_scheduling(bot_instance):
         await bot_instance._maybe_trigger_memory_extraction(12345, "conv-1", conversation)
 
     extract_memories.delay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_settings_callback_respects_feature_flag(bot_instance):
+    bot_instance.bot_config.feature_flags[BotFeature.USER_SETTINGS.value] = False
+
+    query = MagicMock()
+    query.data = "settings"
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+
+    update = MagicMock()
+    update.callback_query = query
+
+    context = MagicMock()
+
+    await bot_instance.handle_callback_query(update, context)
+
+    query.edit_message_text.assert_awaited_once_with("❌ User settings are disabled for this bot.")

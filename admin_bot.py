@@ -453,7 +453,7 @@ Use these commands to manage your bot fleet."""
                 new_value = not current_value
                 
                 # Update feature flags
-                new_flags = bot.feature_flags.copy()
+                new_flags = (bot.feature_flags or {}).copy()
                 new_flags[feature_name] = new_value
                 bot.feature_flags = new_flags
                 

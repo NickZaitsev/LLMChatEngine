@@ -20,7 +20,8 @@ from sqlalchemy.exc import IntegrityError, NoResultFound
 
 from .interfaces import (
     Message, Memory, Conversation, User, Persona, MessageLog, MessageUser,
-    MessageRepo, MemoryRepo, ConversationRepo, UserRepo, PersonaRepo, MessageHistoryRepo
+    MessageRepo, MemoryRepo, ConversationRepo, UserRepo, PersonaRepo, MessageHistoryRepo,
+    UserBotSettings
 )
 from .models import (
     Message as MessageModel,
@@ -28,6 +29,7 @@ from .models import (
     Conversation as ConversationModel,
     User as UserModel,
     Persona as PersonaModel,
+    UserBotSettings as UserBotSettingsModel,
     MessageLog as MessageLogModel,
     MessageUser as MessageUserModel,
     PGVECTOR_AVAILABLE
@@ -1347,6 +1349,112 @@ class PostgresPersonaRepo:
             ]
 
 
+class PostgresUserBotSettingsRepo:
+    """PostgreSQL implementation of UserBotSettingsRepo interface."""
+
+    def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
+        self.session_maker = session_maker
+
+    async def get_or_create_settings(self, user_id: str, bot_id: str) -> UserBotSettings:
+        settings = await self.get_settings(user_id, bot_id)
+        if settings:
+            return settings
+
+        try:
+            user_uuid = UUID(user_id)
+            bot_uuid = UUID(bot_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid UUID format: {e}") from e
+
+        async with self.session_maker() as session:
+            model = UserBotSettingsModel(
+                user_id=user_uuid,
+                bot_id=bot_uuid,
+                settings={},
+            )
+            session.add(model)
+            await session.commit()
+            await session.refresh(model)
+            return UserBotSettings(
+                id=model.id,
+                user_id=model.user_id,
+                bot_id=model.bot_id,
+                settings=model.settings,
+                created_at=model.created_at,
+                updated_at=model.updated_at,
+            )
+
+    async def get_settings(self, user_id: str, bot_id: str) -> Optional[UserBotSettings]:
+        try:
+            user_uuid = UUID(user_id)
+            bot_uuid = UUID(bot_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid UUID format: {e}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(UserBotSettingsModel).where(
+                and_(
+                    UserBotSettingsModel.user_id == user_uuid,
+                    UserBotSettingsModel.bot_id == bot_uuid,
+                )
+            )
+            result = await session.execute(stmt)
+            model = result.scalar_one_or_none()
+
+            if not model:
+                return None
+
+            return UserBotSettings(
+                id=model.id,
+                user_id=model.user_id,
+                bot_id=model.bot_id,
+                settings=model.settings,
+                created_at=model.created_at,
+                updated_at=model.updated_at,
+            )
+
+    async def update_settings(self, user_id: str, bot_id: str, settings: Dict[str, Any]) -> UserBotSettings:
+        try:
+            user_uuid = UUID(user_id)
+            bot_uuid = UUID(bot_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid UUID format: {e}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(UserBotSettingsModel).where(
+                and_(
+                    UserBotSettingsModel.user_id == user_uuid,
+                    UserBotSettingsModel.bot_id == bot_uuid,
+                )
+            )
+            result = await session.execute(stmt)
+            model = result.scalar_one_or_none()
+
+            if not model:
+                model = UserBotSettingsModel(
+                    user_id=user_uuid,
+                    bot_id=bot_uuid,
+                    settings=dict(settings or {}),
+                )
+                session.add(model)
+            else:
+                merged_settings = dict(model.settings or {})
+                merged_settings.update(settings or {})
+                model.settings = merged_settings
+
+            await session.commit()
+            await session.refresh(model)
+
+            return UserBotSettings(
+                id=model.id,
+                user_id=model.user_id,
+                bot_id=model.bot_id,
+                settings=model.settings,
+                created_at=model.created_at,
+                updated_at=model.updated_at,
+            )
+
+
 # Export all repository implementations
 __all__ = [
     'TokenEstimator',
@@ -1356,6 +1464,7 @@ __all__ = [
     'PostgresConversationRepo',
     'PostgresUserRepo',
     'PostgresPersonaRepo',
+    'PostgresUserBotSettingsRepo',
     'TIKTOKEN_AVAILABLE',
     'PGVECTOR_AVAILABLE'
 ]

@@ -4,9 +4,11 @@ Celery Configuration for Proactive Messaging System
 This module contains the Celery configuration settings for the proactive messaging system.
 """
 
+import os
+
 # Celery Configuration
-broker_url = 'redis://redis:6379/0'
-result_backend = 'redis://redis:6379/0'
+broker_url = os.getenv('CELERY_BROKER_URL', os.getenv('REDIS_URL', 'redis://redis:6379/0'))
+result_backend = os.getenv('CELERY_RESULT_BACKEND', broker_url)
 
 # Task Serialization
 task_serializer = 'json'

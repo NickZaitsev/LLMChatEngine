@@ -102,7 +102,9 @@ class TypingIndicatorManager:
         """Stop all active typing indicators"""
         typing_keys = list(self._active_typing_tasks.keys())
         for typing_key in typing_keys:
-            await self.stop_typing(typing_key, route_key=typing_key)
+            chat_id = self._typing_chat_ids.get(typing_key)
+            if chat_id is not None:
+                await self.stop_typing(chat_id, route_key=typing_key)
     
     async def _typing_loop(self, bot: Bot, chat_id: int, typing_key: Hashable) -> None:
         """Internal loop that sends typing action every 3 seconds"""
@@ -140,8 +142,11 @@ class TypingIndicatorManager:
     
     def get_active_typing_chats(self) -> Set[int]:
         """Get set of chat IDs with active typing indicators"""
-        return {chat_id for chat_id, task in self._active_typing_tasks.items() 
-                if not task.done()}
+        return {
+            self._typing_chat_ids[typing_key]
+            for typing_key, task in self._active_typing_tasks.items()
+            if not task.done() and typing_key in self._typing_chat_ids
+        }
     
     async def cleanup(self) -> None:
         """Cleanup method to stop all typing indicators"""
@@ -1001,12 +1006,14 @@ async def generate_ai_response(
     Returns:
         AI response text or None if failed
     """
+    typing_started = False
     try:
         logger.info("Starting AI request with typing indicator for chat %s", chat_id)
         
         # Start typing indicator BEFORE making LLM request if enabled
-        if show_typing:
+        if show_typing and typing_manager:
             await typing_manager.start_typing(bot, chat_id, route_key=route_key)
+            typing_started = True
         
         # Make the actual AI request with timeout from config
         from config import REQUEST_TIMEOUT
@@ -1032,3 +1039,9 @@ async def generate_ai_response(
     except Exception as e:
         logger.error("AI request failed for chat %s: %s", chat_id, e)
         return None
+    finally:
+        if typing_started:
+            try:
+                await typing_manager.stop_typing(chat_id, route_key=route_key)
+            except Exception as e:
+                logger.warning("Failed to stop typing indicator for chat %s: %s", chat_id, e)

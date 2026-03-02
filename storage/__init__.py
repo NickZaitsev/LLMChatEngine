@@ -22,7 +22,8 @@ from .repos import (
     PostgresMemoryRepo, 
     PostgresConversationRepo,
     PostgresUserRepo,
-    PostgresPersonaRepo
+    PostgresPersonaRepo,
+    PostgresUserBotSettingsRepo,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ class Storage:
     engine: AsyncEngine
     session_maker: async_sessionmaker
     use_pgvector: bool
+    user_settings: Optional[PostgresUserBotSettingsRepo] = None
     
     async def close(self):
         """Close the database connection pool"""
@@ -174,6 +176,7 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
         conversations_repo = PostgresConversationRepo(session_maker)
         users_repo = PostgresUserRepo(session_maker)
         personas_repo = PostgresPersonaRepo(session_maker)
+        user_settings_repo = PostgresUserBotSettingsRepo(session_maker)
         
         storage = Storage(
             messages=messages_repo,
@@ -182,6 +185,7 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
             conversations=conversations_repo,
             users=users_repo,
             personas=personas_repo,
+            user_settings=user_settings_repo,
             engine=engine,
             session_maker=session_maker,
             use_pgvector=use_pgvector

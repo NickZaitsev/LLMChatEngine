@@ -80,7 +80,7 @@ async def storage(engine) -> AsyncGenerator[Storage, None]:
     # Create storage using the shared engine components
     from storage.repos import (
         PostgresMessageRepo, PostgresMemoryRepo, PostgresConversationRepo,
-        PostgresUserRepo, PostgresPersonaRepo
+        PostgresUserRepo, PostgresPersonaRepo, PostgresUserBotSettingsRepo
     )
     
     storage = Storage(
@@ -90,6 +90,7 @@ async def storage(engine) -> AsyncGenerator[Storage, None]:
         conversations=PostgresConversationRepo(session_maker),
         users=PostgresUserRepo(session_maker),
         personas=PostgresPersonaRepo(session_maker),
+        user_settings=PostgresUserBotSettingsRepo(session_maker),
         engine=engine,
         session_maker=session_maker,
         use_pgvector=False
@@ -200,6 +201,7 @@ async def app_context(engine) -> "AppContext":
         conversations=PostgresConversationRepo(session_maker),
         users=PostgresUserRepo(session_maker),
         personas=PostgresPersonaRepo(session_maker),
+        user_settings=PostgresUserBotSettingsRepo(session_maker),
         engine=engine,
         session_maker=session_maker,
         use_pgvector=False
