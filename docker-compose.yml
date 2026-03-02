@@ -75,8 +75,10 @@ services:
     command: celery -A proactive_messaging worker --concurrency=5 --loglevel=info --statedb=/var/lib/celery/worker_state/state.db -Q proactive_messaging
     env_file: .env
     environment:
+      - PYTHONPATH=/app
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:-ai_bot_pass}@postgres:5432/ai_bot
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
     depends_on:
       - redis
       - postgres

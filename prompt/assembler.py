@@ -147,7 +147,8 @@ class PromptAssembler:
         self,
         conversation_id: str,
         reply_token_budget: int = None,
-        history_budget: int = None
+        history_budget: int = None,
+        user_query: Optional[str] = None
     ) -> List[Dict[str, str]]:
         """
         Build a chat prompt for LLM request.
@@ -156,6 +157,7 @@ class PromptAssembler:
             conversation_id: UUID string of the conversation
             reply_token_budget: Tokens reserved for LLM reply (default from config)
             history_budget: Tokens available for history and memories (default from config)
+            user_query: Optional current user message for memory retrieval
             
         Returns:
             List of message dicts with 'role' and 'content' keys, ordered for LLM
@@ -170,7 +172,7 @@ class PromptAssembler:
             history_budget = config.PROMPT_HISTORY_BUDGET
             
         messages, _ = await self.build_prompt_and_metadata(
-            conversation_id, reply_token_budget, history_budget
+            conversation_id, reply_token_budget, history_budget, user_query
         )
         return messages
     
@@ -178,7 +180,8 @@ class PromptAssembler:
         self,
         conversation_id: str,
         reply_token_budget: int = None,
-        history_budget: int = None
+        history_budget: int = None,
+        user_query: Optional[str] = None
     ) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
         """
         Build a chat prompt with detailed metadata.
@@ -187,6 +190,7 @@ class PromptAssembler:
             conversation_id: UUID string of the conversation
             reply_token_budget: Tokens reserved for LLM reply (default from config)
             history_budget: Tokens available for history and memories (default from config)
+            user_query: Optional current user message for memory retrieval
             
         Returns:
             Tuple of (messages, metadata) where:
@@ -225,17 +229,40 @@ class PromptAssembler:
         included_memory_ids = []
         truncated_message_ids = []
 
-        # 1. Add system template if enabled
+        # 1. Get conversation first (needed for bot personality lookup)
+        conversation = await self.conversation_repo.get_conversation(conversation_id)
+
+        # 2. Resolve the correct personality to use
+        # Priority: self.personality (set by multibot_adapter in bot process)
+        #   -> bot personality from DB (critical for Celery worker context)
+        #   -> config.BOT_PERSONALITY (env var fallback)
+        personality_to_use = self.personality or config.BOT_PERSONALITY
+        
+        if not self.personality and conversation and conversation.bot_id:
+            try:
+                from storage.models import Bot as BotModel
+                from sqlalchemy import select
+                
+                async with self.conversation_repo.session_maker() as session:
+                    result = await session.execute(
+                        select(BotModel.personality).where(BotModel.id == conversation.bot_id)
+                    )
+                    bot_personality = result.scalar_one_or_none()
+                    if bot_personality:
+                        personality_to_use = bot_personality
+                        logger.info(f"Loaded bot personality from DB for bot_id={conversation.bot_id}")
+            except Exception as e:
+                logger.warning(f"Failed to load bot personality from DB: {e}")
+
+        # 3. Add system template if enabled
         if self.include_system_template:
-            personality_to_use = self.personality or config.BOT_PERSONALITY
             system_message = {"role": "system", "content": personality_to_use}
             system_tokens = self.token_counter.count_tokens(personality_to_use)
             messages.append(system_message)
             token_counts["system_tokens"] += system_tokens
             logger.debug(f"Added system template: {system_tokens} tokens")
 
-        # 2. Get conversation and add summary if it exists
-        conversation = await self.conversation_repo.get_conversation(conversation_id)
+        # 4. Add conversation summary if it exists
         if conversation and conversation.summary:
             summary_message = {"role": "system", "content": f"This is a summary of the conversation so far:\n{conversation.summary}"}
             summary_tokens = self.token_counter.count_tokens(summary_message["content"])
@@ -243,44 +270,77 @@ class PromptAssembler:
             token_counts["system_tokens"] += summary_tokens
             logger.debug(f"Added conversation summary: {summary_tokens} tokens")
 
-        # 3. Add persona configuration if available
-        try:
-            if self.persona_repo and conversation:
-                # Persona logic here if needed in future
-                pass
-        except Exception as e:
-            logger.warning(f"Failed to load persona configuration: {e}")
-
-        # 4. Calculate memory token budget
+        # 5. Calculate memory token budget
         memory_budget = int(history_budget * self.memory_token_budget_ratio)
         remaining_history_budget = history_budget - memory_budget
 
-        # 5. Retrieve and add relevant memories
+        # 6. Retrieve and add relevant memories
         try:
             if not self.memory_manager:
                 logger.info("Memory manager not available, skipping semantic search")
+            elif not conversation:
+                logger.info("No conversation found, skipping memory retrieval")
             else:
-                last_user_message = await self.message_repo.get_last_user_message(conversation_id)
-                if last_user_message and conversation:
+                # Determine the best query for memory retrieval
+                # Priority: user_query -> last user message -> conversation summary (for proactive messages)
+                memory_query = user_query
+                
+                if memory_query:
+                    logger.debug("Using provided user_query for memory query")
+                else:
+                    last_user_message = await self.message_repo.get_last_user_message(conversation_id)
+                    if last_user_message:
+                        memory_query = last_user_message.content
+                        logger.debug("Using last user message from repo for memory query")
+                    elif conversation.summary:
+                        # Proactive messages often have no user message yet;
+                        # use the conversation summary to retrieve relevant memories
+                        memory_query = conversation.summary
+                        logger.info("No user query or last user message; using conversation summary for memory query")
+                
+                if memory_query:
                     user = await self.user_repo.get_user(str(conversation.user_id))
                     if user:
                         logger.info(
                             "Querying memory for user=%s, query='%s', bot_id=%s",
                             user.username,
-                            last_user_message.content[:80],
+                            memory_query[:80],
                             conversation.bot_id,
                         )
                         context = await self.memory_manager.get_context(
                             user_id=user.username,
-                            query=last_user_message.content,
+                            query=memory_query,
                             top_k=self.max_memory_items,
                             bot_id=str(conversation.bot_id) if conversation.bot_id else None
                         )
                         if context:
                             memory_content = f"### Memory Context\n{context}"
-                            memory_message = {"role": "system", "content": memory_content}
                             memory_message_tokens = self.token_counter.count_tokens(memory_content)
-                            if memory_message_tokens <= memory_budget:
+                            
+                            if memory_message_tokens > memory_budget:
+                                logger.warning(
+                                    "Memory context (%d tokens) exceeds budget (%d tokens), truncating",
+                                    memory_message_tokens, memory_budget,
+                                )
+                                # Simple truncation of characters as a fallback for budget management
+                                # Calculating chars to keep: budget * 4 chars/token is heuristic-ish
+                                # but let's be more precise by iteratively stripping lines if possible
+                                lines = context.split("\n")
+                                truncated_context = ""
+                                current_tokens = self.token_counter.count_tokens("### Memory Context\n")
+                                for line in lines:
+                                    line_tokens = self.token_counter.count_tokens(line + "\n")
+                                    if current_tokens + line_tokens <= memory_budget:
+                                        truncated_context += line + "\n"
+                                        current_tokens += line_tokens
+                                    else:
+                                        break
+                                context = truncated_context.strip()
+                                memory_content = f"### Memory Context\n{context}"
+                                memory_message_tokens = current_tokens
+
+                            if context:
+                                memory_message = {"role": "system", "content": memory_content}
                                 messages.append(memory_message)
                                 token_counts["memory_tokens"] = memory_message_tokens
                                 remaining_history_budget -= memory_message_tokens
@@ -290,22 +350,19 @@ class PromptAssembler:
                                         included_memory_ids.append(line.strip()[:64])
                                 logger.info(f"Added memories to prompt: {memory_message_tokens} tokens")
                             else:
-                                logger.warning(
-                                    "Memory context (%d tokens) exceeds budget (%d tokens), skipping",
-                                    memory_message_tokens, memory_budget,
-                                )
+                                logger.warning("Memory context too large even after truncation, skipping")
                         else:
                             logger.info("Semantic search returned no results (empty vector store?)")
                     else:
                         logger.warning("User not found for conversation %s, skipping memory", conversation_id[:8])
                 else:
-                    logger.info("No last user message or conversation, skipping memory retrieval")
+                    logger.info("No user message or summary available, skipping memory retrieval")
         except ValueError as e:
             logger.warning(f"Failed to retrieve memories due to a value error: {e}")
         except Exception as e:
             logger.warning(f"An unexpected error occurred while retrieving memories: {e}", exc_info=True)
 
-        # 6. Fetch active conversation history
+        # 7. Fetch active conversation history
         try:
             last_summarized_id = conversation.last_summarized_message_id if conversation else None
             recent_messages = await self.message_repo.fetch_active_messages(

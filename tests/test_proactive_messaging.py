@@ -39,6 +39,7 @@ async def test_manage_proactive_messages_schedules_due_user(mock_apply_async, pr
     Test that the centralized `manage_proactive_messages` task correctly schedules a message for a user who is due.
     """
     user_id = 123
+    bot_id = "11111111-1111-1111-1111-111111111111"
     # User's last message was long ago, they are due for a proactive message
     initial_state = {
         "cadence": "1h",
@@ -46,10 +47,11 @@ async def test_manage_proactive_messages_schedules_due_user(mock_apply_async, pr
         "consecutive_outreaches": 1,
         "scheduled_task_id": None, # No task is currently scheduled
         "user_replied": False,
+        "bot_id": bot_id,
     }
     
     mock_redis_client.get.return_value = ProactiveMessagingService._serialize_state(initial_state)
-    mock_redis_client.keys.return_value = [f"proactive_messaging:user:{user_id}".encode('utf-8')]
+    mock_redis_client.keys.return_value = [f"proactive_messaging:user:{user_id}:{bot_id}".encode('utf-8')]
 
     mock_task = MagicMock()
     mock_task.id = 'new_test_task_id'
@@ -61,6 +63,8 @@ async def test_manage_proactive_messages_schedules_due_user(mock_apply_async, pr
 
     # ASSERT: A new task should have been scheduled
     mock_apply_async.assert_called_once()
+    _, kwargs = mock_apply_async.call_args
+    assert kwargs["args"] == [user_id, bot_id]
     
     # Verify the user's state was updated with the new task ID
     args, kwargs = mock_redis_client.set.call_args
@@ -74,6 +78,7 @@ async def test_manage_proactive_messages_skips_scheduled_user(mock_apply_async, 
     Test that `manage_proactive_messages` correctly skips a user who already has a task scheduled.
     """
     user_id = 456
+    bot_id = "22222222-2222-2222-2222-222222222222"
     # This user is due, but a task is already scheduled. This can happen if the beat runs
     # again before a previously scheduled task has been cleared.
     initial_state = {
@@ -82,10 +87,11 @@ async def test_manage_proactive_messages_skips_scheduled_user(mock_apply_async, 
         "consecutive_outreaches": 1,
         "scheduled_task_id": "already_existing_task", # A task is already scheduled
         "user_replied": False,
+        "bot_id": bot_id,
     }
     
     mock_redis_client.get.return_value = ProactiveMessagingService._serialize_state(initial_state)
-    mock_redis_client.keys.return_value = [f"proactive_messaging:user:{user_id}".encode('utf-8')]
+    mock_redis_client.keys.return_value = [f"proactive_messaging:user:{user_id}:{bot_id}".encode('utf-8')]
 
     mock_celery_task = MagicMock()
     mock_celery_task.request.id = "test_beat_task"
@@ -114,6 +120,74 @@ def test_handle_user_message_resets_cadence(proactive_service, mock_redis_client
     assert state['consecutive_outreaches'] == 0
     assert state['scheduled_task_id'] is None
 
+def test_handle_user_message_persists_bot_id(proactive_service, mock_redis_client):
+    """Test that handling a user message stores the active bot ID for multi-bot routing."""
+    user_id = 790
+    bot_id = "8c52d8d6-f8c7-4523-8f4c-44d468704d2c"
+
+    proactive_service.handle_user_message(user_id, bot_id=bot_id)
+
+    state_str = mock_redis_client.set.call_args[0][1]
+    state = json.loads(state_str)
+
+    assert state['bot_id'] == bot_id
+
+@pytest.mark.asyncio
+@patch('proactive_messaging.send_proactive_message.apply_async')
+async def test_manage_proactive_messages_schedules_same_user_per_bot(mock_apply_async, proactive_service, mock_redis_client):
+    """Test that the same Telegram user can have independent proactive schedules per bot."""
+    user_id = 901
+    bot_a = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    bot_b = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+
+    states = {
+        proactive_service._state_key(user_id, bot_a): {
+            "cadence": "1h",
+            "last_proactive_message": (datetime.now() - timedelta(hours=2)).isoformat(),
+            "consecutive_outreaches": 0,
+            "scheduled_task_id": None,
+            "user_replied": False,
+            "bot_id": bot_a,
+        },
+        proactive_service._state_key(user_id, bot_b): {
+            "cadence": "1h",
+            "last_proactive_message": (datetime.now() - timedelta(hours=2)).isoformat(),
+            "consecutive_outreaches": 0,
+            "scheduled_task_id": None,
+            "user_replied": False,
+            "bot_id": bot_b,
+        },
+    }
+
+    def mock_get(key):
+        key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+        state = states.get(key_str)
+        return ProactiveMessagingService._serialize_state(state) if state else None
+
+    def mock_set(key, value):
+        key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+        states[key_str] = json.loads(value)
+        return True
+
+    mock_redis_client.get.side_effect = mock_get
+    mock_redis_client.set.side_effect = mock_set
+    mock_redis_client.keys.return_value = [key.encode('utf-8') for key in states.keys()]
+
+    mock_task_a = MagicMock()
+    mock_task_a.id = 'task-a'
+    mock_task_b = MagicMock()
+    mock_task_b.id = 'task-b'
+    mock_apply_async.side_effect = [mock_task_a, mock_task_b]
+
+    mock_celery_task = MagicMock()
+    mock_celery_task.request.id = "test_beat_task"
+    await manage_proactive_messages_async(mock_celery_task)
+
+    assert mock_apply_async.call_count == 2
+    scheduled_args = [call.kwargs["args"] for call in mock_apply_async.call_args_list]
+    assert [user_id, bot_a] in scheduled_args
+    assert [user_id, bot_b] in scheduled_args
+
 def test_get_next_interval(proactive_service):
     """Test cadence escalation logic."""
     assert proactive_service.get_next_interval(CADENCE_LEVELS[0]) == CADENCE_LEVELS[1]
@@ -136,6 +210,7 @@ def test_get_interval_with_jitter(proactive_service):
 
 def test_is_within_quiet_hours(proactive_service):
     """Test checking if time is within quiet hours."""
+    proactive_service.quiet_hours_enabled = True
     proactive_service.quiet_hours_start = "02:30"
     proactive_service.quiet_hours_end = "08:00"
     
@@ -146,6 +221,7 @@ def test_is_within_quiet_hours(proactive_service):
 
 def test_adjust_for_quiet_hours(proactive_service):
     """Test adjusting scheduled time for quiet hours."""
+    proactive_service.quiet_hours_enabled = True
     proactive_service.quiet_hours_start = "02:30"
     proactive_service.quiet_hours_end = "08:00"
     

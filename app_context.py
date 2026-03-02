@@ -64,16 +64,20 @@ class AppContext:
         
         When the event loop changes (e.g. between asyncio.run() calls in
         Celery tasks), we can't await async dispose because the old engine
-        is bound to a now-closed loop. Instead, synchronously close the
-        underlying connection pool and drop all references.
+        is bound to a now-closed loop.  Using dispose(close=False) tells
+        SQLAlchemy to discard the pool *without* attempting to close the
+        underlying asyncpg connections (which would fail with
+        MissingGreenlet).  The abandoned TCP sockets are cleaned up by the
+        OS / garbage collector.
         """
         if self.conversation_manager and self.conversation_manager.storage:
             engine = self.conversation_manager.storage.engine
             if engine:
                 try:
-                    # The sync_engine's pool can be disposed synchronously
-                    engine.sync_engine.pool.dispose()
-                    logger.info("Disposed old Storage engine pool (sync).")
+                    # close=False: drop the pool without calling connection.close()
+                    # on each asyncpg connection (avoids MissingGreenlet error).
+                    engine.sync_engine.dispose(close=False)
+                    logger.info("Disposed old Storage engine pool (close=False).")
                 except Exception as e:
                     logger.warning("Could not dispose old engine pool: %s (will be GC'd)", e)
 

@@ -3,6 +3,7 @@ Integration tests for the proactive messaging system with the main bot.
 """
 
 import pytest
+import uuid
 from unittest.mock import patch, MagicMock, AsyncMock
 import sys
 import os
@@ -45,6 +46,7 @@ def bot_instance():
                     
                     # Create the bot instance
                     bot = AIGirlfriendBot()
+                    bot.bot_id = uuid.uuid4()
                     
                     # Set up mock objects
                     bot.conversation_manager = mock_cm_instance
@@ -83,6 +85,9 @@ async def test_handle_message_triggers_proactive_messaging(bot_instance):
         # Mock conversation manager methods
         bot_instance.conversation_manager.add_message_async = AsyncMock()
         bot_instance.conversation_manager.get_formatted_conversation_async = AsyncMock(return_value=[])
+        mock_conversation = MagicMock()
+        mock_conversation.id = uuid.uuid4()
+        bot_instance.conversation_manager._ensure_user_and_conversation = AsyncMock(return_value=mock_conversation)
         
         # Mock AI handler method
         bot_instance.ai_handler.generate_response = AsyncMock(return_value="Test response")
@@ -104,8 +109,16 @@ async def test_handle_message_triggers_proactive_messaging(bot_instance):
         # Check that proactive messaging service was called
         if bot_instance.proactive_messaging_service:
             bot_instance.proactive_messaging_service.handle_user_message.assert_called_once_with(
-                12345
+                12345,
+                bot_id=bot_instance.bot_id
             )
+
+        bot_instance.conversation_manager.add_message_async.assert_any_call(
+            12345, "user", "Hello bot!", bot_id=bot_instance.bot_id
+        )
+        bot_instance.conversation_manager.get_formatted_conversation_async.assert_awaited_once_with(
+            12345, bot_id=bot_instance.bot_id
+        )
         
         # Restore original dispatch method
         bot_instance.buffer_manager.dispatch_buffer = original_dispatch
@@ -127,6 +140,9 @@ async def test_handle_message_proactive_messaging_failure(bot_instance):
     # Mock conversation manager methods
     bot_instance.conversation_manager.add_message_async = AsyncMock()
     bot_instance.conversation_manager.get_formatted_conversation_async = AsyncMock(return_value=[])
+    mock_conversation = MagicMock()
+    mock_conversation.id = uuid.uuid4()
+    bot_instance.conversation_manager._ensure_user_and_conversation = AsyncMock(return_value=mock_conversation)
     
     # Mock AI handler method
     bot_instance.ai_handler.generate_response = AsyncMock(return_value="Test response")
@@ -169,4 +185,4 @@ def test_bot_initialization_with_proactive_messaging(bot_instance):
     
     # Check that it's the correct type
     if bot_instance.proactive_messaging_service is not None:
-        assert isinstance(bot_instance.proactive_messaging_service, ProactiveMessagingService)
+        assert isinstance(bot_instance.proactive_messaging_service, ProactiveMessagingService)

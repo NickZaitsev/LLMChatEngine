@@ -147,7 +147,7 @@ class AIGirlfriendBot:
         logger.info("Start command from user %s (%s)", user_id, user_name)
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
-        existing_conversation = await self.conversation_manager.get_conversation_async(user_id)
+        existing_conversation = await self.conversation_manager.get_conversation_async(user_id, bot_id=self.bot_id)
         
         if existing_conversation:
             logger.info("Continuing conversation for user %s (%d messages)", user_id, len(existing_conversation))
@@ -204,7 +204,7 @@ You can also just send me messages and I'll respond naturally!
         user_id = update.effective_user.id
         logger.info("Clear command from user %s", user_id)
         
-        existing_conversation = await self.conversation_manager.get_conversation_async(user_id)
+        existing_conversation = await self.conversation_manager.get_conversation_async(user_id, bot_id=self.bot_id)
         
         if not existing_conversation:
             logger.info("No conversation to clear for user %s", user_id)
@@ -235,10 +235,10 @@ You can also just send me messages and I'll respond naturally!
         
         # Proceed to permanently clear conversation
         try:
-            existing_conversation = await self.conversation_manager.get_conversation_async(user_id)
+            existing_conversation = await self.conversation_manager.get_conversation_async(user_id, bot_id=self.bot_id)
             if existing_conversation:
                 logger.info("Clearing conversation for user %s (%d messages)", user_id, len(existing_conversation))
-                await self.conversation_manager.clear_conversation_async(user_id)
+                await self.conversation_manager.clear_conversation_async(user_id, bot_id=self.bot_id)
                 if self.memory_manager:
                     await self.memory_manager.clear_memories(str(user_id))
                 await update.message.reply_text("✨ Our conversation history has been permanently deleted. 💕")
@@ -257,7 +257,7 @@ You can also just send me messages and I'll respond naturally!
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
         user_id = update.effective_user.id
-        stats = await self.conversation_manager.get_user_stats_async(user_id)
+        stats = await self.conversation_manager.get_user_stats_async(user_id, bot_id=self.bot_id)
         
         stats_text = f"""📊 Our Chat Statistics 📊
 
@@ -274,8 +274,8 @@ My responses: {stats['bot_messages']}
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
         user_id = update.effective_user.id
-        conversation = await self.conversation_manager.get_conversation_async(user_id)
-        debug_state = await self.conversation_manager.debug_conversation_state_async(user_id)
+        conversation = await self.conversation_manager.get_conversation_async(user_id, bot_id=self.bot_id)
+        debug_state = await self.conversation_manager.debug_conversation_state_async(user_id, bot_id=self.bot_id)
         
         if not conversation:
             await update.message.reply_text("💭 No conversation history yet. Let's start chatting! 💕")
@@ -314,7 +314,7 @@ My responses: {stats['bot_messages']}
         user_id = update.effective_user.id
         logger.info("Status command from user %s", user_id)
         
-        stats = await self.conversation_manager.get_user_stats_async(user_id)
+        stats = await self.conversation_manager.get_user_stats_async(user_id, bot_id=self.bot_id)
         
         
         # Check memory components status
@@ -395,9 +395,9 @@ Use /help to see all available commands!"""
         logger.info("Reset command from user %s", user_id)
         
         conversation_cleared = ""
-        existing_conversation = await self.conversation_manager.get_conversation_async(user_id)
+        existing_conversation = await self.conversation_manager.get_conversation_async(user_id, bot_id=self.bot_id)
         if existing_conversation:
-            await self.conversation_manager.clear_conversation_async(user_id)
+            await self.conversation_manager.clear_conversation_async(user_id, bot_id=self.bot_id)
             if self.memory_manager:
                 await self.memory_manager.clear_memories(str(user_id))
             logger.info("Cleared conversation for user %s", user_id)
@@ -640,8 +640,8 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             return
         
         # Add user message to conversation history and then get the updated history
-        await self.conversation_manager.add_message_async(user_id, "user", user_message)
-        conversation_history = await self.conversation_manager.get_formatted_conversation_async(user_id)
+        await self.conversation_manager.add_message_async(user_id, "user", user_message, bot_id=self.bot_id)
+        conversation_history = await self.conversation_manager.get_formatted_conversation_async(user_id, bot_id=self.bot_id)
         
         # Get conversation ID for PromptAssembler
         conversation = await self.conversation_manager._ensure_user_and_conversation(user_id, bot_id=self.bot_id)
@@ -651,7 +651,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         # This will reset the user's proactive messaging cadence state.
         if self.proactive_messaging_service:
             try:
-                self.proactive_messaging_service.handle_user_message(user_id)
+                self.proactive_messaging_service.handle_user_message(user_id, bot_id=self.bot_id)
                 logger.info("Proactive messaging service notified of user message from %s.", user_id)
             except Exception as e:
                 logger.error("Failed to notify proactive messaging service for user %s: %s", user_id, e)
@@ -669,7 +669,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                 # Store AI response in conversation history
                 try:
                     cleaned_ai_response = clean_ai_response(ai_response)
-                    await self.conversation_manager.add_message_async(user_id, "assistant", cleaned_ai_response)
+                    await self.conversation_manager.add_message_async(user_id, "assistant", cleaned_ai_response, bot_id=self.bot_id)
                 except Exception as e:
                     logger.error("Failed to add response to history for user %s: %s", user_id, e)
                     # If we can't store the response, we still want to send it to the user

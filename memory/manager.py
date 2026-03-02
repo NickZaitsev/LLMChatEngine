@@ -161,6 +161,15 @@ class LlamaIndexMemoryManager:
                 bot_id=str(bot_id) if bot_id else None,
             )
             logger.info("<== Vector store query returned %d nodes", len(nodes))
+            
+            for i, node in enumerate(nodes):
+                logger.info(
+                    "  Node %d [Score: %s]: %s... (Metadata: %s)",
+                    i + 1,
+                    getattr(node, "score", "N/A"),
+                    node.get_content()[:100].replace("\n", " "),
+                    node.metadata
+                )
 
             if not nodes:
                 return ""

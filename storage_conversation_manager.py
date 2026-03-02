@@ -42,7 +42,7 @@ class PostgresConversationManager:
         self.use_pgvector = use_pgvector
         self.storage: Optional[Storage] = None
         self._user_cache: Dict[int, User] = {}  # Cache for user objects
-        self._conversation_cache: Dict[int, Conversation] = {}  # Cache for conversation objects
+        self._conversation_cache: Dict[tuple[int, Optional[uuid.UUID]], Conversation] = {}  # Cache for conversation objects
         self._default_persona_cache: Dict[str, Persona] = {}  # Cache for default personas
         
         logger.info("PostgresConversationManager initialized. DB: %s, pgvector: %s", 
@@ -125,25 +125,25 @@ class PostgresConversationManager:
         return conversation
     
     # Public async methods for direct use from async contexts
-    async def get_conversation_async(self, user_id: int) -> List[Dict]:
+    async def get_conversation_async(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> List[Dict]:
         """Get conversation history for a user (async version)."""
-        return await self._get_conversation_async(user_id)
+        return await self._get_conversation_async(user_id, bot_id=bot_id)
     
-    async def get_formatted_conversation_async(self, user_id: int) -> List[Dict]:
+    async def get_formatted_conversation_async(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> List[Dict]:
         """Get formatted conversation for AI API (async version)."""
-        return await self._get_formatted_conversation_async(user_id)
+        return await self._get_formatted_conversation_async(user_id, bot_id=bot_id)
     
-    async def get_user_stats_async(self, user_id: int) -> Dict:
+    async def get_user_stats_async(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> Dict:
         """Get user statistics (async version)."""
-        return await self._get_user_stats_async(user_id)
+        return await self._get_user_stats_async(user_id, bot_id=bot_id)
     
-    async def debug_conversation_state_async(self, user_id: int) -> Dict:
+    async def debug_conversation_state_async(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> Dict:
         """Debug conversation state (async version)."""
-        return await self._debug_conversation_state_async(user_id)
+        return await self._debug_conversation_state_async(user_id, bot_id=bot_id)
     
-    async def clear_conversation_async(self, user_id: int) -> None:
+    async def clear_conversation_async(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> None:
         """Clear conversation history for a user (async version)."""
-        await self._clear_conversation_async(user_id)
+        await self._clear_conversation_async(user_id, bot_id=bot_id)
     
     async def save_message_to_history(self, user_id: int, role: str, content: str) -> tuple[MessageLog, MessageUser]:
         """
@@ -203,7 +203,7 @@ class PostgresConversationManager:
             # No event loop, create one
             asyncio.run(self._add_message_async(user_id, role, content))
     
-    async def add_message_async(self, user_id: int, role: str, content: str) -> Message:
+    async def add_message_async(self, user_id: int, role: str, content: str, bot_id: Optional[uuid.UUID] = None) -> Message:
         """
         Add a message to the user's conversation history (async version).
         
@@ -215,9 +215,9 @@ class PostgresConversationManager:
         Returns:
             The created Message object
         """
-        return await self._add_message_async(user_id, role, content)
+        return await self._add_message_async(user_id, role, content, bot_id=bot_id)
     
-    async def _add_message_async(self, user_id: int, role: str, content: str) -> Message:
+    async def _add_message_async(self, user_id: int, role: str, content: str, bot_id: Optional[uuid.UUID] = None) -> Message:
         """
         Add a message to the user's conversation history (async implementation).
         
@@ -229,7 +229,7 @@ class PostgresConversationManager:
         Returns:
             The created Message object
         """
-        conversation = await self._ensure_user_and_conversation(user_id)
+        conversation = await self._ensure_user_and_conversation(user_id, bot_id=bot_id)
         
         message = await self.storage.messages.append_message(
             conversation_id=str(conversation.id),
@@ -269,7 +269,7 @@ class PostgresConversationManager:
             logger.error("Error in get_conversation for user %d: %s", user_id, e)
             return []
     
-    async def _get_conversation_async(self, user_id: int) -> List[Dict]:
+    async def _get_conversation_async(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> List[Dict]:
         """
         Get the conversation history for a user (async implementation).
         
@@ -277,7 +277,7 @@ class PostgresConversationManager:
             List of message dictionaries in original format
         """
         try:
-            conversation = await self._ensure_user_and_conversation(user_id)
+            conversation = await self._ensure_user_and_conversation(user_id, bot_id=bot_id)
             messages = await self.storage.messages.list_messages(
                 str(conversation.id), 
                 limit=MAX_CONVERSATION_HISTORY
@@ -312,7 +312,7 @@ class PostgresConversationManager:
         except RuntimeError:
             asyncio.run(self._clear_conversation_async(user_id))
     
-    async def _clear_conversation_async(self, user_id: int) -> None:
+    async def _clear_conversation_async(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> None:
         """
         Clear conversation history for a user by deleting all messages.
         
@@ -321,7 +321,7 @@ class PostgresConversationManager:
         """
         try:
             # Get the current conversation to delete its messages
-            conversation = await self._ensure_user_and_conversation(user_id)
+            conversation = await self._ensure_user_and_conversation(user_id, bot_id=bot_id)
             
             # Actually delete all messages from the database
             deleted_count = await self.storage.messages.delete_messages(str(conversation.id))
@@ -336,8 +336,9 @@ class PostgresConversationManager:
                        user_id, deleted_count, user_history_deleted_count)
             
             # Remove from cache to clear any cached data
-            if user_id in self._conversation_cache:
-                del self._conversation_cache[user_id]
+            cache_key = (user_id, bot_id)
+            if cache_key in self._conversation_cache:
+                del self._conversation_cache[cache_key]
             
             logger.info("Cleared conversation for user %d", user_id)
             
@@ -364,7 +365,7 @@ class PostgresConversationManager:
             logger.error("Error in get_formatted_conversation for user %d: %s", user_id, e)
             return []
     
-    async def _get_formatted_conversation_async(self, user_id: int) -> List[Dict]:
+    async def _get_formatted_conversation_async(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> List[Dict]:
         """
         Get conversation formatted for AI API with token management (async implementation).
         
@@ -372,7 +373,7 @@ class PostgresConversationManager:
             List of messages formatted for AI API within token budget
         """
         try:
-            conversation = await self._ensure_user_and_conversation(user_id)
+            conversation = await self._ensure_user_and_conversation(user_id, bot_id=bot_id)
             messages = await self.storage.messages.fetch_recent_messages(
                 str(conversation.id),
                 token_budget=AVAILABLE_HISTORY_TOKENS
@@ -416,7 +417,7 @@ class PostgresConversationManager:
             logger.error("Error in get_user_stats for user %d: %s", user_id, e)
             return {"total_messages": 0, "user_messages": 0, "bot_messages": 0, "estimated_tokens": 0}
     
-    async def _get_user_stats_async(self, user_id: int) -> Dict:
+    async def _get_user_stats_async(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> Dict:
         """
         Get statistics about user's conversation (async implementation).
         
@@ -424,7 +425,7 @@ class PostgresConversationManager:
             Dictionary with conversation statistics
         """
         try:
-            conversation = await self._ensure_user_and_conversation(user_id)
+            conversation = await self._ensure_user_and_conversation(user_id, bot_id=bot_id)
             messages = await self.storage.messages.list_messages(str(conversation.id))
             
             total_tokens = sum(msg.token_count for msg in messages)
@@ -527,13 +528,13 @@ class PostgresConversationManager:
                 "formatted_messages": []
             }
     
-    async def _debug_conversation_state_async(self, user_id: int) -> Dict:
+    async def _debug_conversation_state_async(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> Dict:
         """
         Debug method to show current conversation state (async implementation).
         """
         try:
-            conversation_history = await self._get_conversation_async(user_id)
-            formatted_conversation = await self._get_formatted_conversation_async(user_id)
+            conversation_history = await self._get_conversation_async(user_id, bot_id=bot_id)
+            formatted_conversation = await self._get_formatted_conversation_async(user_id, bot_id=bot_id)
             
             raw_tokens = sum(msg.get("token_count", 0) for msg in conversation_history)
             formatted_tokens = sum(

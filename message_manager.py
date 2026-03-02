@@ -173,7 +173,7 @@ class MessageQueueManager:
         
         return safe_parts
     
-    async def enqueue_message(self, user_id: int, chat_id: int, text: str, message_type: str = "regular", bot=None, typing_manager=None, bot_token: str = None):
+    async def enqueue_message(self, user_id: int, chat_id: int, text: str, message_type: str = "regular", bot=None, typing_manager=None, bot_token: str = None, bot_id: str = None):
         """
         Enqueue a message for a user in their Redis list. If the message needs to be split,
         split it first and enqueue each part as a separate message to maintain order.
@@ -186,6 +186,7 @@ class MessageQueueManager:
             bot: Telegram bot instance (for backward compatibility)
             typing_manager: TypingIndicatorManager instance (for backward compatibility)
             bot_token: Optional bot token for multi-bot support
+            bot_id: Optional bot ID for multi-bot proactive state routing
         """
         try:
             # Validate inputs
@@ -225,7 +226,8 @@ class MessageQueueManager:
                     "retry_count": 0,
                     "part_index": i,
                     "total_parts": total_parts,
-                    "bot_token": bot_token
+                    "bot_token": bot_token,
+                    "bot_id": bot_id
                 }
                 
                 # Serialize message data
@@ -756,7 +758,7 @@ class MessageDispatcher:
                 if isinstance(e, Forbidden) or "chat not found" in error_msg or "user is deactivated" in error_msg or "bot was blocked" in error_msg:
                     logger.warning("Permanent error sending message to user %s: %s. Disabling proactive messaging.", user_id, e)
                     try:
-                        await self._disable_proactive_messaging_for_user(user_id)
+                        await self._disable_proactive_messaging_for_user(user_id, bot_id=message.get("bot_id"))
                     except Exception as disable_error:
                         logger.error("Failed to disable proactive messaging for user %s: %s", user_id, disable_error)
                     return True # Return True to pretend it was processed so it is NOT retried
@@ -800,10 +802,10 @@ class MessageDispatcher:
             logger.error("Error handling failed message for user %s: %s", message.get("user_id", "unknown"), e)
 
 
-    async def _disable_proactive_messaging_for_user(self, user_id: int):
+    async def _disable_proactive_messaging_for_user(self, user_id: int, bot_id: str = None):
         """Disable proactive messaging for a user due to permanent error (blocked/chat not found)."""
         try:
-            state_key = f"proactive_messaging:user:{user_id}"
+            state_key = f"proactive_messaging:user:{user_id}:{bot_id or 'default'}"
             state_json = self.redis_client.get(state_key)
             if state_json:
                 state = json.loads(state_json)
@@ -811,19 +813,20 @@ class MessageDispatcher:
                 state['last_error'] = "Permanent failure (Chat not found / Forbidden)"
                 state['error_time'] = datetime.now().isoformat()
                 self.redis_client.set(state_key, json.dumps(state, default=str))
-                logger.info("Proactive messaging disabled for user %s in Redis", user_id)
+                logger.info("Proactive messaging disabled for user %s bot %s in Redis", user_id, bot_id)
             else:
                 # Create a minimal state to mark as inactive
                 state = {
                     'is_active': False, 
                     'user_id': user_id,
+                    'bot_id': bot_id,
                     'last_error': "Permanent failure (Chat not found / Forbidden)",
                     'error_time': datetime.now().isoformat()
                 }
                 self.redis_client.set(state_key, json.dumps(state, default=str))
-                logger.info("Created inactive state for user %s in Redis", user_id)
+                logger.info("Created inactive state for user %s bot %s in Redis", user_id, bot_id)
         except Exception as e:
-            logger.error("Error while trying to disable proactive messaging in Redis for user %s: %s", user_id, e)
+            logger.error("Error while trying to disable proactive messaging in Redis for user %s bot %s: %s", user_id, bot_id, e)
 
 
 async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'TypingIndicatorManager' = None, is_first_message: bool = True):

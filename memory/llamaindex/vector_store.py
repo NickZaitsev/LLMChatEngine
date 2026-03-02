@@ -85,6 +85,7 @@ class PgVectorStore(VectorStoreAbstraction):
                 filters_list.append(ExactMatchFilter(key="bot_id", value=str(bot_id)))
 
             filters = MetadataFilters(filters=filters_list)
+            logger.info(f"PGVectorStore query filters: {filters_list}")
 
             query_obj = VectorStoreQuery(
                 query_embedding=query_embedding,
@@ -94,6 +95,11 @@ class PgVectorStore(VectorStoreAbstraction):
 
             result = await asyncio.to_thread(self._store.query, query_obj)
             logger.info(f"<== PGVectorStore query returned {len(result.nodes)} nodes")
+            
+            for i, node in enumerate(result.nodes):
+                score = result.similarities[i] if result.similarities and i < len(result.similarities) else "N/A"
+                logger.debug(f"  Node {i+1} [Score: {score}]: {node.get_content()[:100]}... Metadata: {node.metadata}")
+            
             return result.nodes
         except Exception as e:
             logger.error(f"Error in vector store query: {e}", exc_info=True)
