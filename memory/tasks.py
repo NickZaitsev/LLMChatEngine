@@ -10,6 +10,8 @@ Includes:
 import logging
 from celery import Celery
 import asyncio
+
+import redis
 from app_context import get_app_context
 from config import SUMMARIZATION_PROMPT
 import celeryconfig
@@ -19,6 +21,43 @@ celery_app = Celery('memory_tasks')
 celery_app.config_from_object(celeryconfig)
 
 logger = logging.getLogger(__name__)
+
+_task_lock_client = None
+SUMMARY_LOCK_TTL = 300
+MEMORY_LOCK_TTL = 600
+
+
+def _get_task_lock_client():
+    global _task_lock_client
+    if _task_lock_client is None:
+        _task_lock_client = redis.from_url(celeryconfig.broker_url)
+    return _task_lock_client
+
+
+def acquire_task_lock(lock_key: str, ttl_seconds: int) -> bool:
+    """Acquire a short-lived Redis lock to dedupe task scheduling/execution."""
+    try:
+        return bool(_get_task_lock_client().set(lock_key, "1", nx=True, ex=ttl_seconds))
+    except Exception as e:
+        logger.warning("Failed to acquire task lock %s: %s", lock_key, e)
+        # Fail open so Redis outages don't disable core behavior.
+        return True
+
+
+def release_task_lock(lock_key: str) -> None:
+    """Release a Redis task lock."""
+    try:
+        _get_task_lock_client().delete(lock_key)
+    except Exception as e:
+        logger.warning("Failed to release task lock %s: %s", lock_key, e)
+
+
+def summary_lock_key(conversation_id: str) -> str:
+    return f"memory_tasks:summary:{conversation_id}"
+
+
+def memory_lock_key(conversation_id: str) -> str:
+    return f"memory_tasks:extract:{conversation_id}"
 
 
 @celery_app.task(name='memory.tasks.create_conversation_summary')
@@ -38,81 +77,103 @@ async def create_conversation_summary_async(conversation_id: str):
     """
     Async implementation of the conversation summarization logic.
     """
+    lock_key = summary_lock_key(conversation_id)
+    if not acquire_task_lock(lock_key, SUMMARY_LOCK_TTL):
+        logger.info("Skipping duplicate summarization task for conversation %s", conversation_id)
+        return
+
     app_context = await get_app_context()
-    conversation_repo = app_context.conversation_manager.storage.conversations
-    message_repo = app_context.conversation_manager.storage.messages
-    # 1. Fetch the conversation
-    conversation = await conversation_repo.get_conversation(conversation_id)
-    if not conversation:
-        logger.error(f"Conversation with ID {conversation_id} not found.")
-        return
-
-    ai_handler, _ = await app_context.get_ai_runtime_for_bot(conversation.bot_id)
-
-    # 2. Fetch messages to summarize
-    messages_to_summarize = await message_repo.get_messages_for_summary(
-        conversation_id,
-        conversation.last_summarized_message_id
-    )
-
-    if not messages_to_summarize:
-        logger.info(f"No new messages to summarize for conversation_id: {conversation_id}")
-        return
-
-    # 3. Use only the oldest half of messages to avoid context length issues
-    half_count = len(messages_to_summarize) // 2
-    if half_count > 0:
-        messages_to_summarize = messages_to_summarize[:half_count]
-        logger.info(f"Using oldest {len(messages_to_summarize)} messages for summarization (out of {len(messages_to_summarize) * 2} total)")
-    else:
-        # If only 1 message, use it
-        messages_to_summarize = messages_to_summarize[:1]
-
-    # 4. Prepare the text for summarization
-    text_to_summarize = "\n".join([f"{msg.role}: {msg.content}" for msg in messages_to_summarize])
-
-    # 4. Generate the new summary with error handling for context length
-    prompt = SUMMARIZATION_PROMPT.format(
-        existing_summary=conversation.summary or "This is the beginning of the conversation.",
-        text=text_to_summarize
-    )
-
     try:
-        new_summary = await ai_handler.get_response(prompt)
-    except Exception as e:
-        error_message = str(e).lower()
-        if any(pattern in error_message for pattern in ["context length", "token limit", "too long", "maximum context"]):
-            logger.warning(f"Context length exceeded for conversation {conversation_id}. Reducing message count and retrying.")
-            # If context is too long, try with even fewer messages (quarter instead of half)
-            quarter_count = len(messages_to_summarize) // 4
-            if quarter_count > 0:
-                messages_to_summarize = messages_to_summarize[:quarter_count]
-                text_to_summarize = "\n".join([f"{msg.role}: {msg.content}" for msg in messages_to_summarize])
-                logger.info(f"Retrying with oldest {len(messages_to_summarize)} messages for summarization")
+        conversation_repo = app_context.conversation_manager.storage.conversations
+        message_repo = app_context.conversation_manager.storage.messages
+        # 1. Fetch the conversation
+        conversation = await conversation_repo.get_conversation(conversation_id)
+        if not conversation:
+            logger.error(f"Conversation with ID {conversation_id} not found.")
+            return
 
-                # Retry with reduced context
-                prompt = SUMMARIZATION_PROMPT.format(
-                    existing_summary=conversation.summary or "This is the beginning of the conversation.",
-                    text=text_to_summarize
-                )
-                new_summary = await ai_handler.get_response(prompt)
-            else:
-                # If we can't reduce further, skip summarization for this conversation
-                logger.error(f"Cannot reduce context further for conversation {conversation_id}. Skipping summarization.")
-                return
+        ai_handler, _ = await app_context.get_ai_runtime_for_bot(conversation.bot_id)
+
+        # 2. Fetch messages to summarize
+        messages_to_summarize = await message_repo.get_messages_for_summary(
+            conversation_id,
+            conversation.last_summarized_message_id
+        )
+
+        if not messages_to_summarize:
+            logger.info(f"No new messages to summarize for conversation_id: {conversation_id}")
+            return
+
+        # 3. Use only the oldest half of messages to avoid context length issues
+        half_count = len(messages_to_summarize) // 2
+        if half_count > 0:
+            messages_to_summarize = messages_to_summarize[:half_count]
+            logger.info(f"Using oldest {len(messages_to_summarize)} messages for summarization (out of {len(messages_to_summarize) * 2} total)")
         else:
-            # Re-raise non-context-length errors
-            raise e
+            # If only 1 message, use it
+            messages_to_summarize = messages_to_summarize[:1]
 
-    # 5. Update the conversation
-    last_message_id = messages_to_summarize[-1].id
-    await conversation_repo.update_conversation(
-        conversation_id=conversation_id,
-        summary=new_summary,
-        last_summarized_message_id=last_message_id
-    )
+        # 4. Prepare the text for summarization
+        text_to_summarize = "\n".join([f"{msg.role}: {msg.content}" for msg in messages_to_summarize])
 
-    logger.info(f"Successfully summarized conversation {conversation_id}. Last message ID: {last_message_id}")
+        # 4. Generate the new summary with error handling for context length
+        prompt = SUMMARIZATION_PROMPT.format(
+            existing_summary=conversation.summary or "This is the beginning of the conversation.",
+            text=text_to_summarize
+        )
+
+        try:
+            new_summary = await ai_handler.get_response(prompt)
+        except Exception as e:
+            error_message = str(e).lower()
+            if any(pattern in error_message for pattern in ["context length", "token limit", "too long", "maximum context"]):
+                logger.warning(f"Context length exceeded for conversation {conversation_id}. Reducing message count and retrying.")
+                # If context is too long, try with even fewer messages (quarter instead of half)
+                quarter_count = len(messages_to_summarize) // 4
+                if quarter_count > 0:
+                    messages_to_summarize = messages_to_summarize[:quarter_count]
+                    text_to_summarize = "\n".join([f"{msg.role}: {msg.content}" for msg in messages_to_summarize])
+                    logger.info(f"Retrying with oldest {len(messages_to_summarize)} messages for summarization")
+
+                    # Retry with reduced context
+                    prompt = SUMMARIZATION_PROMPT.format(
+                        existing_summary=conversation.summary or "This is the beginning of the conversation.",
+                        text=text_to_summarize
+                    )
+                    new_summary = await ai_handler.get_response(prompt)
+                else:
+                    # If we can't reduce further, skip summarization for this conversation
+                    logger.error(f"Cannot reduce context further for conversation {conversation_id}. Skipping summarization.")
+                    return
+            else:
+                # Re-raise non-context-length errors
+                raise e
+
+        # Refresh before write to avoid stale overwrite.
+        latest_conversation = await conversation_repo.get_conversation(conversation_id)
+        if (
+            latest_conversation
+            and latest_conversation.last_summarized_message_id != conversation.last_summarized_message_id
+        ):
+            logger.info(
+                "Skipping stale summarization write for conversation %s: checkpoint advanced from %s to %s",
+                conversation_id,
+                conversation.last_summarized_message_id,
+                latest_conversation.last_summarized_message_id,
+            )
+            return
+
+        # 5. Update the conversation
+        last_message_id = messages_to_summarize[-1].id
+        await conversation_repo.update_conversation(
+            conversation_id=conversation_id,
+            summary=new_summary,
+            last_summarized_message_id=last_message_id
+        )
+
+        logger.info(f"Successfully summarized conversation {conversation_id}. Last message ID: {last_message_id}")
+    finally:
+        release_task_lock(lock_key)
 
 
 # -----------------------------------------------------------------------
@@ -151,64 +212,85 @@ async def extract_memories_async(user_id: str, conversation_id: str):
     from config import MEMORY_CHUNK_MAX_MESSAGES, MEMORY_CHUNK_TARGET_TOKENS
     from memory.adaptive_chunker import AdaptiveChunker
 
+    lock_key = memory_lock_key(conversation_id)
+    if not acquire_task_lock(lock_key, MEMORY_LOCK_TTL):
+        logger.info("Skipping duplicate memory extraction task for conversation %s", conversation_id)
+        return
+
     app_context = await get_app_context()
-    conversation_repo = app_context.conversation_manager.storage.conversations
-    message_repo = app_context.conversation_manager.storage.messages
-    memory_manager = app_context.memory_manager
+    try:
+        conversation_repo = app_context.conversation_manager.storage.conversations
+        message_repo = app_context.conversation_manager.storage.messages
+        memory_manager = app_context.memory_manager
 
-    if not memory_manager:
-        logger.error("Memory manager not available for chunk-embed task")
-        return
+        if not memory_manager:
+            logger.error("Memory manager not available for chunk-embed task")
+            return
 
-    # 1. Fetch the conversation to get last_memorized_message_id
-    conversation = await conversation_repo.get_conversation(conversation_id)
-    if not conversation:
-        logger.error("Conversation %s not found", conversation_id)
-        return
+        # 1. Fetch the conversation to get last_memorized_message_id
+        conversation = await conversation_repo.get_conversation(conversation_id)
+        if not conversation:
+            logger.error("Conversation %s not found", conversation_id)
+            return
 
-    last_memorized_id = getattr(conversation, 'last_memorized_message_id', None)
+        last_memorized_id = getattr(conversation, 'last_memorized_message_id', None)
 
-    # 2. Fetch unprocessed messages
-    messages = await message_repo.get_messages_for_summary(
-        conversation_id, last_memorized_id
-    )
-    if not messages:
-        logger.info(
-            "No new messages to process for memory chunking (conversation %s)",
-            conversation_id,
+        # 2. Fetch unprocessed messages
+        messages = await message_repo.get_messages_for_summary(
+            conversation_id, last_memorized_id
         )
-        return
+        if not messages:
+            logger.info(
+                "No new messages to process for memory chunking (conversation %s)",
+                conversation_id,
+            )
+            return
 
-    logger.info("Processing %d messages for memory chunking", len(messages))
+        logger.info("Processing %d messages for memory chunking", len(messages))
 
-    # 3. Create adaptive chunks
-    chunker = AdaptiveChunker(
-        max_messages=MEMORY_CHUNK_MAX_MESSAGES,
-        target_tokens=MEMORY_CHUNK_TARGET_TOKENS,
-    )
-    chunks = chunker.create_chunks(messages)
+        # 3. Create adaptive chunks
+        chunker = AdaptiveChunker(
+            max_messages=MEMORY_CHUNK_MAX_MESSAGES,
+            target_tokens=MEMORY_CHUNK_TARGET_TOKENS,
+        )
+        chunks = chunker.create_chunks(messages)
 
-    if not chunks:
-        logger.info("No complete turns to chunk in conversation %s", conversation_id)
-    else:
-        # 4. Batch-embed and store
-        stored_count = await memory_manager.store_conversation_chunks(
-            user_id=user_id,
-            chunks=chunks,
+        if not chunks:
+            logger.info("No complete turns to chunk in conversation %s", conversation_id)
+        else:
+            # 4. Batch-embed and store
+            stored_count = await memory_manager.store_conversation_chunks(
+                user_id=user_id,
+                chunks=chunks,
+                conversation_id=conversation_id,
+                bot_id=str(conversation.bot_id) if conversation.bot_id else None,
+            )
+            logger.info(
+                "Stored %d conversation chunk(s) for user %s", stored_count, user_id
+            )
+
+        latest_conversation = await conversation_repo.get_conversation(conversation_id)
+        if (
+            latest_conversation
+            and latest_conversation.last_memorized_message_id != conversation.last_memorized_message_id
+        ):
+            logger.info(
+                "Skipping stale memory checkpoint write for conversation %s: checkpoint advanced from %s to %s",
+                conversation_id,
+                conversation.last_memorized_message_id,
+                latest_conversation.last_memorized_message_id,
+            )
+            return
+
+        # 5. Update last_memorized_message_id
+        last_msg_id = messages[-1].id
+        await conversation_repo.update_conversation(
             conversation_id=conversation_id,
-            bot_id=str(conversation.bot_id) if conversation.bot_id else None,
+            last_memorized_message_id=last_msg_id,
         )
         logger.info(
-            "Stored %d conversation chunk(s) for user %s", stored_count, user_id
+            "Updated last_memorized_message_id to %s for conversation %s",
+            last_msg_id, conversation_id,
         )
-
-    # 5. Update last_memorized_message_id
-    last_msg_id = messages[-1].id
-    await conversation_repo.update_conversation(
-        conversation_id=conversation_id,
-        last_memorized_message_id=last_msg_id,
-    )
-    logger.info(
-        "Updated last_memorized_message_id to %s for conversation %s",
-        last_msg_id, conversation_id,
-    )
+    finally:
+        release_task_lock(lock_key)

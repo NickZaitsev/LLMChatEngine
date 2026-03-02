@@ -656,7 +656,8 @@ class PostgresMemoryRepo:
         conversation_id: str, 
         text: str, 
         embedding: List[float], 
-        memory_type: str = "episodic"
+        memory_type: str = "episodic",
+        bot_id: Optional[str] = None,
     ) -> Memory:
         """
         Store a memory with optional vector embedding.
@@ -674,11 +675,24 @@ class PostgresMemoryRepo:
             conversation_uuid = UUID(conversation_id)
         except ValueError as e:
             raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        bot_uuid = None
+        if bot_id:
+            try:
+                bot_uuid = UUID(bot_id)
+            except ValueError as e:
+                raise ValueError(f"Invalid bot_id format: {bot_id}") from e
         
         async with self.session_maker() as session:
             try:
+                if bot_uuid is None:
+                    conversation_model = await session.get(ConversationModel, conversation_uuid)
+                    if conversation_model:
+                        bot_uuid = conversation_model.bot_id
+
                 memory_model = MemoryModel(
                     conversation_id=conversation_uuid,
+                    bot_id=bot_uuid,
                     memory_type=memory_type,
                     text=text,
                     embedding=embedding
@@ -698,6 +712,7 @@ class PostgresMemoryRepo:
                     memory_type=memory_model.memory_type,
                     text=memory_model.text,
                     created_at=memory_model.created_at,
+                    bot_id=memory_model.bot_id,
                     embedding=embedding
                 )
                 
@@ -709,7 +724,9 @@ class PostgresMemoryRepo:
         self, 
         query_embedding: List[float], 
         top_k: int = 10, 
-        similarity_threshold: float = 0.7
+        similarity_threshold: float = 0.7,
+        user_id: Optional[str] = None,
+        bot_id: Optional[str] = None,
     ) -> List[Memory]:
         """
         Search for memories using vector similarity.
@@ -722,10 +739,30 @@ class PostgresMemoryRepo:
         Returns:
             List of Memory objects ordered by similarity (highest first)
         """
+        user_uuid = None
+        bot_uuid = None
+        if user_id:
+            try:
+                user_uuid = UUID(user_id)
+            except ValueError as e:
+                raise ValueError(f"Invalid user_id format: {user_id}") from e
+        if bot_id:
+            try:
+                bot_uuid = UUID(bot_id)
+            except ValueError as e:
+                raise ValueError(f"Invalid bot_id format: {bot_id}") from e
+
         async with self.session_maker() as session:
             if self.use_pgvector:
                 # Use pgvector for efficient similarity search
-                stmt = select(MemoryModel).order_by(
+                stmt = select(MemoryModel).join(
+                    ConversationModel, MemoryModel.conversation_id == ConversationModel.id
+                )
+                if user_uuid:
+                    stmt = stmt.where(ConversationModel.user_id == user_uuid)
+                if bot_uuid:
+                    stmt = stmt.where(MemoryModel.bot_id == bot_uuid)
+                stmt = stmt.order_by(
                     MemoryModel.embedding.cosine_distance(query_embedding)
                 ).limit(top_k)
                 
@@ -746,7 +783,13 @@ class PostgresMemoryRepo:
                 
             else:
                 # Fallback: load all memories and compute similarity in Python
-                stmt = select(MemoryModel)
+                stmt = select(MemoryModel).join(
+                    ConversationModel, MemoryModel.conversation_id == ConversationModel.id
+                )
+                if user_uuid:
+                    stmt = stmt.where(ConversationModel.user_id == user_uuid)
+                if bot_uuid:
+                    stmt = stmt.where(MemoryModel.bot_id == bot_uuid)
                 result = await session.execute(stmt)
                 all_memories = result.scalars().all()
                 
@@ -768,6 +811,7 @@ class PostgresMemoryRepo:
                     memory_type=mem.memory_type,
                     text=mem.text,
                     created_at=mem.created_at,
+                    bot_id=mem.bot_id,
                     embedding=mem.embedding
                 )
                 for mem in memories
@@ -776,7 +820,8 @@ class PostgresMemoryRepo:
     async def list_memories(
         self, 
         conversation_id: str, 
-        memory_type: Optional[str] = None
+        memory_type: Optional[str] = None,
+        bot_id: Optional[str] = None,
     ) -> List[Memory]:
         """
         List memories for a conversation, optionally filtered by type.
@@ -792,11 +837,20 @@ class PostgresMemoryRepo:
             conversation_uuid = UUID(conversation_id)
         except ValueError as e:
             raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        bot_uuid = None
+        if bot_id:
+            try:
+                bot_uuid = UUID(bot_id)
+            except ValueError as e:
+                raise ValueError(f"Invalid bot_id format: {bot_id}") from e
         
         async with self.session_maker() as session:
             conditions = [MemoryModel.conversation_id == conversation_uuid]
             if memory_type:
                 conditions.append(MemoryModel.memory_type == memory_type)
+            if bot_uuid is not None:
+                conditions.append(MemoryModel.bot_id == bot_uuid)
             
             stmt = select(MemoryModel).where(
                 and_(*conditions)
@@ -812,6 +866,7 @@ class PostgresMemoryRepo:
                     memory_type=mem.memory_type,
                     text=mem.text,
                     created_at=mem.created_at,
+                    bot_id=mem.bot_id,
                     embedding=mem.embedding
                 )
                 for mem in memories

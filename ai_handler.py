@@ -133,8 +133,6 @@ class ModelClient:
             
             
             # Log the full request content for debugging
-            logger.info("Full LLM Request to %s:", self.provider)
-            logger.info(messages)
             logger.info("  Model: %s", self.model_name)
             for i, msg in enumerate(messages):
                 role = msg.get("role", "unknown")
@@ -335,11 +333,10 @@ class AIHandler:
             logger.info("Sending %d messages to LLM", len(messages))
             
             # Log the actual request content for debugging
-            logger.info("LLM Request Messages (Detailed):")
             for i, msg in enumerate(messages):
                 role = msg.get("role", "unknown")
                 content = msg.get("content", "")
-                logger.info("  Message %d [%s]: %s", i + 1, role, content)
+                logger.debug("  Message %d [%s]: %s", i + 1, role, content)
             
             # Retry logic with exponential backoff and proper timeout
             for attempt in range(self.max_retries):
@@ -360,12 +357,26 @@ class AIHandler:
                     try:
                         if MEMORY_ENABLED and self.prompt_assembler:
                             from config import MAX_ACTIVE_MESSAGES
-                            from memory.tasks import create_conversation_summary
+                            from memory.tasks import (
+                                create_conversation_summary,
+                                acquire_task_lock,
+                                release_task_lock,
+                                summary_lock_key,
+                                SUMMARY_LOCK_TTL,
+                            )
                             
                             active_messages_count = await self.prompt_assembler.get_active_message_count(conversation_id)
                             if active_messages_count > MAX_ACTIVE_MESSAGES:
                                 logger.info(f"Active messages ({active_messages_count}) exceed threshold ({MAX_ACTIVE_MESSAGES}). Triggering summarization.")
-                                create_conversation_summary.delay(conversation_id)
+                                lock_key = summary_lock_key(conversation_id)
+                                if acquire_task_lock(lock_key, SUMMARY_LOCK_TTL):
+                                    try:
+                                        create_conversation_summary.delay(conversation_id)
+                                    except Exception:
+                                        release_task_lock(lock_key)
+                                        raise
+                                else:
+                                    logger.info("Skipping duplicate summarization scheduling for conversation %s", conversation_id)
                     except Exception as e:
                         logger.error(f"Failed to trigger summarization: {e}")
 

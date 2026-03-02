@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from memory.tasks import create_conversation_summary_async
+from memory.tasks import create_conversation_summary_async, extract_memories_async
 
 
 @pytest.mark.asyncio
@@ -33,3 +33,25 @@ async def test_create_conversation_summary_uses_bot_scoped_ai_runtime():
 
     app_context.get_ai_runtime_for_bot.assert_awaited_once_with(conversation.bot_id)
     ai_handler.get_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_conversation_summary_skips_when_lock_not_acquired():
+    app_context = MagicMock()
+
+    with patch("memory.tasks.acquire_task_lock", return_value=False), \
+         patch("memory.tasks.get_app_context", AsyncMock(return_value=app_context)):
+        await create_conversation_summary_async("conv-1")
+
+    app_context.get_ai_runtime_for_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_extract_memories_skips_when_lock_not_acquired():
+    app_context = MagicMock()
+
+    with patch("memory.tasks.acquire_task_lock", return_value=False), \
+         patch("memory.tasks.get_app_context", AsyncMock(return_value=app_context)):
+        await extract_memories_async("123", "conv-1")
+
+    assert not app_context.mock_calls

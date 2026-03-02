@@ -693,9 +693,18 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                 )
                 # Try to dispatch via Celery
                 try:
-                    from memory.tasks import extract_memories
-                    extract_memories.delay(str(user_id), conversation_id)
-                    logger.info("Dispatched memory chunk-embed Celery task for user %s", user_id)
+                    from memory.tasks import extract_memories, acquire_task_lock, memory_lock_key, release_task_lock, MEMORY_LOCK_TTL
+
+                    lock_key = memory_lock_key(conversation_id)
+                    if acquire_task_lock(lock_key, MEMORY_LOCK_TTL):
+                        try:
+                            extract_memories.delay(str(user_id), conversation_id)
+                            logger.info("Dispatched memory chunk-embed Celery task for user %s", user_id)
+                        except Exception:
+                            release_task_lock(lock_key)
+                            raise
+                    else:
+                        logger.info("Skipping duplicate memory chunk scheduling for conversation %s", conversation_id)
                 except Exception as celery_err:
                     logger.warning(
                         "Celery dispatch failed for chunk-embed (user %s): %s. "

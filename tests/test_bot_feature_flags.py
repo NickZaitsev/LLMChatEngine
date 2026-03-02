@@ -139,3 +139,16 @@ async def test_handle_message_uses_bot_scoped_buffer_route(bot_instance):
     bot_instance.buffer_manager.set_user_context.assert_called_once_with(expected_route, context.bot, 67890)
     bot_instance.buffer_manager.add_message.assert_awaited_once_with(expected_route, "hello")
     bot_instance.buffer_manager.schedule_dispatch.assert_awaited_once_with(expected_route, bot_instance._dispatch_buffered_message)
+
+
+@pytest.mark.asyncio
+async def test_memory_extraction_skips_duplicate_scheduling(bot_instance):
+    conversation = SimpleNamespace(last_memorized_message_id=None)
+    bot_instance.conversation_manager.storage = MagicMock()
+    bot_instance.conversation_manager.storage.messages.count_active_messages = AsyncMock(return_value=999)
+
+    with patch("memory.tasks.acquire_task_lock", return_value=False), \
+         patch("memory.tasks.extract_memories") as extract_memories:
+        await bot_instance._maybe_trigger_memory_extraction(12345, "conv-1", conversation)
+
+    extract_memories.delay.assert_not_called()

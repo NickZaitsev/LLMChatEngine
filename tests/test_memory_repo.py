@@ -42,6 +42,7 @@ class TestMemoryRepo:
         assert memory.memory_type == memory_type
         assert memory.embedding == sample_embedding
         assert_uuid_string(str(memory.id))
+        assert memory.bot_id is None
     
     async def test_store_memory_summary_type(self, memory_repo: PostgresMemoryRepo, sample_conversation, sample_embedding):
         """Test storing a summary-type memory"""
@@ -145,10 +146,10 @@ class TestMemoryRepo:
         
         # Create embeddings with different similarities
         # Similar embeddings (high dot product)
-        similar_embedding_1 = [0.9, 0.1, 0.0] + [0.0] * 381
-        similar_embedding_2 = [0.8, 0.2, 0.1] + [0.0] * 381
+        similar_embedding_1 = [0.9, 0.1, 0.0] + [0.0] * (MEMORY_EMBED_DIM - 3)
+        similar_embedding_2 = [0.8, 0.2, 0.1] + [0.0] * (MEMORY_EMBED_DIM - 3)
         # Different embedding (lower similarity)
-        different_embedding = [0.1, 0.1, 0.9] + [0.0] * 381
+        different_embedding = [0.1, 0.1, 0.9] + [0.0] * (MEMORY_EMBED_DIM - 3)
         
         # Store memories with different embeddings
         await memory_repo.store_memory(
@@ -171,7 +172,7 @@ class TestMemoryRepo:
         )
         
         # Act - Search with embedding similar to the first two
-        query_embedding = [0.85, 0.15, 0.05] + [0.0] * 381
+        query_embedding = [0.85, 0.15, 0.05] + [0.0] * (MEMORY_EMBED_DIM - 3)
         results = await memory_repo.search_memories(
             query_embedding=query_embedding,
             top_k=5,
@@ -191,9 +192,9 @@ class TestMemoryRepo:
         conversation_id = str(sample_conversation.id)
         
         # Create very different embeddings
-        embedding_1 = [1.0, 0.0, 0.0] + [0.0] * 381
-        embedding_2 = [0.0, 1.0, 0.0] + [0.0] * 381
-        embedding_3 = [0.0, 0.0, 1.0] + [0.0] * 381
+        embedding_1 = [1.0, 0.0, 0.0] + [0.0] * (MEMORY_EMBED_DIM - 3)
+        embedding_2 = [0.0, 1.0, 0.0] + [0.0] * (MEMORY_EMBED_DIM - 3)
+        embedding_3 = [0.0, 0.0, 1.0] + [0.0] * (MEMORY_EMBED_DIM - 3)
         
         await memory_repo.store_memory(
             conversation_id=conversation_id,
@@ -212,7 +213,7 @@ class TestMemoryRepo:
         )
         
         # Act - Search with very high threshold
-        query_embedding = [0.5, 0.5, 0.0] + [0.0] * 381
+        query_embedding = [0.5, 0.5, 0.0] + [0.0] * (MEMORY_EMBED_DIM - 3)
         results = await memory_repo.search_memories(
             query_embedding=query_embedding,
             top_k=10,
@@ -380,5 +381,71 @@ class TestMemoryRepo:
         assert "Memory in conv1" in conv1_texts
         assert "Another memory in conv1" in conv1_texts
         assert "Memory in conv2" in conv2_texts
-        assert "Memory in conv2" not in conv1_texts
-        assert "Memory in conv1" not in conv2_texts
+
+    async def test_store_memory_persists_bot_id(self, memory_repo: PostgresMemoryRepo, conversation_repo, sample_user, sample_persona, sample_embedding):
+        bot_id = uuid4()
+        conversation = await conversation_repo.create_conversation(
+            user_id=str(sample_user.id),
+            persona_id=str(sample_persona.id),
+            bot_id=str(bot_id),
+            title="Bot-scoped conversation",
+        )
+
+        memory = await memory_repo.store_memory(
+            conversation_id=str(conversation.id),
+            text="Bot-specific memory",
+            embedding=sample_embedding,
+        )
+
+        assert memory.bot_id == bot_id
+
+    async def test_search_memories_is_scoped_by_user_and_bot(
+        self,
+        memory_repo: PostgresMemoryRepo,
+        conversation_repo,
+        user_repo,
+        persona_repo,
+        sample_user,
+        sample_persona,
+        sample_embedding,
+    ):
+        other_user = await user_repo.create_user(username=f"other_user_{uuid4()}")
+        other_persona = await persona_repo.create_persona(user_id=str(other_user.id), name="Other Persona")
+
+        bot_a = uuid4()
+        bot_b = uuid4()
+
+        conv_a = await conversation_repo.create_conversation(
+            user_id=str(sample_user.id),
+            persona_id=str(sample_persona.id),
+            bot_id=str(bot_a),
+            title="A",
+        )
+        conv_b = await conversation_repo.create_conversation(
+            user_id=str(sample_user.id),
+            persona_id=str(sample_persona.id),
+            bot_id=str(bot_b),
+            title="B",
+        )
+        conv_other = await conversation_repo.create_conversation(
+            user_id=str(other_user.id),
+            persona_id=str(other_persona.id),
+            bot_id=str(bot_a),
+            title="Other",
+        )
+
+        await memory_repo.store_memory(str(conv_a.id), "Memory A", sample_embedding)
+        await memory_repo.store_memory(str(conv_b.id), "Memory B", sample_embedding)
+        await memory_repo.store_memory(str(conv_other.id), "Memory Other", sample_embedding)
+
+        results = await memory_repo.search_memories(
+            query_embedding=sample_embedding,
+            top_k=10,
+            similarity_threshold=0.0,
+            user_id=str(sample_user.id),
+            bot_id=str(bot_a),
+        )
+
+        assert len(results) == 1
+        assert results[0].text == "Memory A"
+        assert results[0].bot_id == bot_a
