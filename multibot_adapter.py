@@ -51,6 +51,8 @@ def create_bot_with_config(bot_config: Optional[BotConfig] = None):
         bot = AIGirlfriendBot()
         bot.bot_config = None
         bot.bot_id = None
+        bot.bot_name = BOT_NAME
+        bot.bot_token = TELEGRAM_TOKEN
         bot.feature_flags = {}
         return bot
     
@@ -71,11 +73,14 @@ def create_bot_with_config(bot_config: Optional[BotConfig] = None):
         # Attach multi-bot configuration
         bot.bot_config = bot_config
         bot.bot_id = bot_config.id
+        bot.bot_name = bot_config.name
+        bot.bot_token = bot_config.token
         bot.feature_flags = bot_config.feature_flags
         
         # Update AI handler personality
         if hasattr(bot, 'ai_handler') and bot.ai_handler:
             bot.ai_handler.update_personality(bot_config.personality)
+            bot.ai_handler.apply_llm_config(bot_config.llm_config)
         
         logger.info("Created multi-bot instance: %s (%s)", bot_config.name, bot_config.id)
         return bot
@@ -107,6 +112,7 @@ def build_application_for_bot(bot, token: str) -> Application:
     from config import POLLING_INTERVAL
     
     app = Application.builder().token(token).build()
+    app.add_handler(MessageHandler(filters.ALL, bot._monitor_pending_clear), group=-1)
     
     # Register handlers
     app.add_handler(CommandHandler("start", bot.start_command))

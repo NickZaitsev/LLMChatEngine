@@ -945,11 +945,13 @@ class PostgresConversationRepo:
                 id=conversation.id,
                 user_id=conversation.user_id,
                 persona_id=conversation.persona_id,
+                bot_id=conversation.bot_id,
                 title=conversation.title,
                 extra_data=conversation.extra_data,
                 created_at=conversation.created_at,
                 summary=conversation.summary,
-                last_summarized_message_id=conversation.last_summarized_message_id
+                last_summarized_message_id=conversation.last_summarized_message_id,
+                last_memorized_message_id=getattr(conversation, 'last_memorized_message_id', None)
             )
     
     async def list_conversations(self, user_id: str, bot_id: Optional[str] = None) -> List[Conversation]:

@@ -148,6 +148,18 @@ class MessageQueueManager:
         except Exception as e:
             logger.error("Failed to initialize MessageQueueManager with Redis URL %s: %s", redis_url, e)
             raise
+
+    @staticmethod
+    def _normalize_bot_key(bot_id: str = None) -> str:
+        return bot_id or "default"
+
+    @classmethod
+    def _routing_key(cls, user_id: int, bot_id: str = None) -> str:
+        return f"{user_id}:{cls._normalize_bot_key(bot_id)}"
+
+    @classmethod
+    def _queue_key(cls, user_id: int, bot_id: str = None) -> str:
+        return f"queue:{cls._routing_key(user_id, bot_id)}"
     
     def _split_message(self, text: str) -> list:
         """
@@ -210,8 +222,9 @@ class MessageQueueManager:
                 logger.warning("No message parts to enqueue for user %s", user_id)
                 return
             
-            # Add user to active users set first
-            self.redis_client.sadd("dispatcher:active_users", user_id)
+            # Add user/bot route to active users set first
+            routing_key = self._routing_key(user_id, bot_id)
+            self.redis_client.sadd("dispatcher:active_users", routing_key)
             
             # Enqueue each part as a separate message
             total_parts = len(message_parts)
@@ -234,7 +247,7 @@ class MessageQueueManager:
                 message_json = json.dumps(message_data, ensure_ascii=False)
                 
                 # Redis key for user's queue
-                queue_key = f"queue:{user_id}"
+                queue_key = self._queue_key(user_id, bot_id)
                 
                 # Add message to user's Redis list using RPUSH
                 result = self.redis_client.rpush(queue_key, message_json)
@@ -259,7 +272,7 @@ class MessageQueueManager:
             logger.error("Unexpected error when enqueuing message for user %s: %s", user_id, e)
             raise
     
-    async def get_queue_size(self, user_id: int) -> int:
+    async def get_queue_size(self, user_id: int, bot_id: str = None) -> int:
         """
         Get the size of a user's queue.
         
@@ -273,7 +286,7 @@ class MessageQueueManager:
             if not isinstance(user_id, int) or user_id <= 0:
                 raise ValueError("user_id must be a positive integer")
                 
-            queue_key = f"queue:{user_id}"
+            queue_key = self._queue_key(user_id, bot_id)
             size = self.redis_client.llen(queue_key)
             return size
         except ValueError as e:
@@ -286,7 +299,7 @@ class MessageQueueManager:
             logger.error("Unexpected error when getting queue size for user %s: %s", user_id, e)
             raise
     
-    async def is_queue_empty(self, user_id: int) -> bool:
+    async def is_queue_empty(self, user_id: int, bot_id: str = None) -> bool:
         """
         Check if a user's queue is empty.
         
@@ -297,7 +310,7 @@ class MessageQueueManager:
             True if queue is empty, False otherwise
         """
         try:
-            size = await self.get_queue_size(user_id)
+            size = await self.get_queue_size(user_id, bot_id)
             return size == 0
         except Exception as e:
             logger.error("Error when checking if queue is empty for user %s: %s", user_id, e)
@@ -386,9 +399,29 @@ class MessageDispatcher:
         except Exception as e:
             logger.error("Failed to initialize MessageDispatcher with Redis URL %s: %s", redis_url, e)
             raise
+
+    @staticmethod
+    def _normalize_bot_key(bot_id: str = None) -> str:
+        return bot_id or "default"
+
+    @classmethod
+    def _routing_key(cls, user_id: int, bot_id: str = None) -> str:
+        return f"{user_id}:{cls._normalize_bot_key(bot_id)}"
+
+    @classmethod
+    def _queue_key(cls, user_id: int, bot_id: str = None) -> str:
+        return f"queue:{cls._routing_key(user_id, bot_id)}"
+
+    @classmethod
+    def _dlq_key(cls, user_id: int, bot_id: str = None) -> str:
+        return f"dlq:{cls._routing_key(user_id, bot_id)}"
+
+    @classmethod
+    def _lock_key(cls, user_id: int, bot_id: str = None) -> str:
+        return f"dispatcher:processing:{cls._routing_key(user_id, bot_id)}"
     
     
-    def acquire_lock(self, user_id: int) -> bool:
+    def acquire_lock(self, user_id: int, bot_id: str = None) -> bool:
         """
         Acquire a distributed lock for a user queue.
         
@@ -399,7 +432,7 @@ class MessageDispatcher:
             True if lock was acquired, False otherwise
         """
         try:
-            lock_key = f"dispatcher:processing:{user_id}"
+            lock_key = self._lock_key(user_id, bot_id)
             result = self.lock_script(
                 keys=[lock_key],
                 args=[self.instance_id, self.lock_timeout]
@@ -416,7 +449,7 @@ class MessageDispatcher:
             logger.error("Error acquiring lock for user %s: %s", user_id, e)
             return False
     
-    def release_lock(self, user_id: int) -> bool:
+    def release_lock(self, user_id: int, bot_id: str = None) -> bool:
         """
         Release a distributed lock for a user queue.
         
@@ -427,7 +460,7 @@ class MessageDispatcher:
             True if lock was released, False otherwise
         """
         try:
-            lock_key = f"dispatcher:processing:{user_id}"
+            lock_key = self._lock_key(user_id, bot_id)
             result = self.unlock_script(
                 keys=[lock_key],
                 args=[self.instance_id]
@@ -444,7 +477,7 @@ class MessageDispatcher:
             logger.error("Error releasing lock for user %s: %s", user_id, e)
             return False
     
-    def renew_lock(self, user_id: int) -> bool:
+    def renew_lock(self, user_id: int, bot_id: str = None) -> bool:
         """
         Renew a distributed lock for a user queue.
         
@@ -455,7 +488,7 @@ class MessageDispatcher:
             True if lock was renewed, False otherwise
         """
         try:
-            lock_key = f"dispatcher:processing:{user_id}"
+            lock_key = self._lock_key(user_id, bot_id)
             result = self.renew_script(
                 keys=[lock_key],
                 args=[self.instance_id, self.lock_timeout]
@@ -493,14 +526,23 @@ class MessageDispatcher:
                     key_str = key.decode('utf-8') if isinstance(key, bytes) else key
                     if key_str.startswith("queue:"):
                         try:
-                            user_id = int(key_str.split(":")[1])
+                            key_parts = key_str.split(":")
+                            if len(key_parts) == 2:
+                                user_id = int(key_parts[1])
+                                routing_key = self._routing_key(user_id)
+                            elif len(key_parts) == 3:
+                                user_id = int(key_parts[1])
+                                routing_key = f"{key_parts[1]}:{key_parts[2]}"
+                            else:
+                                logger.warning("Invalid queue key format: %s", key_str)
+                                continue
                             queue_size = self.redis_client.llen(key_str)
                             if queue_size > 0:
-                                self.redis_client.sadd("dispatcher:active_users", user_id)
-                                logger.info("Found existing queue for user %s with %s messages", user_id, queue_size)
+                                self.redis_client.sadd("dispatcher:active_users", routing_key)
+                                logger.info("Found existing queue for routing key %s with %s messages", routing_key, queue_size)
                                 added_count += 1
                             else:
-                                logger.debug("Found empty queue for user %s", user_id)
+                                logger.debug("Found empty queue for routing key %s", routing_key)
                         except (ValueError, IndexError) as e:
                             logger.warning("Invalid queue key format: %s", key_str)
                         except redis.RedisError as e:
@@ -542,13 +584,16 @@ class MessageDispatcher:
                             break
                             
                         try:
-                            user_id = int(user_id_bytes.decode('utf-8'))
+                            routing_key = user_id_bytes.decode('utf-8')
+                            routing_parts = routing_key.split(":", 1)
+                            user_id = int(routing_parts[0])
+                            bot_id = routing_parts[1] if len(routing_parts) > 1 and routing_parts[1] != "default" else None
                         except (ValueError, AttributeError) as e:
                             logger.warning("Invalid user ID in active users set: %s", user_id_bytes)
                             continue
                         
                         # Try to acquire processing lock for this user
-                        lock_acquired = self.acquire_lock(user_id)
+                        lock_acquired = self.acquire_lock(user_id, bot_id)
                         
                         if not lock_acquired:
                             # Another dispatcher is already processing this user's queue
@@ -556,12 +601,12 @@ class MessageDispatcher:
                         
                         try:
                             # Process messages for this user
-                            await self.process_user_queue(user_id)
+                            await self.process_user_queue(user_id, bot_id)
                         except Exception as e:
-                            logger.error("Error processing queue for user %s: %s", user_id, e)
+                            logger.error("Error processing queue for user %s bot %s: %s", user_id, bot_id, e)
                         finally:
                             # Release the lock
-                            self.release_lock(user_id)
+                            self.release_lock(user_id, bot_id)
                     
                     # Sleep for a bit before checking again
                     await asyncio.sleep(MESSAGE_QUEUE_DISPATCHER_INTERVAL)
@@ -590,7 +635,7 @@ class MessageDispatcher:
         logger.info("Stopping message dispatcher")
         self.running = False
     
-    async def process_user_queue(self, user_id: int):
+    async def process_user_queue(self, user_id: int, bot_id: str = None):
         """
         Process messages from a user's queue.
         
@@ -598,11 +643,12 @@ class MessageDispatcher:
             user_id: User ID
         """
         # Create a task for lock renewal
-        lock_renewal_task = asyncio.create_task(self._renew_lock_periodically(user_id))
+        lock_renewal_task = asyncio.create_task(self._renew_lock_periodically(user_id, bot_id))
         
         try:
-            queue_key = f"queue:{user_id}"
-            logger.info("Starting to process queue for user %s", user_id)
+            queue_key = self._queue_key(user_id, bot_id)
+            routing_key = self._routing_key(user_id, bot_id)
+            logger.info("Starting to process queue for user %s bot %s", user_id, bot_id)
             
             # Process all messages in the queue
             message_count = 0
@@ -619,10 +665,10 @@ class MessageDispatcher:
                 if not result:
                     # No more messages in queue, remove user from active set
                     try:
-                        self.redis_client.srem("dispatcher:active_users", user_id)
-                        logger.info("Finished processing queue for user %s. Processed %s messages", user_id, message_count)
+                        self.redis_client.srem("dispatcher:active_users", routing_key)
+                        logger.info("Finished processing queue for user %s bot %s. Processed %s messages", user_id, bot_id, message_count)
                     except redis.RedisError as e:
-                        logger.error("Redis error while removing user %s from active set: %s", user_id, e)
+                        logger.error("Redis error while removing user %s bot %s from active set: %s", user_id, bot_id, e)
                     break
                 
                 # Extract message
@@ -654,9 +700,9 @@ class MessageDispatcher:
                         logger.error("Error handling failed message for user %s: %s", user_id, e)
                         
         except redis.RedisError as e:
-            logger.error("Redis error processing queue for user %s: %s", user_id, e)
+            logger.error("Redis error processing queue for user %s bot %s: %s", user_id, bot_id, e)
         except Exception as e:
-            logger.error("Error processing queue for user %s: %s", user_id, e)
+            logger.error("Error processing queue for user %s bot %s: %s", user_id, bot_id, e)
         finally:
             # Cancel the lock renewal task
             lock_renewal_task.cancel()
@@ -665,7 +711,7 @@ class MessageDispatcher:
             except asyncio.CancelledError:
                 pass
     
-    async def _renew_lock_periodically(self, user_id: int):
+    async def _renew_lock_periodically(self, user_id: int, bot_id: str = None):
         """
         Periodically renew the lock for a user queue.
         
@@ -675,16 +721,16 @@ class MessageDispatcher:
         try:
             while True:
                 await asyncio.sleep(MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL)
-                lock_renewed = self.renew_lock(user_id)
+                lock_renewed = self.renew_lock(user_id, bot_id)
                 if not lock_renewed:
-                    logger.warning("Failed to renew lock for user %s", user_id)
+                    logger.warning("Failed to renew lock for user %s bot %s", user_id, bot_id)
                     # If we can't renew the lock, we should stop processing
                     break
         except asyncio.CancelledError:
             # Task was cancelled, which is expected when processing is done
             pass
         except Exception as e:
-            logger.error("Error in lock renewal task for user %s: %s", user_id, e)
+            logger.error("Error in lock renewal task for user %s bot %s: %s", user_id, bot_id, e)
     
     async def process_message(self, message: Dict[str, Any]) -> bool:
         """
@@ -782,21 +828,23 @@ class MessageDispatcher:
         """
         try:
             user_id = message["user_id"]
+            bot_id = message.get("bot_id")
             retry_count = message.get("retry_count", 0)
             
             if retry_count < self.max_retries:
                 # Increment retry count and requeue
                 message["retry_count"] = retry_count + 1
                 message_json = json.dumps(message, ensure_ascii=False)
-                queue_key = f"queue:{user_id}"
+                queue_key = self._queue_key(user_id, bot_id)
                 self.redis_client.rpush(queue_key, message_json)
-                logger.info("Requeued failed message for user %s (retry %s)", user_id, retry_count + 1)
+                self.redis_client.sadd("dispatcher:active_users", self._routing_key(user_id, bot_id))
+                logger.info("Requeued failed message for user %s bot %s (retry %s)", user_id, bot_id, retry_count + 1)
             else:
                 # Move to dead letter queue
-                dlq_key = f"dlq:{user_id}"
+                dlq_key = self._dlq_key(user_id, bot_id)
                 message_json = json.dumps(message, ensure_ascii=False)
                 self.redis_client.rpush(dlq_key, message_json)
-                logger.error("Moved message to dead letter queue for user %s after %s retries", user_id, self.max_retries)
+                logger.error("Moved message to dead letter queue for user %s bot %s after %s retries", user_id, bot_id, self.max_retries)
                 
         except Exception as e:
             logger.error("Error handling failed message for user %s: %s", message.get("user_id", "unknown"), e)

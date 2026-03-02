@@ -16,6 +16,7 @@ from celery import Celery
 from celery.schedules import crontab
 import redis
 import json
+from telegram import Bot
 
 from config import (
     PROACTIVE_MESSAGING_ENABLED,
@@ -505,6 +506,7 @@ async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str]
             # Fallback to default token
 
     try:
+        typing_bot = Bot(token=bot_token)
         # Generate and send the message...
         conversation_history = await app_context.conversation_manager.get_formatted_conversation_async(
             user_id,
@@ -519,7 +521,7 @@ async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str]
         ai_response = await generate_ai_response(
             ai_handler=app_context.ai_handler,
             typing_manager=app_context.typing_manager,
-            bot=app_context.bot,
+            bot=typing_bot,
             chat_id=user_id,
             additional_prompt=PROACTIVE_MESSAGING_PROMPT,
             conversation_history=conversation_history,

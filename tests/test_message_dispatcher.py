@@ -21,9 +21,9 @@ class TestMessageDispatcher:
         # Clean up test data
         try:
             redis_client = redis.from_url(self.redis_url)
-            redis_client.delete(f"queue:{self.user_id}")
-            redis_client.delete(f"dispatcher:processing:{self.user_id}")
-            redis_client.srem("dispatcher:active_users", self.user_id)
+            redis_client.delete(f"queue:{self.user_id}:default")
+            redis_client.delete(f"dispatcher:processing:{self.user_id}:default")
+            redis_client.srem("dispatcher:active_users", f"{self.user_id}:default")
         except Exception:
             pass  # Ignore cleanup errors
     
@@ -95,7 +95,8 @@ class TestMessageDispatcher:
                 chat_id=self.chat_id,
                 text=self.test_message,
                 bot=mock_bot_instance,
-                typing_manager=mock_typing_manager_instance
+                typing_manager=mock_typing_manager_instance,
+                is_first_message=True
             )
     
     @pytest.mark.asyncio
@@ -178,7 +179,7 @@ class TestMessageDispatcher:
                 # Verify the message was requeued
                 mock_rpush.assert_called_once()
                 args = mock_rpush.call_args[0]
-                assert args[0] == f"queue:{self.user_id}"
+                assert args[0] == f"queue:{self.user_id}:default"
                 
                 # Verify the retry count was incremented
                 message_json = args[1]
@@ -225,7 +226,7 @@ class TestMessageDispatcher:
                 # Verify the message was moved to dead letter queue
                 mock_rpush.assert_called_once()
                 args = mock_rpush.call_args[0]
-                assert args[0] == f"dlq:{self.user_id}"
+                assert args[0] == f"dlq:{self.user_id}:default"
 
     @pytest.mark.asyncio
     async def test_scan_existing_queues(self):
@@ -247,7 +248,7 @@ class TestMessageDispatcher:
             dispatcher = MessageDispatcher(self.redis_url)
             
             # Mock Redis scan method to return some test keys
-            test_keys = [b'queue:12345', b'queue:67890', b'queue:1111']
+            test_keys = [b'queue:12345:default', b'queue:67890:default', b'queue:1111:default']
             with patch.object(dispatcher.redis_client, 'scan') as mock_scan, \
                  patch.object(dispatcher.redis_client, 'llen') as mock_llen, \
                  patch.object(dispatcher.redis_client, 'sadd') as mock_sadd:

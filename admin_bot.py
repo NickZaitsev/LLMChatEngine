@@ -63,6 +63,10 @@ class AdminBot:
     def set_bot_manager(self, bot_manager):
         """Set reference to bot manager for hot-reload functionality."""
         self.bot_manager = bot_manager
+
+    def _session_key(self, update: Update) -> tuple[int, int]:
+        """Scope pending admin workflows to user and chat."""
+        return (update.effective_user.id, update.effective_chat.id)
     
     def _is_admin(self, user_id: int) -> bool:
         """Check if user is an admin."""
@@ -116,7 +120,7 @@ Use these commands to manage your bot fleet."""
         
         await self._init_storage()
         
-        self._pending_bot_data[user_id] = {}
+        self._pending_bot_data[self._session_key(update)] = {}
         
         await update.message.reply_text(
             "🤖 **Add New Bot**\n\n"
@@ -139,7 +143,7 @@ Use these commands to manage your bot fleet."""
             return WAITING_TOKEN
         
         # Store encrypted token
-        self._pending_bot_data[user_id]['token'] = token
+        self._pending_bot_data[self._session_key(update)]['token'] = token
         
         # Delete the message containing the token for security
         try:
@@ -163,7 +167,7 @@ Use these commands to manage your bot fleet."""
             await update.message.reply_text("❌ Name must be 1-100 characters.")
             return WAITING_NAME
         
-        self._pending_bot_data[user_id]['name'] = name
+        self._pending_bot_data[self._session_key(update)]['name'] = name
         
         await update.message.reply_text(
             f"✅ Name set to **{name}**.\n\n"
@@ -184,7 +188,7 @@ Use these commands to manage your bot fleet."""
             await update.message.reply_text("❌ Personality must be at least 10 characters.")
             return WAITING_PERSONALITY
         
-        pending = self._pending_bot_data.get(user_id, {})
+        pending = self._pending_bot_data.get(self._session_key(update), {})
         token = pending.get('token')
         name = pending.get('name')
         
@@ -216,7 +220,7 @@ Use these commands to manage your bot fleet."""
                 bot_id = new_bot.id
             
             # Clean up pending data
-            del self._pending_bot_data[user_id]
+            del self._pending_bot_data[self._session_key(update)]
             
             # Build feature list for display
             features_text = "\n".join([
@@ -229,7 +233,7 @@ Use these commands to manage your bot fleet."""
                 f"**Name:** {name}\n"
                 f"**Status:** Active\n\n"
                 f"**Enabled Features:**\n{features_text}\n\n"
-                f"Use /reloadbot to start the bot, or it will start automatically on next restart.",
+                f"Use /reloadbot {bot_id} if you need to restart it later.",
                 parse_mode='Markdown'
             )
             
@@ -251,8 +255,9 @@ Use these commands to manage your bot fleet."""
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel current operation."""
         user_id = update.effective_user.id
-        if user_id in self._pending_bot_data:
-            del self._pending_bot_data[user_id]
+        session_key = self._session_key(update)
+        if session_key in self._pending_bot_data:
+            del self._pending_bot_data[session_key]
         
         await update.message.reply_text("❌ Operation cancelled.")
         return ConversationHandler.END
@@ -329,7 +334,7 @@ Use these commands to manage your bot fleet."""
                 return ConversationHandler.END
             
             # Store bot_id for next message
-            self._pending_bot_data[user_id] = {'edit_bot_id': bot_id, 'bot_name': bot.name}
+            self._pending_bot_data[self._session_key(update)] = {'edit_bot_id': bot_id, 'bot_name': bot.name}
             
             await update.message.reply_text(
                 f"📝 **Editing: {bot.name}**\n\n"
@@ -353,7 +358,7 @@ Use these commands to manage your bot fleet."""
             await update.message.reply_text("❌ Personality must be at least 10 characters. Please try again or /cancel.")
             return WAITING_NEW_PERSONALITY
         
-        pending = self._pending_bot_data.get(user_id, {})
+        pending = self._pending_bot_data.get(self._session_key(update), {})
         bot_id = pending.get('edit_bot_id')
         bot_name = pending.get('bot_name', 'Unknown')
         
@@ -378,7 +383,7 @@ Use these commands to manage your bot fleet."""
                 await session.commit()
             
             # Clean up pending data
-            del self._pending_bot_data[user_id]
+            del self._pending_bot_data[self._session_key(update)]
             
             await update.message.reply_text(
                 f"✅ **Personality updated for {bot_name}!**\n\n"
@@ -463,6 +468,54 @@ Use these commands to manage your bot fleet."""
                 
         except Exception as e:
             logger.error(f"Failed to toggle feature: {e}")
+            await update.message.reply_text(f"❌ Error: {e}")
+
+    async def editbot_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show editable settings for a bot and direct the admin to supported edit commands."""
+        user_id = update.effective_user.id
+
+        if not self._is_admin(user_id):
+            await update.message.reply_text("⛔ You are not authorized to use this bot.")
+            return
+
+        await self._init_storage()
+
+        args = context.args
+        if not args:
+            await update.message.reply_text("Usage: /editbot <bot_id>")
+            return
+
+        bot_id = args[0]
+
+        try:
+            from storage.models import Bot
+            from sqlalchemy import select
+
+            async with self.storage.session_maker() as session:
+                result = await session.execute(select(Bot).where(Bot.id == uuid.UUID(bot_id)))
+                bot = result.scalar_one_or_none()
+
+            if not bot:
+                await update.message.reply_text(f"❌ Bot not found: {bot_id}")
+                return
+
+            enabled_features = [f.value for f in BotFeature if bot.feature_flags.get(f.value, False)]
+            features_text = ", ".join(enabled_features) if enabled_features else "None"
+
+            await update.message.reply_text(
+                f"🛠 **Edit Bot: {bot.name}**\n\n"
+                f"**ID:** `{bot.id}`\n"
+                f"**Active:** {'Yes' if bot.is_active else 'No'}\n"
+                f"**Enabled Features:** {features_text}\n\n"
+                f"**Edit Commands:**\n"
+                f"`/setprompt {bot.id}` to change personality\n"
+                f"`/togglefeature {bot.id} <feature>` to toggle a feature\n"
+                f"`/reloadbot {bot.id}` to apply or restart\n"
+                f"`/removebot {bot.id}` to deactivate",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Failed to edit bot: {e}")
             await update.message.reply_text(f"❌ Error: {e}")
     
     async def botstatus_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -624,6 +677,7 @@ Use these commands to manage your bot fleet."""
         self.application.add_handler(CommandHandler('start', self.start_command))
         self.application.add_handler(CommandHandler('help', self.help_command))
         self.application.add_handler(CommandHandler('listbots', self.listbots_command))
+        self.application.add_handler(CommandHandler('editbot', self.editbot_command))
         self.application.add_handler(CommandHandler('togglefeature', self.togglefeature_command))
         self.application.add_handler(CommandHandler('botstatus', self.botstatus_command))
         self.application.add_handler(CommandHandler('reloadbot', self.reloadbot_command))

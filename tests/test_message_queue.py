@@ -21,8 +21,8 @@ class TestMessageQueueManager:
         # Clean up test data
         try:
             redis_client = redis.from_url(self.redis_url)
-            redis_client.delete(f"queue:{self.user_id}")
-            redis_client.srem("dispatcher:active_users", self.user_id)
+            redis_client.delete(f"queue:{self.user_id}:default")
+            redis_client.srem("dispatcher:active_users", f"{self.user_id}:default")
         except Exception:
             pass  # Ignore cleanup errors
     
@@ -64,7 +64,7 @@ class TestMessageQueueManager:
                 # Verify rpush was called with correct arguments
                 mock_rpush.assert_called_once()
                 args = mock_rpush.call_args[0]
-                assert args[0] == f"queue:{self.user_id}"
+                assert args[0] == f"queue:{self.user_id}:default"
                 
                 # Verify the message content
                 message_json = args[1]
@@ -77,7 +77,7 @@ class TestMessageQueueManager:
                 assert message_data["retry_count"] == 0
                 
                 # Verify sadd was called to add user to active users set
-                mock_sadd.assert_called_once_with("dispatcher:active_users", self.user_id)
+                mock_sadd.assert_called_once_with("dispatcher:active_users", f"{self.user_id}:default")
     
     @pytest.mark.asyncio
     async def test_enqueue_message_validation_errors(self):
@@ -132,7 +132,7 @@ class TestMessageQueueManager:
                 
                 size = await manager.get_queue_size(self.user_id)
                 assert size == 5
-                mock_llen.assert_called_once_with(f"queue:{self.user_id}")
+                mock_llen.assert_called_once_with(f"queue:{self.user_id}:default")
     
     @pytest.mark.asyncio
     async def test_get_queue_size_validation_error(self):
@@ -158,7 +158,7 @@ class TestMessageQueueManager:
                 
                 is_empty = await manager.is_queue_empty(self.user_id)
                 assert is_empty is True
-                mock_get_queue_size.assert_called_once_with(self.user_id)
+                mock_get_queue_size.assert_called_once_with(self.user_id, None)
     
     @pytest.mark.asyncio
     async def test_is_queue_empty_false(self):
@@ -173,7 +173,7 @@ class TestMessageQueueManager:
                 
                 is_empty = await manager.is_queue_empty(self.user_id)
                 assert is_empty is False
-                mock_get_queue_size.assert_called_once_with(self.user_id)
+                mock_get_queue_size.assert_called_once_with(self.user_id, None)
 
 if __name__ == "__main__":
     pytest.main([__file__])

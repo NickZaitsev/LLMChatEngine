@@ -2,7 +2,7 @@ import asyncio
 import logging
 import random
 import sys
-from typing import List, Dict
+from typing import List, Dict, Any
 
 from config import BOT_PERSONALITY, PROMPT_REPLY_TOKEN_BUDGET, TEMPERATURE, MEMORY_ENABLED
 
@@ -49,66 +49,79 @@ logger = logging.getLogger(__name__)
 class ModelClient:
     """Abstracts interaction with different LLM providers"""
     
-    def __init__(self, provider="azure"):
+    def __init__(self, provider="azure", llm_config: Dict = None):
         if not OPENAI_AVAILABLE:
             raise ImportError("OpenAI package not available. Install with: pip install openai")
         
+        self.llm_config = dict(llm_config or {})
         self.provider = provider
         
         if provider == "azure":
             from config import AZURE_ENDPOINT, AZURE_API_KEY, AZURE_MODEL
-            
-            if not all([AZURE_ENDPOINT, AZURE_API_KEY, AZURE_MODEL]):
+
+            azure_endpoint = self.llm_config.get("azure_endpoint", AZURE_ENDPOINT)
+            azure_api_key = self.llm_config.get("azure_api_key", AZURE_API_KEY)
+            azure_model = self.llm_config.get("model", self.llm_config.get("azure_model", AZURE_MODEL))
+
+            if not all([azure_endpoint, azure_api_key, azure_model]):
                 raise ValueError("Azure provider requires AZURE_ENDPOINT, AZURE_API_KEY, and AZURE_MODEL to be set in .env")
             
             self.client = AzureOpenAI(
-                azure_endpoint=AZURE_ENDPOINT,
-                api_key=AZURE_API_KEY,
+                azure_endpoint=azure_endpoint,
+                api_key=azure_api_key,
                 api_version="2024-06-01",
             )
-            self.model_name = AZURE_MODEL
-            logger.info("ModelClient initialized with Azure provider - Model: %s", AZURE_MODEL)
+            self.model_name = azure_model
+            logger.info("ModelClient initialized with Azure provider - Model: %s", azure_model)
             
         elif provider == "lmstudio":
             from config import (LMSTUDIO_MODEL, LMSTUDIO_BASE_URL, LMSTUDIO_AUTO_LOAD,
                                LMSTUDIO_MAX_LOAD_WAIT, LMSTUDIO_SERVER_TIMEOUT)
+
+            lmstudio_base_url = self.llm_config.get("base_url", self.llm_config.get("lmstudio_base_url", LMSTUDIO_BASE_URL))
+            lmstudio_model = self.llm_config.get("model", self.llm_config.get("lmstudio_model", LMSTUDIO_MODEL))
+            lmstudio_auto_load = self.llm_config.get("auto_load_model", LMSTUDIO_AUTO_LOAD)
+            lmstudio_max_load_wait = self.llm_config.get("max_load_wait", LMSTUDIO_MAX_LOAD_WAIT)
+            lmstudio_server_timeout = self.llm_config.get("server_timeout", LMSTUDIO_SERVER_TIMEOUT)
             
             self.client = OpenAI(
-                base_url=LMSTUDIO_BASE_URL,
+                base_url=lmstudio_base_url,
                 api_key="lm-studio",
             )
-            self.model_name = LMSTUDIO_MODEL
+            self.model_name = lmstudio_model
             
             # Initialize LM Studio Manager for model loading
             if LMSTUDIO_MANAGER_AVAILABLE:
                 # Extract base URL without /v1 suffix for manager
-                manager_base_url = LMSTUDIO_BASE_URL.replace('/v1', '').rstrip('/')
+                manager_base_url = lmstudio_base_url.replace('/v1', '').rstrip('/')
                 self.lm_studio_manager = LMStudioManager(
                     base_url=manager_base_url,
-                    timeout=LMSTUDIO_SERVER_TIMEOUT
+                    timeout=lmstudio_server_timeout
                 )
-                self.auto_load_model = LMSTUDIO_AUTO_LOAD
-                self.max_load_wait = LMSTUDIO_MAX_LOAD_WAIT
-                logger.info("LMStudioManager initialized (auto_load=%s)", LMSTUDIO_AUTO_LOAD)
+                self.auto_load_model = lmstudio_auto_load
+                self.max_load_wait = lmstudio_max_load_wait
+                logger.info("LMStudioManager initialized (auto_load=%s)", lmstudio_auto_load)
             else:
                 self.lm_studio_manager = None
                 self.auto_load_model = False
                 logger.warning("LMStudioManager not available - model auto-loading disabled")
             
-            logger.info("ModelClient initialized with LM Studio provider - Model: %s, Base URL: %s", LMSTUDIO_MODEL, LMSTUDIO_BASE_URL)
+            logger.info("ModelClient initialized with LM Studio provider - Model: %s, Base URL: %s", lmstudio_model, lmstudio_base_url)
 
         elif provider == "gemini":
             if not GEMINI_AVAILABLE:
                 raise ImportError("Google Generative AI package not available. Install with: pip install google-generativeai")
             
             from config import GEMINI_API_KEY, GEMINI_MODEL
-            if not all([GEMINI_API_KEY, GEMINI_MODEL]):
+            gemini_api_key = self.llm_config.get("gemini_api_key", GEMINI_API_KEY)
+            gemini_model = self.llm_config.get("model", self.llm_config.get("gemini_model", GEMINI_MODEL))
+            if not all([gemini_api_key, gemini_model]):
                 raise ValueError("Gemini provider requires GEMINI_API_KEY and GEMINI_MODEL to be set in .env")
 
-            genai.configure(api_key=GEMINI_API_KEY)
-            self.client = genai.GenerativeModel(GEMINI_MODEL)
-            self.model_name = GEMINI_MODEL
-            logger.info("ModelClient initialized with Gemini provider - Model: %s", GEMINI_MODEL)
+            genai.configure(api_key=gemini_api_key)
+            self.client = genai.GenerativeModel(gemini_model)
+            self.model_name = gemini_model
+            logger.info("ModelClient initialized with Gemini provider - Model: %s", gemini_model)
             
         else:
             raise ValueError(f"Unsupported provider: {provider}. Supported providers: 'azure', 'lmstudio', 'gemini'")
@@ -217,6 +230,7 @@ class AIHandler:
         self.max_tokens = PROMPT_REPLY_TOKEN_BUDGET
         self.temperature = TEMPERATURE
         self.prompt_assembler = prompt_assembler
+        self.llm_config: Dict = {}
         
         # Retry configuration
         self.max_retries = DEFAULT_MAX_RETRIES
@@ -227,7 +241,7 @@ class AIHandler:
         # Initialize ModelClient
         try:
             from config import PROVIDER
-            self.model_client = ModelClient(provider=PROVIDER)
+            self.model_client = ModelClient(provider=PROVIDER, llm_config=self.llm_config)
             logger.info("AIHandler initialized with %s provider via ModelClient", PROVIDER)
         except Exception as e:
             logger.error("Failed to initialize ModelClient: %s", e)
@@ -454,11 +468,34 @@ class AIHandler:
     def update_provider(self, new_provider: str) -> bool:
         """Update the LLM provider"""
         try:
-            self.model_client = ModelClient(provider=new_provider)
+            self.model_client = ModelClient(provider=new_provider, llm_config=self.llm_config)
             logger.info("Provider updated to: %s", new_provider)
             return True
         except Exception as e:
             logger.error("Failed to update provider to %s: %s", new_provider, e)
+            return False
+
+    def apply_llm_config(self, llm_config: Dict[str, Any]) -> bool:
+        """Apply per-bot LLM configuration overrides."""
+        self.llm_config = dict(llm_config or {})
+
+        if "temperature" in self.llm_config:
+            self.temperature = self.llm_config["temperature"]
+        if "max_tokens" in self.llm_config:
+            self.max_tokens = self.llm_config["max_tokens"]
+        if "request_timeout" in self.llm_config:
+            self.request_timeout = self.llm_config["request_timeout"]
+
+        provider = self.llm_config.get("provider")
+        if provider:
+            return self.update_provider(provider)
+
+        try:
+            from config import PROVIDER
+            self.model_client = ModelClient(provider=PROVIDER, llm_config=self.llm_config)
+            return True
+        except Exception as e:
+            logger.error("Failed to apply llm_config: %s", e)
             return False
     
     def get_retry_config(self) -> Dict:

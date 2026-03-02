@@ -27,6 +27,7 @@ from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
 from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response, MessageQueueManager, MessageDispatcher
 from buffer_manager import BufferManager
+from features import BotFeature, has_feature
 
 # Set up logging
 logging.basicConfig(
@@ -91,6 +92,8 @@ class AIGirlfriendBot:
         self._storage_initialized = False
         self.bot_id = None  # Will be set by multibot_adapter in multi-bot mode
         self.bot_config = None # Will be set by multibot_adapter in multi-bot mode
+        self.bot_name = BOT_NAME
+        self.bot_token = TELEGRAM_TOKEN
         
         # Initialize memory and prompt components
         self.memory_manager = None
@@ -136,6 +139,76 @@ class AIGirlfriendBot:
         
         # Store chat context for buffered messages
         self.user_chat_context = {}  # Maps user_id to (chat_id, bot)
+
+    def _get_bot_name(self) -> str:
+        """Return the runtime bot name for this instance."""
+        return self.bot_name
+
+    def _feature_enabled(self, feature: BotFeature) -> bool:
+        """Check whether a feature is enabled for this bot instance."""
+        if self.bot_config:
+            return has_feature(self.bot_config.feature_flags, feature)
+        return True
+
+    async def _generate_and_send_response(self, user_id: int, chat_id: int, bot, user_message: str) -> None:
+        """Generate a response for a user message and deliver it."""
+        await self.conversation_manager.add_message_async(user_id, "user", user_message, bot_id=self.bot_id)
+        conversation_history = await self.conversation_manager.get_formatted_conversation_async(user_id, bot_id=self.bot_id)
+        conversation = await self.conversation_manager._ensure_user_and_conversation(user_id, bot_id=self.bot_id)
+        conversation_id = str(conversation.id) if conversation else None
+
+        if self.proactive_messaging_service and self._feature_enabled(BotFeature.PROACTIVE_MESSAGING):
+            try:
+                self.proactive_messaging_service.handle_user_message(user_id, bot_id=self.bot_id)
+                logger.info("Proactive messaging service notified of user message from %s.", user_id)
+            except Exception as e:
+                logger.error("Failed to notify proactive messaging service for user %s: %s", user_id, e)
+
+        try:
+            ai_response = await generate_ai_response(
+                self.ai_handler, self.typing_manager, bot, chat_id, user_message, conversation_history, conversation_id, "user", True
+            )
+
+            if not ai_response:
+                logger.error("Error getting AI response for user %s: No response returned", user_id)
+                return
+
+            try:
+                cleaned_ai_response = clean_ai_response(ai_response)
+                await self.conversation_manager.add_message_async(user_id, "assistant", cleaned_ai_response, bot_id=self.bot_id)
+            except Exception as e:
+                logger.error("Failed to add response to history for user %s: %s", user_id, e)
+                cleaned_ai_response = clean_ai_response(ai_response)
+
+            if self.memory_manager and conversation_id and self._feature_enabled(BotFeature.MEMORY):
+                try:
+                    await self._maybe_trigger_memory_extraction(user_id, conversation_id, conversation)
+                except Exception as e:
+                    logger.error("Failed to check memory extraction for user %s: %s", user_id, e)
+        except Exception as e:
+            logger.error("Error getting AI response for user %s: %s", user_id, e)
+            return
+        finally:
+            await self.typing_manager.stop_typing(chat_id)
+
+        try:
+            if self.message_queue_manager and self._feature_enabled(BotFeature.MESSAGE_QUEUE):
+                await self.message_queue_manager.enqueue_message(
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    text=cleaned_ai_response,
+                    message_type="regular",
+                    bot=bot,
+                    typing_manager=self.typing_manager,
+                    bot_token=self.bot_token,
+                    bot_id=str(self.bot_id) if self.bot_id else None
+                )
+                logger.info("Response enqueued for user %s", user_id)
+            else:
+                await send_ai_response(chat_id=chat_id, text=cleaned_ai_response, bot=bot, typing_manager=self.typing_manager, is_first_message=True)
+                logger.info("Response sent directly to user %s", user_id)
+        except Exception as e:
+            logger.error("Failed to enqueue/send response to user %s: %s", user_id, e)
     
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -163,7 +236,7 @@ class AIGirlfriendBot:
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        welcome_text = f"""🌸 Welcome to {BOT_NAME}! 🌸
+        welcome_text = f"""🌸 Welcome to {self._get_bot_name()}! 🌸
 
 {greeting}
 
@@ -177,7 +250,7 @@ What would you like to do?"""
         """Handle /help command"""
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
-        help_text = f"""💖 {BOT_NAME} Help 💖
+        help_text = f"""💖 {self._get_bot_name()} Help 💖
 
 Here are the commands you can use:
 
@@ -240,7 +313,10 @@ You can also just send me messages and I'll respond naturally!
                 logger.info("Clearing conversation for user %s (%d messages)", user_id, len(existing_conversation))
                 await self.conversation_manager.clear_conversation_async(user_id, bot_id=self.bot_id)
                 if self.memory_manager:
-                    await self.memory_manager.clear_memories(str(user_id))
+                    await self.memory_manager.clear_memories(
+                        str(user_id),
+                        bot_id=str(self.bot_id) if self.bot_id else None
+                    )
                 await update.message.reply_text("✨ Our conversation history has been permanently deleted. 💕")
             else:
                 await update.message.reply_text("💭 There's no conversation history to clear. We're already starting fresh! 💕")
@@ -295,14 +371,14 @@ My responses: {stats['bot_messages']}
         
         for i, msg in enumerate(debug_state['last_messages'], 1):
             role_emoji = "👤" if msg["role"] == "user" else "🤖"
-            role_name = "You" if msg["role"] == "user" else BOT_NAME
+            role_name = "You" if msg["role"] == "user" else self._get_bot_name()
             debug_text += f"\n{i}. {role_emoji} **{role_name}**: {msg['content']}"
         
         debug_text += f"\n\n🤖 **Last 5 Formatted Messages (sent to AI):**"
         
         for i, msg in enumerate(debug_state['formatted_messages'], 1):
             role_emoji = "👤" if msg["role"] == "user" else "🤖"
-            role_name = "You" if msg["role"] == "user" else BOT_NAME
+            role_name = "You" if msg["role"] == "user" else self._get_bot_name()
             debug_text += f"\n{i}. {role_emoji} **{role_name}**: {msg['content']}"
         
         await update.message.reply_text(debug_text, parse_mode='Markdown')
@@ -321,19 +397,23 @@ My responses: {stats['bot_messages']}
         memory_status = "❌ Not Available"
         prompt_status = "❌ Not Available"
         
-        if MEMORY_ENABLED and self.memory_manager:
-            memory_status = "✅ Enabled & Working"
-        elif MEMORY_ENABLED and not self.memory_manager:
-            memory_status = "⚠️ Enabled but Failed to Initialize"
-        
-        if self.prompt_assembler:
-            prompt_status = "✅ Enabled & Working"
-        elif not self.prompt_assembler:
-            prompt_status = "⚠️ Enabled but Failed to Initialize"
+        if not self._feature_enabled(BotFeature.MEMORY):
+            memory_status = "⏸️ Disabled for this bot"
+            prompt_status = "⏸️ Disabled for this bot"
+        else:
+            if MEMORY_ENABLED and self.memory_manager:
+                memory_status = "✅ Enabled & Working"
+            elif MEMORY_ENABLED and not self.memory_manager:
+                memory_status = "⚠️ Enabled but Failed to Initialize"
+
+            if self.prompt_assembler:
+                prompt_status = "✅ Enabled & Working"
+            elif not self.prompt_assembler:
+                prompt_status = "⚠️ Enabled but Failed to Initialize"
         
         storage_status = "✅ PostgreSQL Connected" if self._storage_initialized else "❌ PostgreSQL Not Connected"
         
-        status_text = f"""📊 **{BOT_NAME} Status Report** 📊
+        status_text = f"""📊 **{self._get_bot_name()} Status Report** 📊
 
 🔧 **Bot Status:** ✅ Running normally
 📡 **Telegram Connection:** ✅ Connected
@@ -355,6 +435,10 @@ Use /help to see all available commands!"""
     async def personality_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /personality command"""
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        if not self._feature_enabled(BotFeature.PERSONALITY_SWITCH):
+            await update.message.reply_text("❌ Personality switching is disabled for this bot.")
+            return
         
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name or update.effective_user.username or "there"
@@ -399,7 +483,10 @@ Use /help to see all available commands!"""
         if existing_conversation:
             await self.conversation_manager.clear_conversation_async(user_id, bot_id=self.bot_id)
             if self.memory_manager:
-                await self.memory_manager.clear_memories(str(user_id))
+                await self.memory_manager.clear_memories(
+                    str(user_id),
+                    bot_id=str(self.bot_id) if self.bot_id else None
+                )
             logger.info("Cleared conversation for user %s", user_id)
             conversation_cleared = "✅ Conversation history cleared!\n"
         
@@ -436,12 +523,15 @@ Use /start to begin a new conversation!"""
         
         logger.info("Dependencies command from user %s", user_id)
         
-        azure_status = "✅ Available" if hasattr(self.ai_handler, 'AZURE_AVAILABLE') and self.ai_handler.AZURE_AVAILABLE else "❌ Not Available"
+        provider_info = self.ai_handler.get_provider_info() if self.ai_handler else {}
+        provider_name = provider_info.get("provider", "unknown")
+        sdk_status = "✅ Available" if getattr(self.ai_handler, "model_client", None) else "❌ Not Available"
         
         deps_text = f"""📦 **Dependencies Status** 📦
 
-🤖 **OpenAI SDK:** {azure_status}
-{f"⚠️ **Issue Detected:** OpenAI SDK is not available. Install with: `pip install openai`" if azure_status == "❌ Not Available" else "✨ **All dependencies are available!**"}
+🤖 **Active Provider:** `{provider_name}`
+📚 **Provider SDK:** {sdk_status}
+{f"⚠️ **Issue Detected:** The configured provider client could not be initialized. Check the provider settings and install the required SDKs from `requirements.txt`." if sdk_status == "❌ Not Available" else "✨ **All dependencies are available!**"}
 
 💡 **To fix dependency issues:**
 1. Run: `pip install -r requirements.txt`
@@ -461,7 +551,7 @@ Use /start to begin a new conversation!"""
             await query.edit_message_text("💕 Great! Just send me a message and I'll respond! I'm excited to chat with you! ✨")
         
         elif query.data == "about":
-            about_text = f"""🌸 About {BOT_NAME} 🌸
+            about_text = f"""🌸 About {self._get_bot_name()} 🌸
 
 I'm an AI companion created to be your friend, confidant, and support system. I'm here to:
 
@@ -489,17 +579,21 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             await query.edit_message_text(settings_text)
         
         elif query.data.startswith("personality_"):
+            if not self._feature_enabled(BotFeature.PERSONALITY_SWITCH):
+                await query.edit_message_text("❌ Personality switching is disabled for this bot.")
+                return
+
             personality_type = query.data.split("_")[1]
             user_id = query.from_user.id
             
             logger.info("User %s changing personality to: %s", user_id, personality_type)
             
             personalities = {
-                "sweet": f"You are {BOT_NAME}, a sweet and caring AI girlfriend. You are gentle, nurturing, and always put others first. You love to give hugs, share kind words, and make people feel special and loved.",
-                "cheerful": f"You are {BOT_NAME}, a cheerful and energetic AI girlfriend. You are always happy, optimistic, and full of life. You love to laugh, dance, and bring joy to everyone around you. You're like a ray of sunshine!",
-                "supportive": f"You are {BOT_NAME}, a supportive and understanding AI girlfriend. You are wise, empathetic, and great at listening. You give thoughtful advice, emotional support, and help people through difficult times.",
-                "mysterious": f"You are {BOT_NAME}, a mysterious and alluring AI girlfriend. You are intriguing, slightly enigmatic, and have a captivating presence. You're sweet but with a hint of mystery that draws people in.",
-                "default": f"You are {BOT_NAME}, a caring and affectionate AI girlfriend. You are sweet, supportive, and always there to listen. You love to chat about daily life, give emotional support, and share positive energy. You are romantic but not overly sexual. You respond with warmth and empathy."
+                "sweet": f"You are {self._get_bot_name()}, a sweet and caring AI girlfriend. You are gentle, nurturing, and always put others first. You love to give hugs, share kind words, and make people feel special and loved.",
+                "cheerful": f"You are {self._get_bot_name()}, a cheerful and energetic AI girlfriend. You are always happy, optimistic, and full of life. You love to laugh, dance, and bring joy to everyone around you. You're like a ray of sunshine!",
+                "supportive": f"You are {self._get_bot_name()}, a supportive and understanding AI girlfriend. You are wise, empathetic, and great at listening. You give thoughtful advice, emotional support, and help people through difficult times.",
+                "mysterious": f"You are {self._get_bot_name()}, a mysterious and alluring AI girlfriend. You are intriguing, slightly enigmatic, and have a captivating presence. You're sweet but with a hint of mystery that draws people in.",
+                "default": f"You are {self._get_bot_name()}, a caring and affectionate AI girlfriend. You are sweet, supportive, and always there to listen. You love to chat about daily life, give emotional support, and share positive energy. You are romantic but not overly sexual. You respond with warmth and empathy."
             }
             
             if personality_type in personalities:
@@ -545,13 +639,17 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         
         # Store chat context for buffered dispatch
         self.user_chat_context[user_id] = (chat_id, context.bot)
-        
+
+        if not self._feature_enabled(BotFeature.BUFFER_MANAGER):
+            await self._generate_and_send_response(user_id, chat_id, context.bot, user_message)
+            return
+
         # Set user context in buffer manager for typing indicators
         self.buffer_manager.set_user_context(user_id, context.bot, chat_id)
-        
+
         # Add message to buffer instead of processing directly
         await self.buffer_manager.add_message(user_id, user_message)
-        
+
         # Schedule dispatch based on adaptive timeout
         await self.buffer_manager.schedule_dispatch(user_id, self._dispatch_buffered_message)
         
@@ -638,84 +736,14 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         if not user_message:
             logger.debug("No buffered messages to dispatch for user %s", user_id)
             return
-        
-        # Add user message to conversation history and then get the updated history
-        await self.conversation_manager.add_message_async(user_id, "user", user_message, bot_id=self.bot_id)
-        conversation_history = await self.conversation_manager.get_formatted_conversation_async(user_id, bot_id=self.bot_id)
-        
-        # Get conversation ID for PromptAssembler
-        conversation = await self.conversation_manager._ensure_user_and_conversation(user_id, bot_id=self.bot_id)
-        conversation_id = str(conversation.id) if conversation else None
-        
-        # Notify proactive messaging service that the user has sent a message.
-        # This will reset the user's proactive messaging cadence state.
-        if self.proactive_messaging_service:
-            try:
-                self.proactive_messaging_service.handle_user_message(user_id, bot_id=self.bot_id)
-                logger.info("Proactive messaging service notified of user message from %s.", user_id)
-            except Exception as e:
-                logger.error("Failed to notify proactive messaging service for user %s: %s", user_id, e)
-        
-        # Start typing indicator and get AI response
-        try:
-            ai_response = await generate_ai_response(
-                self.ai_handler, self.typing_manager, bot, chat_id, user_message, conversation_history, conversation_id, "user", True
-            )
-            
-            if not ai_response:
-                logger.error("Error getting AI response for user %s: No response returned", user_id)
-                return
-            else:
-                # Store AI response in conversation history
-                try:
-                    cleaned_ai_response = clean_ai_response(ai_response)
-                    await self.conversation_manager.add_message_async(user_id, "assistant", cleaned_ai_response, bot_id=self.bot_id)
-                except Exception as e:
-                    logger.error("Failed to add response to history for user %s: %s", user_id, e)
-                    # If we can't store the response, we still want to send it to the user
-                    cleaned_ai_response = clean_ai_response(ai_response) if 'cleaned_ai_response' not in locals() else cleaned_ai_response
-                
-                # Check if we should trigger memory extraction
-                if self.memory_manager and conversation_id:
-                    try:
-                        await self._maybe_trigger_memory_extraction(user_id, conversation_id, conversation)
-                    except Exception as e:
-                        logger.error("Failed to check memory extraction for user %s: %s", user_id, e)
-        except Exception as e:
-            logger.error("Error getting AI response for user %s: %s", user_id, e)
-            return  # Exit early if we couldn't get an AI response
-        finally:
-            # Ensure typing is stopped even on errors
-            await self.typing_manager.stop_typing(chat_id)
-        
-        # Send final response to user
-        try:
-            # Make sure cleaned_ai_response is defined
-            if 'cleaned_ai_response' in locals():
-                # Enqueue message instead of sending directly
-                if self.message_queue_manager:
-                    bot_token = self.bot_config.token if hasattr(self, 'bot_config') and self.bot_config else TELEGRAM_TOKEN
-                    await self.message_queue_manager.enqueue_message(
-                        user_id=user_id,
-                        chat_id=chat_id,
-                        text=cleaned_ai_response,
-                        message_type="regular",
-                        bot=bot,  # For backward compatibility
-                        typing_manager=self.typing_manager,  # For backward compatibility
-                        bot_token=bot_token
-                    )
-                    logger.info("Response enqueued for user %s", user_id)
-                else:
-                    # Fallback to direct sending if queue manager is not available
-                    await send_ai_response(chat_id=chat_id, text=cleaned_ai_response, bot=bot, typing_manager=self.typing_manager, is_first_message=True)
-                    logger.info("Response sent directly to user %s (queue manager not available)", user_id)
-            else:
-                logger.error("No response to send to user %s", user_id)
-        except Exception as e:
-            logger.error("Failed to enqueue/send response to user %s: %s", user_id, e)
+
+        await self._generate_and_send_response(user_id, chat_id, bot, user_message)
     
     async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle photo messages"""
+        if not self._feature_enabled(BotFeature.PHOTO_REACTIONS):
+            return
+
         user_name = update.effective_user.first_name or update.effective_user.username or "there"
         
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
@@ -732,6 +760,9 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
     
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle voice messages"""
+        if not self._feature_enabled(BotFeature.VOICE_MESSAGES):
+            return
+
         user_name = update.effective_user.first_name or update.effective_user.username or "there"
         
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="record_voice")
@@ -926,9 +957,9 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 
     def run(self):
         """Start the bot"""
-        logger.info("Starting up %s...", BOT_NAME)
+        logger.info("Starting up %s...", self._get_bot_name())
         
-        self.application = Application.builder().token(TELEGRAM_TOKEN).concurrent_updates(True).build()
+        self.application = Application.builder().token(self.bot_token).concurrent_updates(True).build()
         logger.info("Application created successfully")
         
         # Initialize storage and LM Studio model in the event loop
@@ -997,7 +1028,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         logger.info("All handlers registered successfully")
         
         logger.info("Starting polling...")
-        print(f"🤖 {BOT_NAME} is starting up...")
+        print(f"🤖 {self._get_bot_name()} is starting up...")
         print("💕 Bot is now running! Press Ctrl+C to stop.")
         
         self.application.run_polling(allowed_updates=Update.ALL_TYPES, poll_interval=POLLING_INTERVAL)
@@ -1014,7 +1045,7 @@ if __name__ == "__main__":
         bot.run()
     except KeyboardInterrupt:
         logger.info("Bot shutdown requested by user (Ctrl+C)")
-        print(f"\n💕 {BOT_NAME} is shutting down... Goodbye!")
+        print(f"\n💕 {bot._get_bot_name()} is shutting down... Goodbye!")
         
         # Run cleanup in async context
         import asyncio

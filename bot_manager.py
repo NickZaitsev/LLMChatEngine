@@ -15,6 +15,8 @@ from telegram.ext import Application
 
 from token_encryption import decrypt_token
 from features import BotFeature, has_feature
+from message_manager import MessageDispatcher
+from config import MESSAGE_QUEUE_REDIS_URL, MESSAGE_QUEUE_MAX_RETRIES, MESSAGE_QUEUE_LOCK_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,8 @@ class BotManager:
         self.storage = None
         self._running = False
         self._tasks: Dict[uuid.UUID, asyncio.Task] = {}
+        self.shared_dispatcher: Optional[MessageDispatcher] = None
+        self._shared_dispatcher_task: Optional[asyncio.Task] = None
     
     async def _init_storage(self):
         """Initialize database storage."""
@@ -95,6 +99,33 @@ class BotManager:
                 logger.info(f"Loaded bot config: {bot.name} ({bot.id})")
             except Exception as e:
                 logger.error(f"Failed to load bot {bot.id}: {e}")
+
+    async def _ensure_shared_dispatcher(self) -> None:
+        """Start a single shared dispatcher for all bot instances."""
+        if self._shared_dispatcher_task and not self._shared_dispatcher_task.done():
+            return
+
+        self.shared_dispatcher = MessageDispatcher(
+            MESSAGE_QUEUE_REDIS_URL,
+            MESSAGE_QUEUE_MAX_RETRIES,
+            MESSAGE_QUEUE_LOCK_TIMEOUT
+        )
+        self._shared_dispatcher_task = asyncio.create_task(self.shared_dispatcher.start_dispatching())
+        logger.info("Shared message dispatcher started")
+
+    async def _stop_shared_dispatcher(self) -> None:
+        """Stop the shared dispatcher if it is running."""
+        if self.shared_dispatcher:
+            await self.shared_dispatcher.stop_dispatching()
+        if self._shared_dispatcher_task:
+            self._shared_dispatcher_task.cancel()
+            try:
+                await self._shared_dispatcher_task
+            except asyncio.CancelledError:
+                pass
+            self._shared_dispatcher_task = None
+        self.shared_dispatcher = None
+        logger.info("Shared message dispatcher stopped")
     
     async def start_bot(self, bot_id: uuid.UUID) -> None:
         """
@@ -131,6 +162,8 @@ class BotManager:
         # Start bot in background
         async def run_bot():
             try:
+                await self._ensure_shared_dispatcher()
+
                 # Initialize bot storage and components
                 if hasattr(bot_instance, '_initialize_storage'):
                     await bot_instance._initialize_storage()
@@ -141,12 +174,6 @@ class BotManager:
                 if hasattr(bot_instance, '_initialize_lmstudio_model'):
                     await bot_instance._initialize_lmstudio_model()
                 
-                # Start the message dispatcher for consuming messages from Redis
-                dispatcher_task = None
-                if hasattr(bot_instance, 'message_dispatcher') and bot_instance.message_dispatcher:
-                    dispatcher_task = asyncio.create_task(bot_instance.message_dispatcher.start_dispatching())
-                    logger.info(f"Message dispatcher started for bot {config.name}")
-
                 await app.initialize()
                 await app.start()
                 await app.updater.start_polling()
@@ -158,17 +185,6 @@ class BotManager:
             except Exception as e:
                 logger.error(f"Bot {bot_id} crashed: {e}")
             finally:
-                # Stop message dispatcher if running
-                if dispatcher_task and not dispatcher_task.done():
-                    if hasattr(bot_instance, 'message_dispatcher') and bot_instance.message_dispatcher:
-                        await bot_instance.message_dispatcher.stop_dispatching()
-                    dispatcher_task.cancel()
-                    try:
-                        await dispatcher_task
-                    except asyncio.CancelledError:
-                        pass
-                    logger.info(f"Message dispatcher stopped for bot {config.name}")
-                
                 if bot_id in self.applications:
                     try:
                         await app.updater.stop()
@@ -208,6 +224,9 @@ class BotManager:
         # Remove application
         if bot_id in self.applications:
             del self.applications[bot_id]
+
+        if not self.bots and self._shared_dispatcher_task:
+            await self._stop_shared_dispatcher()
         
         logger.info(f"Stopped bot: {bot_name}")
     
@@ -218,6 +237,8 @@ class BotManager:
         Args:
             bot_id: UUID of the bot to reload
         """
+        old_config = self.bot_configs.get(bot_id)
+
         # Reload config from database
         await self._load_single_bot_config(bot_id)
         config = self.bot_configs.get(bot_id)
@@ -228,14 +249,31 @@ class BotManager:
         # If bot is running, update its config
         if bot_id in self.bots:
             bot_instance = self.bots[bot_id]
-            
-            # Update personality in AI handler
+
+            if not config.is_active:
+                await self.stop_bot(bot_id)
+                logger.info(f"Stopped inactive bot after reload: {config.name}")
+                return
+
+            requires_restart = (
+                old_config is not None and old_config.token != config.token
+            )
+
+            bot_instance.bot_config = config
+            bot_instance.bot_name = config.name
+            bot_instance.bot_token = config.token
+            bot_instance.feature_flags = config.feature_flags
+
             if hasattr(bot_instance, 'ai_handler') and bot_instance.ai_handler:
                 bot_instance.ai_handler.update_personality(config.personality)
-            
-            # Update bot config reference
-            bot_instance.bot_config = config
-            
+                bot_instance.ai_handler.apply_llm_config(config.llm_config)
+
+            if requires_restart:
+                logger.info(f"Bot token changed for {config.name}; restarting bot")
+                await self.stop_bot(bot_id)
+                await self.start_bot(bot_id)
+                return
+
             logger.info(f"Hot-reloaded config for bot: {config.name}")
         else:
             # Bot not running, check if it should be started
@@ -300,5 +338,8 @@ class BotManager:
         bot_ids = list(self.bots.keys())
         for bot_id in bot_ids:
             await self.stop_bot(bot_id)
+
+        if self._shared_dispatcher_task:
+            await self._stop_shared_dispatcher()
         
         logger.info("All bots stopped")
