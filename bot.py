@@ -171,7 +171,16 @@ class AIGirlfriendBot:
 
         try:
             ai_response = await generate_ai_response(
-                self.ai_handler, self.typing_manager, bot, chat_id, user_message, conversation_history, conversation_id, "user", True
+                self.ai_handler,
+                self.typing_manager,
+                bot,
+                chat_id,
+                user_message,
+                conversation_history,
+                conversation_id,
+                "user",
+                True,
+                route_key=self._buffer_route_key(user_id),
             )
 
             if not ai_response:
@@ -194,7 +203,7 @@ class AIGirlfriendBot:
             logger.error("Error getting AI response for user %s: %s", user_id, e)
             return
         finally:
-            await self.typing_manager.stop_typing(chat_id)
+            await self.typing_manager.stop_typing(chat_id, route_key=self._buffer_route_key(user_id))
 
         try:
             if self.message_queue_manager and self._feature_enabled(BotFeature.MESSAGE_QUEUE):
@@ -210,7 +219,14 @@ class AIGirlfriendBot:
                 )
                 logger.info("Response enqueued for user %s", user_id)
             else:
-                await send_ai_response(chat_id=chat_id, text=cleaned_ai_response, bot=bot, typing_manager=self.typing_manager, is_first_message=True)
+                await send_ai_response(
+                    chat_id=chat_id,
+                    text=cleaned_ai_response,
+                    bot=bot,
+                    typing_manager=self.typing_manager,
+                    is_first_message=True,
+                    route_key=self._buffer_route_key(user_id)
+                )
                 logger.info("Response sent directly to user %s", user_id)
         except Exception as e:
             logger.error("Failed to enqueue/send response to user %s: %s", user_id, e)
@@ -798,7 +814,8 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         if update and hasattr(update, 'effective_chat') and update.effective_chat:
             try:
                 chat_id = update.effective_chat.id
-                await self.typing_manager.stop_typing(chat_id)
+                route_key = self._buffer_route_key(update.effective_user.id) if update.effective_user else None
+                await self.typing_manager.stop_typing(chat_id, route_key=route_key)
                 logger.debug("Stopped typing indicator due to error in chat %s", chat_id)
             except Exception as typing_error:
                 logger.error("Failed to stop typing indicator on error: %s", typing_error)

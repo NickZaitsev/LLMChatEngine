@@ -145,7 +145,7 @@ class BufferManager:
             # Create and start typing indicator task
             async def _typing_task():
                 try:
-                    await self.typing_manager.start_typing(bot, chat_id)
+                    await self.typing_manager.start_typing(bot, chat_id, route_key=route_key)
                     logger.debug(f"Started typing indicator for buffered messages from user {route_key}")
                 except Exception as e:
                     logger.error(f"Failed to start typing indicator for user {route_key}: {e}")
@@ -172,7 +172,7 @@ class BufferManager:
             # Create task to stop typing indicator
             async def _stop_typing_task():
                 try:
-                    await self.typing_manager.stop_typing(chat_id)
+                    await self.typing_manager.stop_typing(chat_id, route_key=route_key)
                     logger.debug(f"Stopped typing indicator for user {route_key}")
                 except Exception as e:
                     logger.error(f"Failed to stop typing indicator for user {route_key}: {e}")

@@ -557,7 +557,8 @@ async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str]
             conversation_history=conversation_history,
             conversation_id=conversation_id,
             role="user",
-            show_typing=True
+            show_typing=True,
+            route_key=f"{user_id}:{resolved_bot_id or normalized_bot_id or 'default'}"
         )
 
         if ai_response:

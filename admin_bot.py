@@ -635,14 +635,14 @@ Use these commands to manage your bot fleet."""
                 
                 await update.message.reply_text(
                     f"✅ Bot **`{bot.name}`** has been deactivated.\n\n"
-                    "The bot will stop on next restart, or use /reloadbot to stop it now.",
+                    "The running instance will be stopped now if the bot manager is connected.",
                     parse_mode='Markdown'
                 )
                 
-                # Try to stop if manager available
-                if self.bot_manager and bot.id in self.bot_manager.bots:
-                    await self.bot_manager.stop_bot(bot.id)
-                    await update.message.reply_text("Bot stopped successfully.")
+                # Reload config so BotManager sees the inactive state and stops the runtime cleanly.
+                if self.bot_manager:
+                    await self.bot_manager.reload_bot_config(bot.id)
+                    await update.message.reply_text("Bot deactivated in runtime successfully.")
                     
         except Exception as e:
             logger.error(f"Failed to remove bot: {e}")

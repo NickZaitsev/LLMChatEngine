@@ -101,12 +101,24 @@ async def main():
             await admin_bot.run()
         except asyncio.CancelledError:
             await admin_bot.stop()
+            raise
+        finally:
+            try:
+                await admin_bot.stop()
+            except Exception as e:
+                logger.error("Failed to stop admin bot cleanly: %s", e)
     
     async def run_bots():
         try:
             await bot_manager.run_all()
         except asyncio.CancelledError:
             await bot_manager.stop_all()
+            raise
+        finally:
+            try:
+                await bot_manager.stop_all()
+            except Exception as e:
+                logger.error("Failed to stop bot manager cleanly: %s", e)
     
     admin_task = asyncio.create_task(run_admin(), name="admin_bot")
     bots_task = asyncio.create_task(run_bots(), name="bot_manager")

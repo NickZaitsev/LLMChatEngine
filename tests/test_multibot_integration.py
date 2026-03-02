@@ -356,3 +356,35 @@ async def test_bot_manager_removes_crashed_bot_from_running_state(mock_bot_confi
 
     assert mock_bot_config.id not in manager.bots
     assert mock_bot_config.id not in manager.applications
+
+
+@pytest.mark.asyncio
+async def test_admin_removebot_reloads_manager_config():
+    admin = AdminBot("token", [1], "postgresql://u:p@h:5432/db")
+    admin.storage = MagicMock()
+    admin.bot_manager = MagicMock()
+    admin.bot_manager.reload_bot_config = AsyncMock()
+
+    bot_id = uuid.uuid4()
+    bot_record = SimpleNamespace(
+        id=bot_id,
+        name="RetireMe",
+        is_active=True,
+    )
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: bot_record))
+    session.commit = AsyncMock()
+    admin.storage.session_maker.return_value.__aenter__ = AsyncMock(return_value=session)
+    admin.storage.session_maker.return_value.__aexit__ = AsyncMock(return_value=None)
+
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.message.reply_text = AsyncMock()
+
+    context = MagicMock()
+    context.args = [str(bot_id)]
+
+    await admin.removebot_command(update, context)
+
+    assert bot_record.is_active is False
+    admin.bot_manager.reload_bot_config.assert_awaited_once_with(bot_id)

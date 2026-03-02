@@ -10,7 +10,7 @@ from datetime import datetime
 from config import MIN_TYPING_SPEED, MAX_TYPING_SPEED, MAX_DELAY, RANDOM_OFFSET_MIN, RANDOM_OFFSET_MAX, MESSAGE_QUEUE_MAX_RETRIES, MESSAGE_QUEUE_LOCK_TIMEOUT, MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL, MESSAGE_QUEUE_DISPATCHER_INTERVAL
 import textwrap
 import re
-from typing import Dict, Set, Optional, Any
+from typing import Dict, Set, Optional, Any, Hashable
 from telegram import Bot
 from telegram.error import Forbidden, BadRequest
 from config import TELEGRAM_TOKEN
@@ -44,37 +44,46 @@ class TypingIndicatorManager:
     """Manages typing indicators for concurrent conversations"""
     
     def __init__(self):
-        self._active_typing_tasks: Dict[int, asyncio.Task] = {}
-        self._typing_locks: Dict[int, asyncio.Lock] = {}
+        self._active_typing_tasks: Dict[Hashable, asyncio.Task] = {}
+        self._typing_locks: Dict[Hashable, asyncio.Lock] = {}
+        self._typing_chat_ids: Dict[Hashable, int] = {}
         self.typing_interval = 3.0  # Send typing action every 3 seconds
+
+    @staticmethod
+    def _typing_key(chat_id: int, route_key: Optional[Hashable] = None) -> Hashable:
+        """Build a typing key that can isolate concurrent bot routes in one chat."""
+        return route_key if route_key is not None else chat_id
     
-    async def start_typing(self, bot: Bot, chat_id: int) -> None:
+    async def start_typing(self, bot: Bot, chat_id: int, route_key: Optional[Hashable] = None) -> None:
         """Start typing indicator for a specific chat"""
         try:
+            typing_key = self._typing_key(chat_id, route_key)
             # Cancel any existing typing task for this chat
-            await self.stop_typing(chat_id)
+            await self.stop_typing(chat_id, route_key=route_key)
             
             # Create lock for this chat if it doesn't exist
-            if chat_id not in self._typing_locks:
-                self._typing_locks[chat_id] = asyncio.Lock()
+            if typing_key not in self._typing_locks:
+                self._typing_locks[typing_key] = asyncio.Lock()
             
-            async with self._typing_locks[chat_id]:
+            async with self._typing_locks[typing_key]:
                 # Create and start new typing task
                 task = asyncio.create_task(
-                    self._typing_loop(bot, chat_id),
-                    name=f"typing_indicator_{chat_id}"
+                    self._typing_loop(bot, chat_id, typing_key),
+                    name=f"typing_indicator_{typing_key}"
                 )
-                self._active_typing_tasks[chat_id] = task
-                logger.debug("Started typing indicator for chat %s", chat_id)
+                self._active_typing_tasks[typing_key] = task
+                self._typing_chat_ids[typing_key] = chat_id
+                logger.debug("Started typing indicator for chat %s route %s", chat_id, typing_key)
                 
         except Exception as e:
-            logger.error("Failed to start typing indicator for chat %s: %s", chat_id, e)
+            logger.error("Failed to start typing indicator for chat %s route %s: %s", chat_id, route_key, e)
     
-    async def stop_typing(self, chat_id: int) -> None:
+    async def stop_typing(self, chat_id: int, route_key: Optional[Hashable] = None) -> None:
         """Stop typing indicator for a specific chat"""
         try:
-            if chat_id in self._active_typing_tasks:
-                task = self._active_typing_tasks[chat_id]
+            typing_key = self._typing_key(chat_id, route_key)
+            if typing_key in self._active_typing_tasks:
+                task = self._active_typing_tasks[typing_key]
                 if not task.done():
                     task.cancel()
                     try:
@@ -82,42 +91,52 @@ class TypingIndicatorManager:
                     except asyncio.CancelledError:
                         pass
                 
-                del self._active_typing_tasks[chat_id]
-                logger.debug("Stopped typing indicator for chat %s", chat_id)
+                del self._active_typing_tasks[typing_key]
+                self._typing_chat_ids.pop(typing_key, None)
+                logger.debug("Stopped typing indicator for chat %s route %s", chat_id, typing_key)
                 
         except Exception as e:
-            logger.error("Failed to stop typing indicator for chat %s: %s", chat_id, e)
+            logger.error("Failed to stop typing indicator for chat %s route %s: %s", chat_id, route_key, e)
     
     async def stop_all_typing(self) -> None:
         """Stop all active typing indicators"""
-        chat_ids = list(self._active_typing_tasks.keys())
-        for chat_id in chat_ids:
-            await self.stop_typing(chat_id)
+        typing_keys = list(self._active_typing_tasks.keys())
+        for typing_key in typing_keys:
+            await self.stop_typing(typing_key, route_key=typing_key)
     
-    async def _typing_loop(self, bot: Bot, chat_id: int) -> None:
+    async def _typing_loop(self, bot: Bot, chat_id: int, typing_key: Hashable) -> None:
         """Internal loop that sends typing action every 3 seconds"""
         try:
             while True:
                 try:
                     await bot.send_chat_action(chat_id=chat_id, action="typing")
-                    logger.debug("Sent typing action to chat %s", chat_id)
+                    logger.debug("Sent typing action to chat %s route %s", chat_id, typing_key)
                 except Exception as e:
-                    logger.warning("Failed to send typing action to chat %s: %s", chat_id, e)
+                    logger.warning("Failed to send typing action to chat %s route %s: %s", chat_id, typing_key, e)
                     # Continue loop despite individual failures
                 
                 # Wait for next typing interval
                 await asyncio.sleep(self.typing_interval)
                 
         except asyncio.CancelledError:
-            logger.debug("Typing loop cancelled for chat %s", chat_id)
+            logger.debug("Typing loop cancelled for chat %s route %s", chat_id, typing_key)
             raise
         except Exception as e:
-            logger.error("Unexpected error in typing loop for chat %s: %s", chat_id, e)
+            logger.error("Unexpected error in typing loop for chat %s route %s: %s", chat_id, typing_key, e)
     
-    def is_typing_active(self, chat_id: int) -> bool:
+    def is_typing_active(self, chat_id: int, route_key: Optional[Hashable] = None) -> bool:
         """Check if typing is currently active for a chat"""
-        return (chat_id in self._active_typing_tasks and 
-                not self._active_typing_tasks[chat_id].done())
+        if route_key is None:
+            return any(
+                active_chat_id == chat_id and not self._active_typing_tasks[typing_key].done()
+                for typing_key, active_chat_id in self._typing_chat_ids.items()
+            )
+
+        typing_key = self._typing_key(chat_id, route_key)
+        return (
+            typing_key in self._active_typing_tasks and
+            not self._active_typing_tasks[typing_key].done()
+        )
     
     def get_active_typing_chats(self) -> Set[int]:
         """Get set of chat IDs with active typing indicators"""
@@ -128,6 +147,7 @@ class TypingIndicatorManager:
         """Cleanup method to stop all typing indicators"""
         await self.stop_all_typing()
         self._typing_locks.clear()
+        self._typing_chat_ids.clear()
 
 
 class MessageQueueManager:
@@ -807,7 +827,15 @@ class MessageDispatcher:
                     logger.error("No bot instance available to send message for user %s", user_id)
                     return False
                     
-                await send_ai_response(chat_id=chat_id, text=text, bot=bot_to_use, typing_manager=self.typing_manager, is_first_message=is_first_message)
+                await send_ai_response(
+                    chat_id=chat_id,
+                    text=text,
+                    bot=bot_to_use,
+                    typing_manager=self.typing_manager,
+                    is_first_message=is_first_message,
+                    route_key=self._routing_key(user_id, message.get("bot_id"))
+                )
+                
             except (Forbidden, BadRequest) as e:
                 error_msg = str(e).lower()
                 if isinstance(e, Forbidden) or "chat not found" in error_msg or "user is deactivated" in error_msg or "bot was blocked" in error_msg:
@@ -886,7 +914,7 @@ class MessageDispatcher:
             logger.error("Error while trying to disable proactive messaging in Redis for user %s bot %s: %s", user_id, bot_id, e)
 
 
-async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'TypingIndicatorManager' = None, is_first_message: bool = True):
+async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'TypingIndicatorManager' = None, is_first_message: bool = True, route_key: Optional[Hashable] = None):
     """
     Sends a single message part with intelligent delays if it's not the first part in a sequence.
     Note: The message is already pre-split when using the queue system.
@@ -923,13 +951,13 @@ async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'Typing
         # Start typing indicator if manager is provided and wait for the delay concurrently
         if typing_manager and delay > 0.7:
             # Start typing indicator
-            await typing_manager.start_typing(bot, chat_id)
+            await typing_manager.start_typing(bot, chat_id, route_key=route_key)
             
             # Wait for the calculated delay
             await asyncio.sleep(delay)
             
             # Stop typing indicator
-            await typing_manager.stop_typing(chat_id)
+            await typing_manager.stop_typing(chat_id, route_key=route_key)
         else:
             # Wait for the calculated delay without typing indicator
             await asyncio.sleep(delay)
@@ -953,7 +981,8 @@ async def generate_ai_response(
     conversation_history: list,
     conversation_id: str = None,
     role: str = "user",
-    show_typing: bool = True
+    show_typing: bool = True,
+    route_key: Optional[Hashable] = None
 ) -> str:
     """
     Generate AI response with typing indicator management.
@@ -977,7 +1006,7 @@ async def generate_ai_response(
         
         # Start typing indicator BEFORE making LLM request if enabled
         if show_typing:
-            await typing_manager.start_typing(bot, chat_id)
+            await typing_manager.start_typing(bot, chat_id, route_key=route_key)
         
         # Make the actual AI request with timeout from config
         from config import REQUEST_TIMEOUT

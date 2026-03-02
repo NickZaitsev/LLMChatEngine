@@ -96,7 +96,8 @@ class TestMessageDispatcher:
                 text=self.test_message,
                 bot=mock_bot_instance,
                 typing_manager=mock_typing_manager_instance,
-                is_first_message=True
+                is_first_message=True,
+                route_key=f"{self.user_id}:default"
             )
     
     @pytest.mark.asyncio

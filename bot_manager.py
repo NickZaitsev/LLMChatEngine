@@ -105,6 +105,16 @@ class BotManager:
         if self._shared_dispatcher_task and not self._shared_dispatcher_task.done():
             return
 
+        if self._shared_dispatcher_task and self._shared_dispatcher_task.done():
+            try:
+                error = self._shared_dispatcher_task.exception()
+            except asyncio.CancelledError:
+                error = None
+            if error is not None:
+                logger.error("Shared message dispatcher task exited unexpectedly: %s", error)
+            self._shared_dispatcher_task = None
+            self.shared_dispatcher = None
+
         self.shared_dispatcher = MessageDispatcher(
             MESSAGE_QUEUE_REDIS_URL,
             MESSAGE_QUEUE_MAX_RETRIES,
@@ -332,6 +342,11 @@ class BotManager:
         
         # Keep running until stopped
         while self._running:
+            if self.bots and (self._shared_dispatcher_task is None or self._shared_dispatcher_task.done()):
+                try:
+                    await self._ensure_shared_dispatcher()
+                except Exception as e:
+                    logger.error("Failed to ensure shared dispatcher while bots are running: %s", e)
             await asyncio.sleep(1)
     
     async def stop_all(self) -> None:
