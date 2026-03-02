@@ -53,7 +53,7 @@ class LlamaIndexMemoryManager:
         user_id: str,
         chunks: list,
         conversation_id: str,
-        bot_id: str = None,
+        bot_id: Optional[str] = None,
     ) -> int:
         """
         Batch-embed and store conversation chunks.
@@ -113,7 +113,7 @@ class LlamaIndexMemoryManager:
             await self._vector_store.upsert(nodes)
             logger.info(
                 "Stored %d conversation chunk(s) for user %s (conversation %s)",
-                len(nodes), user_id, conversation_id[:8],
+                len(nodes), user_id, str(conversation_id)[:8],
             )
 
         return len(nodes)
@@ -127,7 +127,7 @@ class LlamaIndexMemoryManager:
         user_id: str,
         query: str,
         top_k: int,
-        bot_id: str = None,
+        bot_id: Optional[str] = None,
     ) -> str:
         """
         Get memory context for a query by searching the vector store,
@@ -179,7 +179,7 @@ class LlamaIndexMemoryManager:
             logger.error("Error in get_context: %s", e, exc_info=True)
             return ""
 
-    async def _expand_and_merge(self, nodes: list, user_id: str) -> str:
+    async def _expand_and_merge(self, nodes: List[Any], user_id: str) -> str:
         """
         For each matched node, fetch its neighboring chunks and merge
         everything into a deduplicated, timestamp-ordered result.
@@ -232,7 +232,7 @@ class LlamaIndexMemoryManager:
     # Maintenance
     # ------------------------------------------------------------------
 
-    async def clear_memories(self, user_id: str, bot_id: str = None) -> None:
+    async def clear_memories(self, user_id: str, bot_id: Optional[str] = None) -> None:
         """
         Clear all memories for a user.
 

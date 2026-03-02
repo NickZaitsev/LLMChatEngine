@@ -9,7 +9,7 @@ for upserting, querying, and clearing vector data.
 
 import asyncio
 import logging
-from typing import List, Any
+from typing import List, Any, Optional
 
 from llama_index.vector_stores.postgres import PGVectorStore
 from llama_index.core.vector_stores import (
@@ -62,7 +62,7 @@ class PgVectorStore(VectorStoreAbstraction):
         await asyncio.to_thread(self._store.add, nodes)
 
     async def query(
-        self, query_embedding: List[float], top_k: int, user_id: str, bot_id: str = None
+        self, query_embedding: List[float], top_k: int, user_id: str, bot_id: Optional[str] = None
     ) -> List[Any]:
         """
         Query the vector store for similar nodes.
@@ -99,7 +99,7 @@ class PgVectorStore(VectorStoreAbstraction):
             logger.error(f"Error in vector store query: {e}", exc_info=True)
             raise
 
-    async def clear(self, user_id: str, bot_id: str = None) -> None:
+    async def clear(self, user_id: str, bot_id: Optional[str] = None) -> None:
         """
         Clear all nodes for a specific user (and optionally bot) from the vector store.
 
@@ -144,7 +144,7 @@ class PgVectorStore(VectorStoreAbstraction):
         user_id: str,
         threshold: float = 0.85,
         top_k: int = 3,
-        bot_id: str = None,
+        bot_id: Optional[str] = None,
     ) -> List[dict]:
         """
         Find existing vectors that are similar to the query above a threshold.
@@ -220,7 +220,7 @@ class PgVectorStore(VectorStoreAbstraction):
             def _fetch():
                 with self._store._session() as session:
                     sql = (
-                        f'SELECT text_, metadata_ FROM public."data_{table_name}" '
+                        f'SELECT text, metadata_ FROM public."data_{table_name}" '
                         f"WHERE metadata_->>'conversation_id' = :conv_id "
                         f"AND metadata_->>'user_id' = :uid "
                         f"AND CAST(metadata_->>'chunk_index' AS INTEGER) "
@@ -235,9 +235,10 @@ class PgVectorStore(VectorStoreAbstraction):
                     })
                     rows = []
                     for row in result:
+                        # row might be a Row object or a Mapping
                         meta = row.metadata_ if hasattr(row, 'metadata_') else {}
                         rows.append({
-                            "text": row.text_ if hasattr(row, 'text_') else "",
+                            "text": row.text if hasattr(row, 'text') else "",
                             "first_timestamp": meta.get("first_timestamp", "") if isinstance(meta, dict) else "",
                         })
                     return rows

@@ -53,19 +53,64 @@ class AppContext:
         self.message_queue_manager: Optional[MessageQueueManager] = None
         self.typing_manager: Optional[TypingIndicatorManager] = None
         self.bot: Optional[Bot] = None
+        self._loop = None  # Track which event loop owns the current connections
         
         self._initialized = True
         logger.info("AppContext created but not yet initialized.")
 
+    def _dispose_old_resources(self):
+        """
+        Best-effort cleanup of old database resources.
+        
+        When the event loop changes (e.g. between asyncio.run() calls in
+        Celery tasks), we can't await async dispose because the old engine
+        is bound to a now-closed loop. Instead, synchronously close the
+        underlying connection pool and drop all references.
+        """
+        if self.conversation_manager and self.conversation_manager.storage:
+            engine = self.conversation_manager.storage.engine
+            if engine:
+                try:
+                    # The sync_engine's pool can be disposed synchronously
+                    engine.sync_engine.pool.dispose()
+                    logger.info("Disposed old Storage engine pool (sync).")
+                except Exception as e:
+                    logger.warning("Could not dispose old engine pool: %s (will be GC'd)", e)
+
     async def initialize(self):
         """
         Initializes all shared services. This should be called once on application startup.
+        
+        In Celery workers (prefork), each task may call asyncio.run() which creates
+        a fresh event loop and closes it afterward. The async engine/sessions from a
+        previous loop become invalid, so we detect loop changes and re-create all
+        loop-bound components.
         """
+        current_loop = asyncio.get_running_loop()
+        
+        # Check if we need to re-initialize due to loop change
+        if self._loop is not None and self._loop is not current_loop:
+            logger.warning(
+                "Event loop changed (id %s -> %s). Re-initializing AppContext components.",
+                id(self._loop), id(current_loop),
+            )
+            # Dispose old DB connections first to avoid leaked resources
+            self._dispose_old_resources()
+            # Reset all loop-bound components
+            self.conversation_manager = None
+            self.memory_manager = None
+            self.prompt_assembler = None
+            self.ai_handler = None
+            self.message_queue_manager = None
+            self.typing_manager = None
+            self.bot = None
+        
         if self.conversation_manager:
-            logger.info("AppContext already initialized.")
+            logger.info("AppContext already initialized on current loop.")
             return
 
-        logger.info("Initializing AppContext...")
+        self._loop = current_loop
+        logger.info("Initializing AppContext on loop id=%s ...", id(current_loop))
 
         # 1. Initialize Conversation Manager (Database)
         try:
@@ -177,8 +222,11 @@ app_context = AppContext()
 async def get_app_context() -> AppContext:
     """
     Returns the initialized AppContext instance.
-    If not initialized, it will initialize it first.
+    If not initialized or the loop has changed, it will initialize it first.
     """
-    if not app_context._initialized or not app_context.conversation_manager:
+    current_loop = asyncio.get_running_loop()
+    if (not app_context._initialized
+            or not app_context.conversation_manager
+            or app_context._loop is not current_loop):
         await app_context.initialize()
     return app_context

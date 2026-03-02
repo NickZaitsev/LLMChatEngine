@@ -257,29 +257,49 @@ class PromptAssembler:
 
         # 5. Retrieve and add relevant memories
         try:
-            last_user_message = await self.message_repo.get_last_user_message(conversation_id)
-            if last_user_message and conversation:
-                user = await self.user_repo.get_user(str(conversation.user_id))
-                if user:
-                    context = await self.memory_manager.get_context(
-                        user_id=user.username,
-                        query=last_user_message.content,
-                        top_k=self.max_memory_items,
-                        bot_id=str(conversation.bot_id) if conversation.bot_id else None
-                    )
-                    if context:
-                        memory_content = f"### Memory Context\n{context}"
-                        memory_message = {"role": "system", "content": memory_content}
-                        memory_message_tokens = self.token_counter.count_tokens(memory_content)
-                        if memory_message_tokens <= memory_budget:
-                            messages.append(memory_message)
-                            token_counts["memory_tokens"] = memory_message_tokens
-                            remaining_history_budget -= memory_message_tokens
-                            # Track which memory items were included
-                            for line in context.split("\n"):
-                                if line.strip():
-                                    included_memory_ids.append(line.strip()[:64])
-                            logger.info(f"Added memories to prompt: {memory_message_tokens} tokens")
+            if not self.memory_manager:
+                logger.info("Memory manager not available, skipping semantic search")
+            else:
+                last_user_message = await self.message_repo.get_last_user_message(conversation_id)
+                if last_user_message and conversation:
+                    user = await self.user_repo.get_user(str(conversation.user_id))
+                    if user:
+                        logger.info(
+                            "Querying memory for user=%s, query='%s', bot_id=%s",
+                            user.username,
+                            last_user_message.content[:80],
+                            conversation.bot_id,
+                        )
+                        context = await self.memory_manager.get_context(
+                            user_id=user.username,
+                            query=last_user_message.content,
+                            top_k=self.max_memory_items,
+                            bot_id=str(conversation.bot_id) if conversation.bot_id else None
+                        )
+                        if context:
+                            memory_content = f"### Memory Context\n{context}"
+                            memory_message = {"role": "system", "content": memory_content}
+                            memory_message_tokens = self.token_counter.count_tokens(memory_content)
+                            if memory_message_tokens <= memory_budget:
+                                messages.append(memory_message)
+                                token_counts["memory_tokens"] = memory_message_tokens
+                                remaining_history_budget -= memory_message_tokens
+                                # Track which memory items were included
+                                for line in context.split("\n"):
+                                    if line.strip():
+                                        included_memory_ids.append(line.strip()[:64])
+                                logger.info(f"Added memories to prompt: {memory_message_tokens} tokens")
+                            else:
+                                logger.warning(
+                                    "Memory context (%d tokens) exceeds budget (%d tokens), skipping",
+                                    memory_message_tokens, memory_budget,
+                                )
+                        else:
+                            logger.info("Semantic search returned no results (empty vector store?)")
+                    else:
+                        logger.warning("User not found for conversation %s, skipping memory", conversation_id[:8])
+                else:
+                    logger.info("No last user message or conversation, skipping memory retrieval")
         except ValueError as e:
             logger.warning(f"Failed to retrieve memories due to a value error: {e}")
         except Exception as e:
@@ -292,8 +312,8 @@ class PromptAssembler:
                 conversation_id, remaining_history_budget, last_summarized_id
             )
             logger.info(f"Retrieved {len(recent_messages)} active messages for conversation {conversation_id}")
-            for i, msg in enumerate(recent_messages):
-                logger.info(f"  Active Message {i+1} [{msg.role}]: {msg.content[:100]}...")
+            # for i, msg in enumerate(recent_messages):
+            #     logger.info(f"  Active Message {i+1} [{msg.role}]: {msg.content[:100]}...")
             
             # Use all recent messages as-is
             # The current user message should be included as the last message in the prompt
