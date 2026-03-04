@@ -19,6 +19,7 @@ from llama_index.core.vector_stores import (
 )
 from sqlalchemy.engine.url import make_url
 from sqlalchemy import text as sql_text
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from core.abstractions import VectorStore as VectorStoreAbstraction
 
@@ -51,6 +52,7 @@ class PgVectorStore(VectorStoreAbstraction):
             table_name=table_name,
             embed_dim=embed_dim,
         )
+        self._engine: AsyncEngine = create_async_engine(db_url)
 
     async def upsert(self, nodes: List[Any]) -> None:
         """
@@ -115,27 +117,18 @@ class PgVectorStore(VectorStoreAbstraction):
         """
         try:
             table_name = self._store.table_name
+            sql = (
+                f'DELETE FROM public."data_{table_name}" '
+                f"WHERE metadata_->>'user_id' = :uid"
+            )
+            params = {"uid": str(user_id)}
 
-            # NOTE:
-            # This assumes LlamaIndex created a table named public."data_{table_name}"
-            # with JSON/JSONB column metadata_.
-            # If your schema/table differs, adjust this SQL accordingly.
-            def _delete():
-                with self._store._session() as session:
-                    sql = (
-                        f'DELETE FROM public."data_{table_name}" '
-                        f"WHERE metadata_->>'user_id' = :uid"
-                    )
-                    params = {"uid": str(user_id)}
+            if bot_id:
+                sql += " AND metadata_->>'bot_id' = :bid"
+                params["bid"] = str(bot_id)
 
-                    if bot_id:
-                        sql += " AND metadata_->>'bot_id' = :bid"
-                        params["bid"] = str(bot_id)
-
-                    session.execute(sql_text(sql), params)
-                    session.commit()
-
-            await asyncio.to_thread(_delete)
+            async with self._engine.begin() as conn:
+                await conn.execute(sql_text(sql), params)
             logger.info(f"Cleared vector store entries for user {user_id} (bot_id={bot_id})")
         except Exception as e:
             logger.error(
@@ -222,34 +215,29 @@ class PgVectorStore(VectorStoreAbstraction):
         """
         try:
             table_name = self._store.table_name
-
-            def _fetch():
-                with self._store._session() as session:
-                    sql = (
-                        f'SELECT text, metadata_ FROM public."data_{table_name}" '
-                        f"WHERE metadata_->>'conversation_id' = :conv_id "
-                        f"AND metadata_->>'user_id' = :uid "
-                        f"AND CAST(metadata_->>'chunk_index' AS INTEGER) "
-                        f"BETWEEN :min_idx AND :max_idx "
-                        f"ORDER BY CAST(metadata_->>'chunk_index' AS INTEGER)"
-                    )
-                    result = session.execute(sql_text(sql), {
-                        "conv_id": str(conversation_id),
-                        "uid": str(user_id),
-                        "min_idx": max(0, chunk_index - radius),
-                        "max_idx": chunk_index + radius,
+            sql = (
+                f'SELECT text, metadata_ FROM public."data_{table_name}" '
+                f"WHERE metadata_->>'conversation_id' = :conv_id "
+                f"AND metadata_->>'user_id' = :uid "
+                f"AND CAST(metadata_->>'chunk_index' AS INTEGER) "
+                f"BETWEEN :min_idx AND :max_idx "
+                f"ORDER BY CAST(metadata_->>'chunk_index' AS INTEGER)"
+            )
+            async with self._engine.connect() as conn:
+                result = await conn.execute(sql_text(sql), {
+                    "conv_id": str(conversation_id),
+                    "uid": str(user_id),
+                    "min_idx": max(0, chunk_index - radius),
+                    "max_idx": chunk_index + radius,
+                })
+                rows = []
+                for row in result.mappings():
+                    meta = row.get("metadata_", {})
+                    rows.append({
+                        "text": row.get("text", ""),
+                        "first_timestamp": meta.get("first_timestamp", "") if isinstance(meta, dict) else "",
                     })
-                    rows = []
-                    for row in result:
-                        # row might be a Row object or a Mapping
-                        meta = row.metadata_ if hasattr(row, 'metadata_') else {}
-                        rows.append({
-                            "text": row.text if hasattr(row, 'text') else "",
-                            "first_timestamp": meta.get("first_timestamp", "") if isinstance(meta, dict) else "",
-                        })
-                    return rows
-
-            return await asyncio.to_thread(_fetch)
+                return rows
         except Exception as e:
             logger.error(
                 "Error fetching neighbors for conversation %s, chunk %d: %s",
