@@ -157,6 +157,12 @@ Open your Admin Bot in Telegram and use these commands:
 
 ## Development
 
+### Local setup
+```bash
+pip install -r requirements-dev.txt
+pre-commit install
+```
+
 ### Testing
 ```bash
 # Run all tests
@@ -170,10 +176,20 @@ pytest tests/test_memory_manager.py
 ```
 
 ### Code Quality
-- Pre-commit hooks configured
+- Pre-commit hooks via `.pre-commit-config.yaml`
 - Black for code formatting
-- Ruff for linting
-- MyPy for type checking
+- Ruff for linting/import sorting
+- MyPy configuration for incremental type-check adoption
+- Runtime dependencies live in `requirements.txt`
+- Developer tooling lives in `requirements-dev.txt`
+
+### CI/CD
+- GitHub Actions CI workflow for linting, repository structure verification, and focused unit tests
+- GitHub Actions Docker workflow that builds the application image on every `main` push and publishes to GHCR on `main`/version tags
+
+### Before publishing
+- Follow the release/publishing checklist in [`docs/publishing-checklist.md`](docs/publishing-checklist.md)
+- Use [`CONTRIBUTING.md`](CONTRIBUTING.md) for the recommended local workflow and PR expectations
 
 ## License
 

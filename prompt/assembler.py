@@ -9,14 +9,11 @@ and proper token budgeting.
 import logging
 import math
 from typing import Dict, List, Any, Optional, Mapping, Tuple, Protocol
-from uuid import UUID
 
-from storage.interfaces import MessageRepo, PersonaRepo, ConversationRepo, UserRepo, Message
+from storage.interfaces import MessageRepo, PersonaRepo, ConversationRepo, UserRepo
 from memory.manager import LlamaIndexMemoryManager
-from .templates import (
-    create_memory_context_message,
-)
 import config
+
 logger = logging.getLogger(__name__)
 
 

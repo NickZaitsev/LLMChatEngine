@@ -11,27 +11,27 @@ import asyncio
 import logging
 import uuid
 from typing import Optional, Tuple
+
 from memory.llamaindex.embedding import LMStudioEmbeddingModel
 from memory.llamaindex.gemini import GeminiEmbeddingModel
-from llama_index.llms.lmstudio import LMStudio
 from ai_handler import AIHandler
 from config import (
     DATABASE_URL, USE_PGVECTOR, PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
     PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE, MESSAGE_QUEUE_REDIS_URL,
     TELEGRAM_TOKEN, MEMORY_ENABLED,
     VECTOR_STORE_TABLE_NAME, MEMORY_EMBED_MODEL, MEMORY_EMBED_DIM,
-    MEMORY_EMBEDDING_PROVIDER, LMSTUDIO_BASE_URL, GEMINI_EMBEDDING_MODEL,
+    MEMORY_EMBEDDING_PROVIDER, GEMINI_EMBEDDING_MODEL,
     MEMORY_RETRIEVAL_EXPAND_NEIGHBORS
 )
 from memory.manager import LlamaIndexMemoryManager
 from memory.llamaindex.vector_store import PgVectorStore
 from message_manager import MessageQueueManager, TypingIndicatorManager
-from llama_index.llms.lmstudio import LMStudio
 from prompt.assembler import PromptAssembler
 from storage_conversation_manager import PostgresConversationManager
 from telegram import Bot
 
 logger = logging.getLogger(__name__)
+
 
 class AppContext:
     """Singleton class to hold all shared application services."""

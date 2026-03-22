@@ -8,7 +8,7 @@ syntactically correct without needing to install the dependencies.
 import ast
 import os
 import sys
-from typing import List, Dict
+from typing import Dict, List
 
 
 def check_python_syntax(file_path: str) -> bool:
@@ -50,7 +50,7 @@ def check_imports_structure(file_path: str) -> Dict:
                     imports.append(f"{module}.{alias.name}")
             elif isinstance(node, ast.ClassDef):
                 classes.append(node.name)
-            elif isinstance(node, ast.FunctionDef):
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 functions.append(node.name)
         
         return {

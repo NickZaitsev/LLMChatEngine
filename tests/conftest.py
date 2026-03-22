@@ -6,10 +6,17 @@ an in-memory SQLite database for speed and isolation.
 """
 
 import asyncio
+import os
 import pytest
 import pytest_asyncio
 import uuid
 from typing import AsyncGenerator, Generator
+
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("PROACTIVE_MESSAGING_REDIS_URL", "redis://redis:6379/0")
+os.environ.setdefault("MESSAGE_QUEUE_REDIS_URL", "redis://redis:6379/0")
+os.environ.setdefault("TELEGRAM_TOKEN", "test-token")
+os.environ.setdefault("PROVIDER", "lmstudio")
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from storage.models import Base
