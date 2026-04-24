@@ -159,14 +159,18 @@ Open your Admin Bot in Telegram and use these commands:
 
 ### Testing
 ```bash
+# Create and use the pinned project environment
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements-lock.txt
+
 # Run all tests
-pytest
+.\.venv\Scripts\python -m pytest
 
 # Run with coverage
-pytest --cov=.
+.\.venv\Scripts\python -m pytest --cov=.
 
 # Run specific test file
-pytest tests/test_memory_manager.py
+.\.venv\Scripts\python -m pytest tests/test_memory_manager.py
 ```
 
 ### Code Quality
