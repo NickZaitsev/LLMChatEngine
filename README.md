@@ -66,8 +66,6 @@ GEMINI_MODEL=gemini-pro
 GEMINI_EMBEDDING_MODEL=models/embedding-001
 ```
 
-Gemma 3 recommended for optimal performance.
-
 ### Usage
 
 Start the engine using Docker Compose:
