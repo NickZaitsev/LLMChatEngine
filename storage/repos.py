@@ -1,0 +1,1470 @@
+"""
+Async repository implementations for PostgreSQL storage.
+
+This module implements the repository interfaces defined in storage.interfaces
+using SQLAlchemy 2.x async ORM with PostgreSQL backend.
+"""
+
+import json
+import logging
+import math
+from datetime import datetime
+from typing import List, Dict, Any, Optional, Union
+from uuid import UUID, uuid4
+from pathlib import Path
+
+from sqlalchemy import select, func, desc, and_, or_, text, delete
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import selectinload, joinedload
+from sqlalchemy.exc import IntegrityError, NoResultFound
+
+from .interfaces import (
+    Message, Memory, Conversation, User, Persona, MessageLog, MessageUser,
+    MessageRepo, MemoryRepo, ConversationRepo, UserRepo, PersonaRepo, MessageHistoryRepo,
+    UserBotSettings
+)
+from .models import (
+    Message as MessageModel,
+    Memory as MemoryModel,
+    Conversation as ConversationModel,
+    User as UserModel,
+    Persona as PersonaModel,
+    UserBotSettings as UserBotSettingsModel,
+    MessageLog as MessageLogModel,
+    MessageUser as MessageUserModel,
+    PGVECTOR_AVAILABLE
+)
+
+# Try to import tiktoken for accurate token counting
+TIKTOKEN_AVAILABLE = False
+_encoding = None
+
+try:
+    import tiktoken
+    # Don't initialize encoding at top level to avoid crash if download fails
+    TIKTOKEN_AVAILABLE = True
+except ImportError:
+    pass
+
+def get_tiktoken_encoding():
+    """Lazy initialization of tiktoken encoding to avoid crash if internet is down during import"""
+    global _encoding
+    if TIKTOKEN_AVAILABLE and _encoding is None:
+        try:
+            # This can trigger a download if not cached
+            _encoding = tiktoken.get_encoding("cl100k_base")
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to load tiktoken encoding: {e}")
+    return _encoding
+
+logger = logging.getLogger(__name__)
+
+
+class TokenEstimator:
+    """Helper class for estimating token counts"""
+
+    @staticmethod
+    def estimate_tokens(text: str) -> int:
+        """
+        Estimate token count for given text.
+
+        Uses tiktoken if available, otherwise falls back to character-based heuristic.
+
+        Args:
+            text: The text to estimate tokens for
+
+        Returns:
+            Estimated token count
+        """
+        if not text:
+            return 0
+
+        if TIKTOKEN_AVAILABLE:
+            encoding = get_tiktoken_encoding()
+            if encoding:
+                try:
+                    return len(encoding.encode(text))
+                except Exception as e:
+                    logger.warning(f"Failed to use tiktoken for token estimation: {e}")
+                    # Fall through to heuristic
+
+        # Heuristic: ~4 characters per token for mixed content
+        return max(1, len(text) // 4)
+
+
+class PostgresMessageRepo:
+    """PostgreSQL implementation of MessageRepo interface"""
+
+    def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
+        """
+        Initialize the message repository.
+
+        Args:
+            session_maker: SQLAlchemy async session maker
+        """
+        self.session_maker = session_maker
+        self.token_estimator = TokenEstimator()
+
+    async def append_message(
+        self,
+        conversation_id: str,
+        role: str,
+        content: str,
+        extra_data: Dict[str, Any] = None,
+        token_count: int = 0
+    ) -> Message:
+        """
+        Append a new message to a conversation.
+
+        Args:
+            conversation_id: UUID string of the conversation
+            role: Role of the message sender ("user" | "assistant" | "system")
+            content: The message content
+            extra_data: Optional extra_data dictionary
+            token_count: Pre-calculated token count (will estimate if 0)
+
+        Returns:
+            The created Message object
+
+        Raises:
+            ValueError: If conversation_id is invalid
+            IntegrityError: If conversation doesn't exist
+        """
+        if extra_data is None:
+            extra_data = {}
+
+        if token_count == 0:
+            token_count = self.estimate_tokens(content)
+
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        async with self.session_maker() as session:
+            try:
+                message_model = MessageModel(
+                    conversation_id=conversation_uuid,
+                    role=role,
+                    content=content,
+                    extra_data=extra_data,
+                    token_count=token_count
+                )
+
+                session.add(message_model)
+                await session.commit()
+                await session.refresh(message_model)
+
+                return Message(
+                    id=message_model.id,
+                    conversation_id=message_model.conversation_id,
+                    role=message_model.role,
+                    content=message_model.content,
+                    extra_data=message_model.extra_data,
+                    token_count=message_model.token_count,
+                    created_at=message_model.created_at
+                )
+
+            except IntegrityError as e:
+                await session.rollback()
+                raise IntegrityError(f"Failed to create message: {e}") from e
+
+    async def fetch_recent_messages(self, conversation_id: str, token_budget: int) -> List[Message]:
+        """
+        Fetch recent messages within a token budget.
+
+        Args:
+            conversation_id: UUID string of the conversation
+            token_budget: Maximum tokens to include in response
+
+        Returns:
+            List of Message objects ordered by creation time (oldest first)
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        async with self.session_maker() as session:
+            # Get messages ordered by created_at DESC for efficient trimming
+            stmt = select(MessageModel).where(
+                MessageModel.conversation_id == conversation_uuid
+            ).order_by(desc(MessageModel.created_at))
+
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+
+            # Trim to token budget (keeping most recent messages)
+            selected_messages = []
+            current_tokens = 0
+
+            for message in messages:
+                if current_tokens + message.token_count <= token_budget:
+                    selected_messages.append(message)
+                    current_tokens += message.token_count
+                else:
+                    break
+
+            # Reverse to return chronological order (oldest first)
+            selected_messages.reverse()
+
+            return [
+                Message(
+                    id=m.id,
+                    conversation_id=m.conversation_id,
+                    role=m.role,
+                    content=m.content,
+                    extra_data=m.extra_data,
+                    token_count=m.token_count,
+                    created_at=m.created_at
+                )
+                for m in selected_messages
+            ]
+
+    async def fetch_messages_since(self, conversation_id: str, since_ts: datetime) -> List[Message]:
+        """
+        Fetch messages created after a specific timestamp.
+
+        Args:
+            conversation_id: UUID string of the conversation
+            since_ts: Timestamp to filter messages after
+
+        Returns:
+            List of Message objects ordered by creation time
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(MessageModel).where(
+                and_(
+                    MessageModel.conversation_id == conversation_uuid,
+                    MessageModel.created_at > since_ts
+                )
+            ).order_by(MessageModel.created_at)
+
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+
+            return [
+                Message(
+                    id=m.id,
+                    conversation_id=m.conversation_id,
+                    role=m.role,
+                    content=m.content,
+                    extra_data=m.extra_data,
+                    token_count=m.token_count,
+                    created_at=m.created_at
+                )
+                for m in messages
+            ]
+
+    async def list_messages(
+        self,
+        conversation_id: str,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Message]:
+        """
+        List messages for a conversation with pagination.
+
+        Args:
+            conversation_id: UUID string of the conversation
+            limit: Maximum number of messages to return
+            offset: Number of messages to skip
+
+        Returns:
+            List of Message objects ordered by creation time
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(MessageModel).where(
+                MessageModel.conversation_id == conversation_uuid
+            ).order_by(MessageModel.created_at).offset(offset).limit(limit)
+
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+
+            return [
+                Message(
+                    id=msg.id,
+                    conversation_id=msg.conversation_id,
+                    role=msg.role,
+                    content=msg.content,
+                    extra_data=msg.extra_data,
+                    token_count=msg.token_count,
+                    created_at=msg.created_at
+                )
+                for msg in messages
+            ]
+
+    async def delete_messages(self, conversation_id: str) -> int:
+        """
+        Delete all messages for a conversation.
+
+        Args:
+            conversation_id: UUID string of the conversation
+
+        Returns:
+            Number of messages deleted
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        async with self.session_maker() as session:
+            # Use bulk delete for efficiency
+            stmt = delete(MessageModel).where(
+                MessageModel.conversation_id == conversation_uuid
+            )
+
+            result = await session.execute(stmt)
+            await session.commit()
+
+            deleted_count = result.rowcount
+            # Reduced logging - let the caller handle detailed logging
+            # logger.info("Deleted %d messages for conversation %s", deleted_count, conversation_id)
+            return deleted_count
+
+    async def get_last_user_message(self, conversation_id: str) -> Optional[Message]:
+        """
+        Get the last user message for a conversation.
+
+        Args:
+            conversation_id: UUID string of the conversation
+
+        Returns:
+            The last user Message object if found, None otherwise
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(MessageModel).where(
+                and_(
+                    MessageModel.conversation_id == conversation_uuid,
+                    MessageModel.role == 'user'
+                )
+            ).order_by(desc(MessageModel.created_at)).limit(1)
+
+            result = await session.execute(stmt)
+            message = result.scalar_one_or_none()
+
+            if not message:
+                return None
+
+            return Message(
+                id=message.id,
+                conversation_id=message.conversation_id,
+                role=message.role,
+                content=message.content,
+                extra_data=message.extra_data,
+                token_count=message.token_count,
+                created_at=message.created_at
+            )
+
+    def estimate_tokens(self, text: str) -> int:
+        """
+        Estimate token count for given text.
+
+        Args:
+            text: The text to estimate tokens for
+
+        Returns:
+            Estimated token count
+        """
+        return self.token_estimator.estimate_tokens(text)
+
+    async def count_active_messages(self, conversation_id: str, last_summarized_message_id: Optional[UUID]) -> int:
+        """
+        Count active (unsummarized) messages in a conversation.
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(func.count(MessageModel.id)).where(
+                MessageModel.conversation_id == conversation_uuid
+            )
+            if last_summarized_message_id:
+                # We need to get the created_at timestamp of the last summarized message
+                last_summarized_message = await session.get(MessageModel, last_summarized_message_id)
+                if last_summarized_message:
+                    stmt = stmt.where(MessageModel.created_at > last_summarized_message.created_at)
+
+            result = await session.execute(stmt)
+            return result.scalar_one()
+
+    async def fetch_active_messages(self, conversation_id: str, token_budget: int, last_summarized_message_id: Optional[UUID]) -> List[Message]:
+        """
+        Fetch recent active (unsummarized) messages within a token budget.
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(MessageModel).where(
+                MessageModel.conversation_id == conversation_uuid
+            )
+            if last_summarized_message_id:
+                last_summarized_message = await session.get(MessageModel, last_summarized_message_id)
+                if last_summarized_message:
+                    stmt = stmt.where(MessageModel.created_at > last_summarized_message.created_at)
+
+            stmt = stmt.order_by(desc(MessageModel.created_at))
+
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+
+            selected_messages = []
+            current_tokens = 0
+            for message in messages:
+                if current_tokens + message.token_count <= token_budget:
+                    selected_messages.append(message)
+                    current_tokens += message.token_count
+                else:
+                    break
+
+            selected_messages.reverse()
+
+            return [
+                Message(
+                    id=m.id,
+                    conversation_id=m.conversation_id,
+                    role=m.role,
+                    content=m.content,
+                    extra_data=m.extra_data,
+                    token_count=m.token_count,
+                    created_at=m.created_at
+                ) for m in selected_messages
+            ]
+
+    async def get_messages_for_summary(self, conversation_id: str, last_summarized_message_id: Optional[UUID]) -> List[Message]:
+        """
+        Fetch all active messages to be summarized.
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(MessageModel).where(
+                MessageModel.conversation_id == conversation_uuid
+            )
+            if last_summarized_message_id:
+                last_summarized_message = await session.get(MessageModel, last_summarized_message_id)
+                if last_summarized_message:
+                    stmt = stmt.where(MessageModel.created_at > last_summarized_message.created_at)
+
+            stmt = stmt.order_by(MessageModel.created_at.asc())
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+
+            return [
+                Message(
+                    id=m.id,
+                    conversation_id=m.conversation_id,
+                    role=m.role,
+                    content=m.content,
+                    extra_data=m.extra_data,
+                    token_count=m.token_count,
+                    created_at=m.created_at
+                ) for m in messages
+            ]
+
+
+class PostgresMessageHistoryRepo:
+    """PostgreSQL implementation of MessageHistoryRepo interface"""
+
+    def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
+        """
+        Initialize the message history repository.
+
+        Args:
+            session_maker: SQLAlchemy async session maker
+        """
+        self.session_maker = session_maker
+
+    async def save_message(self, user_id: UUID, role: str, content: str, bot_id: Optional[UUID] = None) -> tuple[MessageLog, MessageUser]:
+        """
+        Save a message to both messages_log and messages_user tables.
+
+        Args:
+            user_id: Telegram user ID (as UUID)
+            role: Role of the message sender ("user" | "bot")
+            content: The message content
+
+        Returns:
+            Tuple of (MessageLog, MessageUser) objects
+        """
+        async with self.session_maker() as session:
+            try:
+                # Create message log entry (permanent)
+                message_log_model = MessageLogModel(
+                    user_id=user_id,
+                    role=role,
+                    content=content,
+                    bot_id=bot_id,
+                )
+
+                # Create user message entry (can be cleared)
+                message_user_model = MessageUserModel(
+                    user_id=user_id,
+                    role=role,
+                    content=content,
+                    bot_id=bot_id,
+                )
+
+                session.add(message_log_model)
+                session.add(message_user_model)
+                await session.commit()
+                await session.refresh(message_log_model)
+                await session.refresh(message_user_model)
+
+                message_log = MessageLog(
+                    id=message_log_model.id,
+                    user_id=message_log_model.user_id,
+                    role=message_log_model.role,
+                    content=message_log_model.content,
+                    created_at=message_log_model.created_at,
+                    bot_id=message_log_model.bot_id,
+                )
+
+                message_user = MessageUser(
+                    id=message_user_model.id,
+                    user_id=message_user_model.user_id,
+                    role=message_user_model.role,
+                    content=message_user_model.content,
+                    created_at=message_user_model.created_at,
+                    bot_id=message_user_model.bot_id,
+                )
+
+                # Reduced logging - let the caller handle detailed logging
+                # logger.info("Saved message to both tables: user_id=%s, role=%s, length=%d chars",
+                #            user_id, role, len(content))
+
+                return (message_log, message_user)
+
+            except Exception as e:
+                await session.rollback()
+                logger.error("Failed to save message to history tables: %s", e)
+                raise
+
+    async def get_user_history(self, user_id: UUID, limit: int = 100, bot_id: Optional[UUID] = None) -> List[MessageUser]:
+        """
+        Get user message history from messages_user table.
+
+        Args:
+            user_id: Telegram user ID (as UUID)
+            limit: Maximum number of messages to return
+
+        Returns:
+            List of MessageUser objects ordered by creation time
+        """
+        async with self.session_maker() as session:
+            try:
+                stmt = select(MessageUserModel).where(
+                    MessageUserModel.user_id == user_id
+                )
+                if bot_id is not None:
+                    stmt = stmt.where(MessageUserModel.bot_id == bot_id)
+                stmt = stmt.order_by(MessageUserModel.created_at).limit(limit)
+
+                result = await session.execute(stmt)
+                messages = result.scalars().all()
+
+                return [
+                    MessageUser(
+                        id=msg.id,
+                        user_id=msg.user_id,
+                        role=msg.role,
+                        content=msg.content,
+                        created_at=msg.created_at,
+                        bot_id=msg.bot_id,
+                    )
+                    for msg in messages
+                ]
+
+            except Exception as e:
+                logger.error("Failed to get user history: %s", e)
+                return []
+
+    async def clear_user_history(self, user_id: UUID, bot_id: Optional[UUID] = None) -> int:
+        """
+        Clear user message history from messages_user table only.
+
+        Args:
+            user_id: Telegram user ID (as UUID)
+
+        Returns:
+            Number of messages deleted
+        """
+        async with self.session_maker() as session:
+            try:
+                stmt = delete(MessageUserModel).where(
+                    MessageUserModel.user_id == user_id
+                )
+                if bot_id is not None:
+                    stmt = stmt.where(MessageUserModel.bot_id == bot_id)
+
+                result = await session.execute(stmt)
+                await session.commit()
+
+                deleted_count = result.rowcount
+                # Reduced logging - let the caller handle detailed logging
+                # logger.info("Cleared %d messages from messages_user table for user %s", deleted_count, user_id)
+                return deleted_count
+
+            except Exception as e:
+                await session.rollback()
+                logger.error("Failed to clear user history: %s", e)
+                return 0
+
+
+class PostgresMemoryRepo:
+    """PostgreSQL implementation of MemoryRepo interface with optional pgvector support"""
+
+    def __init__(self, session_maker: async_sessionmaker[AsyncSession], use_pgvector: bool = True):
+        """
+        Initialize the memory repository.
+
+        Args:
+            session_maker: SQLAlchemy async session maker
+            use_pgvector: Whether to use pgvector for similarity search
+        """
+        self.session_maker = session_maker
+        self.use_pgvector = use_pgvector and PGVECTOR_AVAILABLE
+        self.fallback_file = Path("memories_embeddings.json")
+
+        if not self.use_pgvector:
+            logger.info("pgvector not available, using file-based embedding storage")
+
+    async def store_memory(
+        self,
+        conversation_id: str,
+        text: str,
+        embedding: List[float],
+        memory_type: str = "episodic",
+        bot_id: Optional[str] = None,
+    ) -> Memory:
+        """
+        Store a memory with optional vector embedding.
+
+        Args:
+            conversation_id: UUID string of the conversation
+            text: The memory text content
+            embedding: Vector embedding of the text
+            memory_type: Type of memory ("episodic" | "summary")
+
+        Returns:
+            The created Memory object
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        bot_uuid = None
+        if bot_id:
+            try:
+                bot_uuid = UUID(bot_id)
+            except ValueError as e:
+                raise ValueError(f"Invalid bot_id format: {bot_id}") from e
+
+        async with self.session_maker() as session:
+            try:
+                if bot_uuid is None:
+                    conversation_model = await session.get(ConversationModel, conversation_uuid)
+                    if conversation_model:
+                        bot_uuid = conversation_model.bot_id
+
+                memory_model = MemoryModel(
+                    conversation_id=conversation_uuid,
+                    bot_id=bot_uuid,
+                    memory_type=memory_type,
+                    text=text,
+                    embedding=embedding
+                )
+
+                session.add(memory_model)
+                await session.commit()
+                await session.refresh(memory_model)
+
+                # Store embedding in file if not using pgvector
+                if not self.use_pgvector:
+                    await self._store_embedding_to_file(str(memory_model.id), embedding)
+
+                return Memory(
+                    id=memory_model.id,
+                    conversation_id=memory_model.conversation_id,
+                    memory_type=memory_model.memory_type,
+                    text=memory_model.text,
+                    created_at=memory_model.created_at,
+                    bot_id=memory_model.bot_id,
+                    embedding=embedding
+                )
+
+            except IntegrityError as e:
+                await session.rollback()
+                raise IntegrityError(f"Failed to create memory: {e}") from e
+
+    async def search_memories(
+        self,
+        query_embedding: List[float],
+        top_k: int = 10,
+        similarity_threshold: float = 0.7,
+        user_id: Optional[str] = None,
+        bot_id: Optional[str] = None,
+    ) -> List[Memory]:
+        """
+        Search for memories using vector similarity.
+
+        Args:
+            query_embedding: Query vector for similarity search
+            top_k: Maximum number of results to return
+            similarity_threshold: Minimum similarity score (0-1)
+
+        Returns:
+            List of Memory objects ordered by similarity (highest first)
+        """
+        user_uuid = None
+        bot_uuid = None
+        if user_id:
+            try:
+                user_uuid = UUID(user_id)
+            except ValueError as e:
+                raise ValueError(f"Invalid user_id format: {user_id}") from e
+        if bot_id:
+            try:
+                bot_uuid = UUID(bot_id)
+            except ValueError as e:
+                raise ValueError(f"Invalid bot_id format: {bot_id}") from e
+
+        async with self.session_maker() as session:
+            if self.use_pgvector:
+                # Use pgvector for efficient similarity search
+                stmt = select(MemoryModel).join(
+                    ConversationModel, MemoryModel.conversation_id == ConversationModel.id
+                )
+                if user_uuid:
+                    stmt = stmt.where(ConversationModel.user_id == user_uuid)
+                if bot_uuid:
+                    stmt = stmt.where(MemoryModel.bot_id == bot_uuid)
+                stmt = stmt.order_by(
+                    MemoryModel.embedding.cosine_distance(query_embedding)
+                ).limit(top_k)
+
+                result = await session.execute(stmt)
+                memories = result.scalars().all()
+
+                # Filter by similarity threshold
+                filtered_memories = []
+                for memory in memories:
+                    if memory.embedding is not None and len(memory.embedding) > 0:
+                        similarity = self._cosine_similarity(query_embedding, memory.embedding)
+                        if similarity >= similarity_threshold:
+                            filtered_memories.append((memory, similarity))
+
+                # Sort by similarity descending
+                filtered_memories.sort(key=lambda x: x[1], reverse=True)
+                memories = [mem for mem, _ in filtered_memories]
+
+            else:
+                # Fallback: load all memories and compute similarity in Python
+                stmt = select(MemoryModel).join(
+                    ConversationModel, MemoryModel.conversation_id == ConversationModel.id
+                )
+                if user_uuid:
+                    stmt = stmt.where(ConversationModel.user_id == user_uuid)
+                if bot_uuid:
+                    stmt = stmt.where(MemoryModel.bot_id == bot_uuid)
+                result = await session.execute(stmt)
+                all_memories = result.scalars().all()
+
+                memory_similarities = []
+                for memory in all_memories:
+                    if memory.embedding is not None and len(memory.embedding) > 0:
+                        similarity = self._cosine_similarity(query_embedding, memory.embedding)
+                        if similarity >= similarity_threshold:
+                            memory_similarities.append((memory, similarity))
+
+                # Sort by similarity descending and take top_k
+                memory_similarities.sort(key=lambda x: x[1], reverse=True)
+                memories = [mem for mem, _ in memory_similarities[:top_k]]
+
+            return [
+                Memory(
+                    id=mem.id,
+                    conversation_id=mem.conversation_id,
+                    memory_type=mem.memory_type,
+                    text=mem.text,
+                    created_at=mem.created_at,
+                    bot_id=mem.bot_id,
+                    embedding=mem.embedding
+                )
+                for mem in memories
+            ]
+
+    async def list_memories(
+        self,
+        conversation_id: str,
+        memory_type: Optional[str] = None,
+        bot_id: Optional[str] = None,
+    ) -> List[Memory]:
+        """
+        List memories for a conversation, optionally filtered by type.
+
+        Args:
+            conversation_id: UUID string of the conversation
+            memory_type: Optional memory type filter
+
+        Returns:
+            List of Memory objects ordered by creation time
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        bot_uuid = None
+        if bot_id:
+            try:
+                bot_uuid = UUID(bot_id)
+            except ValueError as e:
+                raise ValueError(f"Invalid bot_id format: {bot_id}") from e
+
+        async with self.session_maker() as session:
+            conditions = [MemoryModel.conversation_id == conversation_uuid]
+            if memory_type:
+                conditions.append(MemoryModel.memory_type == memory_type)
+            if bot_uuid is not None:
+                conditions.append(MemoryModel.bot_id == bot_uuid)
+
+            stmt = select(MemoryModel).where(
+                and_(*conditions)
+            ).order_by(MemoryModel.created_at)
+
+            result = await session.execute(stmt)
+            memories = result.scalars().all()
+
+            return [
+                Memory(
+                    id=mem.id,
+                    conversation_id=mem.conversation_id,
+                    memory_type=mem.memory_type,
+                    text=mem.text,
+                    created_at=mem.created_at,
+                    bot_id=mem.bot_id,
+                    embedding=mem.embedding
+                )
+                for mem in memories
+            ]
+
+    async def _store_embedding_to_file(self, memory_id: str, embedding: List[float]):
+        """Store embedding to file when pgvector is not available"""
+        try:
+            # Load existing embeddings
+            embeddings = {}
+            if self.fallback_file.exists():
+                with open(self.fallback_file, 'r') as f:
+                    embeddings = json.load(f)
+
+            # Add new embedding
+            embeddings[memory_id] = embedding
+
+            # Save back to file
+            with open(self.fallback_file, 'w') as f:
+                json.dump(embeddings, f)
+
+        except Exception as e:
+            logger.error(f"Failed to store embedding to file: {e}")
+
+    @staticmethod
+    def _cosine_similarity(a: List[float], b: List[float]) -> float:
+        """Calculate cosine similarity between two vectors"""
+        try:
+            dot_product = sum(x * y for x, y in zip(a, b))
+            norm_a = math.sqrt(sum(x * x for x in a))
+            norm_b = math.sqrt(sum(x * x for x in b))
+
+            if norm_a == 0 or norm_b == 0:
+                return 0.0
+
+            return dot_product / (norm_a * norm_b)
+        except (ValueError, ZeroDivisionError):
+            return 0.0
+
+
+class PostgresConversationRepo:
+    """PostgreSQL implementation of ConversationRepo interface"""
+
+    def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
+        """
+        Initialize the conversation repository.
+
+        Args:
+            session_maker: SQLAlchemy async session maker
+        """
+        self.session_maker = session_maker
+
+    async def create_conversation(
+        self,
+        user_id: str,
+        persona_id: str,
+        bot_id: Optional[str] = None,
+        title: Optional[str] = None,
+        extra_data: Optional[Dict[str, Any]] = None
+    ) -> Conversation:
+        """
+        Create a new conversation.
+
+        Args:
+            user_id: UUID string of the user
+            persona_id: UUID string of the persona
+            title: Optional conversation title
+            extra_data: Optional extra_data dictionary
+
+        Returns:
+            The created Conversation object
+        """
+        if extra_data is None:
+            extra_data = {}
+
+        try:
+            user_uuid = UUID(user_id)
+            persona_uuid = UUID(persona_id)
+            bot_uuid = UUID(bot_id) if bot_id else None
+        except ValueError as e:
+            raise ValueError(f"Invalid UUID format: {e}") from e
+
+        async with self.session_maker() as session:
+            try:
+                conversation_model = ConversationModel(
+                    user_id=user_uuid,
+                    persona_id=persona_uuid,
+                    bot_id=bot_uuid,
+                    title=title,
+                    extra_data=extra_data
+                )
+
+                session.add(conversation_model)
+                await session.commit()
+                await session.refresh(conversation_model)
+
+                return Conversation(
+                    id=conversation_model.id,
+                    user_id=conversation_model.user_id,
+                    persona_id=conversation_model.persona_id,
+                    bot_id=conversation_model.bot_id,
+                    title=conversation_model.title,
+                    extra_data=conversation_model.extra_data,
+                    created_at=conversation_model.created_at,
+                    summary=conversation_model.summary,
+                    last_summarized_message_id=conversation_model.last_summarized_message_id,
+                    last_memorized_message_id=getattr(conversation_model, 'last_memorized_message_id', None)
+                )
+
+            except IntegrityError as e:
+                await session.rollback()
+                raise IntegrityError(f"Failed to create conversation: {e}") from e
+
+    async def get_conversation(self, conversation_id: str) -> Optional[Conversation]:
+        """
+        Get a conversation by ID.
+
+        Args:
+            conversation_id: UUID string of the conversation
+
+        Returns:
+            Conversation object if found, None otherwise
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(ConversationModel).where(
+                ConversationModel.id == conversation_uuid
+            )
+
+            result = await session.execute(stmt)
+            conversation = result.scalar_one_or_none()
+
+            if not conversation:
+                return None
+
+            return Conversation(
+                id=conversation.id,
+                user_id=conversation.user_id,
+                persona_id=conversation.persona_id,
+                bot_id=conversation.bot_id,
+                title=conversation.title,
+                extra_data=conversation.extra_data,
+                created_at=conversation.created_at,
+                summary=conversation.summary,
+                last_summarized_message_id=conversation.last_summarized_message_id,
+                last_memorized_message_id=getattr(conversation, 'last_memorized_message_id', None)
+            )
+
+    async def list_conversations(self, user_id: str, bot_id: Optional[str] = None) -> List[Conversation]:
+        """
+        List all conversations for a user.
+
+        Args:
+            user_id: UUID string of the user
+
+        Returns:
+            List of Conversation objects ordered by creation time (newest first)
+        """
+        try:
+            user_uuid = UUID(user_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid user_id format: {user_id}") from e
+
+        async with self.session_maker() as session:
+            conditions = [ConversationModel.user_id == user_uuid]
+            if bot_id:
+                try:
+                    bot_uuid = UUID(bot_id)
+                    conditions.append(ConversationModel.bot_id == bot_uuid)
+                except ValueError:
+                    logger.warning(f"Invalid bot_id format in list_conversations: {bot_id}")
+
+            stmt = select(ConversationModel).where(
+                and_(*conditions)
+            ).order_by(desc(ConversationModel.created_at))
+
+            result = await session.execute(stmt)
+            conversations = result.scalars().all()
+
+            return [
+                Conversation(
+                    id=conv.id,
+                    user_id=conv.user_id,
+                    persona_id=conv.persona_id,
+                    bot_id=conv.bot_id,
+                    title=conv.title,
+                    extra_data=conv.extra_data,
+                    created_at=conv.created_at,
+                    summary=conv.summary,
+                    last_summarized_message_id=conv.last_summarized_message_id,
+                    last_memorized_message_id=getattr(conv, 'last_memorized_message_id', None)
+                )
+                for conv in conversations
+            ]
+
+    async def update_conversation(
+        self,
+        conversation_id: str,
+        title: Optional[str] = None,
+        extra_data: Optional[Dict[str, Any]] = None,
+        summary: Optional[str] = None,
+        last_summarized_message_id: Optional[UUID] = None,
+        last_memorized_message_id: Optional[UUID] = None
+    ) -> Optional[Conversation]:
+        """
+        Update an existing conversation.
+        """
+        try:
+            conversation_uuid = UUID(conversation_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(ConversationModel).where(ConversationModel.id == conversation_uuid)
+            result = await session.execute(stmt)
+            conversation = result.scalar_one_or_none()
+
+            if not conversation:
+                return None
+
+            if title is not None:
+                conversation.title = title
+            if extra_data is not None:
+                conversation.extra_data = extra_data
+            if summary is not None:
+                conversation.summary = summary
+            if last_summarized_message_id is not None:
+                conversation.last_summarized_message_id = last_summarized_message_id
+            if last_memorized_message_id is not None:
+                conversation.last_memorized_message_id = last_memorized_message_id
+
+            await session.commit()
+            await session.refresh(conversation)
+
+            return Conversation(
+                id=conversation.id,
+                user_id=conversation.user_id,
+                persona_id=conversation.persona_id,
+                bot_id=conversation.bot_id,
+                title=conversation.title,
+                extra_data=conversation.extra_data,
+                created_at=conversation.created_at,
+                summary=conversation.summary,
+                last_summarized_message_id=conversation.last_summarized_message_id,
+                last_memorized_message_id=getattr(conversation, 'last_memorized_message_id', None)
+            )
+
+
+class PostgresUserRepo:
+    """PostgreSQL implementation of UserRepo interface"""
+
+    def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
+        """
+        Initialize the user repository.
+
+        Args:
+            session_maker: SQLAlchemy async session maker
+        """
+        self.session_maker = session_maker
+
+    async def create_user(self, username: str, extra_data: Dict[str, Any] = None) -> User:
+        """
+        Create a new user.
+
+        Args:
+            username: Unique username
+            extra_data: Optional extra_data dictionary
+
+        Returns:
+            The created User object
+
+        Raises:
+            IntegrityError: If username already exists
+        """
+        if extra_data is None:
+            extra_data = {}
+
+        async with self.session_maker() as session:
+            try:
+                user_model = UserModel(
+                    username=username,
+                    extra_data=extra_data
+                )
+
+                session.add(user_model)
+                await session.commit()
+                await session.refresh(user_model)
+
+                return User(
+                    id=user_model.id,
+                    username=user_model.username,
+                    extra_data=user_model.extra_data
+                )
+
+            except IntegrityError as e:
+                await session.rollback()
+                raise IntegrityError(f"Username '{username}' already exists") from e
+
+    async def get_user(self, user_id: str) -> Optional[User]:
+        """
+        Get a user by ID.
+
+        Args:
+            user_id: UUID string of the user
+
+        Returns:
+            User object if found, None otherwise
+        """
+        try:
+            user_uuid = UUID(user_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid user_id format: {user_id}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(UserModel).where(UserModel.id == user_uuid)
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+
+            if not user:
+                return None
+
+            return User(
+                id=user.id,
+                username=user.username,
+                extra_data=user.extra_data
+            )
+
+    async def get_user_by_username(self, username: str) -> Optional[User]:
+        """
+        Get a user by username.
+
+        Args:
+            username: The username to search for
+
+        Returns:
+            User object if found, None otherwise
+        """
+        if not username:
+            return None
+
+        async with self.session_maker() as session:
+            stmt = select(UserModel).where(UserModel.username == username)
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+
+            if not user:
+                return None
+
+            return User(
+                id=user.id,
+                username=user.username,
+                extra_data=user.extra_data
+            )
+
+
+class PostgresPersonaRepo:
+    """PostgreSQL implementation of PersonaRepo interface"""
+
+    def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
+        """
+        Initialize the persona repository.
+
+        Args:
+            session_maker: SQLAlchemy async session maker
+        """
+        self.session_maker = session_maker
+
+    async def create_persona(
+        self,
+        user_id: str,
+        name: str,
+        config: Dict[str, Any] = None
+    ) -> Persona:
+        """
+        Create a new persona.
+
+        Args:
+            user_id: UUID string of the owning user
+            name: Display name of the persona
+            config: Optional configuration dictionary
+
+        Returns:
+            The created Persona object
+        """
+        if config is None:
+            config = {}
+
+        try:
+            user_uuid = UUID(user_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid user_id format: {user_id}") from e
+
+        async with self.session_maker() as session:
+            try:
+                persona_model = PersonaModel(
+                    user_id=user_uuid,
+                    name=name,
+                    config=config
+                )
+
+                session.add(persona_model)
+                await session.commit()
+                await session.refresh(persona_model)
+
+                return Persona(
+                    id=persona_model.id,
+                    user_id=persona_model.user_id,
+                    name=persona_model.name,
+                    config=persona_model.config
+                )
+
+            except IntegrityError as e:
+                await session.rollback()
+                raise IntegrityError(f"Failed to create persona: {e}") from e
+
+    async def get_persona(self, persona_id: str) -> Optional[Persona]:
+        """
+        Get a persona by ID.
+
+        Args:
+            persona_id: UUID string of the persona
+
+        Returns:
+            Persona object if found, None otherwise
+        """
+        try:
+            persona_uuid = UUID(persona_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid persona_id format: {persona_id}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(PersonaModel).where(PersonaModel.id == persona_uuid)
+            result = await session.execute(stmt)
+            persona = result.scalar_one_or_none()
+
+            if not persona:
+                return None
+
+            return Persona(
+                id=persona.id,
+                user_id=persona.user_id,
+                name=persona.name,
+                config=persona.config
+            )
+
+    async def list_personas(self, user_id: str) -> List[Persona]:
+        """
+        List all personas for a user.
+
+        Args:
+            user_id: UUID string of the user
+
+        Returns:
+            List of Persona objects
+        """
+        try:
+            user_uuid = UUID(user_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid user_id format: {user_id}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(PersonaModel).where(PersonaModel.user_id == user_uuid)
+            result = await session.execute(stmt)
+            personas = result.scalars().all()
+
+            return [
+                Persona(
+                    id=persona.id,
+                    user_id=persona.user_id,
+                    name=persona.name,
+                    config=persona.config
+                )
+                for persona in personas
+            ]
+
+
+class PostgresUserBotSettingsRepo:
+    """PostgreSQL implementation of UserBotSettingsRepo interface."""
+
+    def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
+        self.session_maker = session_maker
+
+    async def get_or_create_settings(self, user_id: str, bot_id: str) -> UserBotSettings:
+        settings = await self.get_settings(user_id, bot_id)
+        if settings:
+            return settings
+
+        try:
+            user_uuid = UUID(user_id)
+            bot_uuid = UUID(bot_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid UUID format: {e}") from e
+
+        async with self.session_maker() as session:
+            model = UserBotSettingsModel(
+                user_id=user_uuid,
+                bot_id=bot_uuid,
+                settings={},
+            )
+            session.add(model)
+            await session.commit()
+            await session.refresh(model)
+            return UserBotSettings(
+                id=model.id,
+                user_id=model.user_id,
+                bot_id=model.bot_id,
+                settings=model.settings,
+                created_at=model.created_at,
+                updated_at=model.updated_at,
+            )
+
+    async def get_settings(self, user_id: str, bot_id: str) -> Optional[UserBotSettings]:
+        try:
+            user_uuid = UUID(user_id)
+            bot_uuid = UUID(bot_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid UUID format: {e}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(UserBotSettingsModel).where(
+                and_(
+                    UserBotSettingsModel.user_id == user_uuid,
+                    UserBotSettingsModel.bot_id == bot_uuid,
+                )
+            )
+            result = await session.execute(stmt)
+            model = result.scalar_one_or_none()
+
+            if not model:
+                return None
+
+            return UserBotSettings(
+                id=model.id,
+                user_id=model.user_id,
+                bot_id=model.bot_id,
+                settings=model.settings,
+                created_at=model.created_at,
+                updated_at=model.updated_at,
+            )
+
+    async def update_settings(self, user_id: str, bot_id: str, settings: Dict[str, Any]) -> UserBotSettings:
+        try:
+            user_uuid = UUID(user_id)
+            bot_uuid = UUID(bot_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid UUID format: {e}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(UserBotSettingsModel).where(
+                and_(
+                    UserBotSettingsModel.user_id == user_uuid,
+                    UserBotSettingsModel.bot_id == bot_uuid,
+                )
+            )
+            result = await session.execute(stmt)
+            model = result.scalar_one_or_none()
+
+            if not model:
+                model = UserBotSettingsModel(
+                    user_id=user_uuid,
+                    bot_id=bot_uuid,
+                    settings=dict(settings or {}),
+                )
+                session.add(model)
+            else:
+                merged_settings = dict(model.settings or {})
+                merged_settings.update(settings or {})
+                model.settings = merged_settings
+
+            await session.commit()
+            await session.refresh(model)
+
+            return UserBotSettings(
+                id=model.id,
+                user_id=model.user_id,
+                bot_id=model.bot_id,
+                settings=model.settings,
+                created_at=model.created_at,
+                updated_at=model.updated_at,
+            )
+
+
+# Export all repository implementations
+__all__ = [
+    'TokenEstimator',
+    'PostgresMessageRepo',
+    'PostgresMessageHistoryRepo',
+    'PostgresMemoryRepo',
+    'PostgresConversationRepo',
+    'PostgresUserRepo',
+    'PostgresPersonaRepo',
+    'PostgresUserBotSettingsRepo',
+    'TIKTOKEN_AVAILABLE',
+    'PGVECTOR_AVAILABLE'
+]

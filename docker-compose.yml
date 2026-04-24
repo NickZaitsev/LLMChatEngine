@@ -1,0 +1,152 @@
+services:
+  llm-chat-engine:
+    build: .
+    container_name: llm-chat-engine
+    restart: unless-stopped
+    command: bash -c "alembic upgrade head && python run_multibot.py"
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/ai_bot
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
+      - ADMIN_BOT_TOKEN=${ADMIN_BOT_TOKEN}
+      - ADMIN_USER_IDS=${ADMIN_USER_IDS}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backup_network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    extra_hosts:
+      - "host-machine:host-gateway"
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: llm-chat-engine-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=ai_bot
+      - POSTGRES_USER=ai_bot
+      - POSTGRES_PASSWORD=${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-pgvector.sql:/docker-entrypoint-initdb.d/init-pgvector.sql
+      - backups:/backups
+    ports:
+      - "5432:5432"
+    networks:
+      - backup_network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ai_bot -d ai_bot" ]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  postgres-backup:
+    build: ./backup
+    container_name: llm-chat-engine-postgres-backup
+    restart: unless-stopped
+    environment:
+      - DB_PASSWORD=${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    volumes:
+      - backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backup_network
+
+  redis:
+    image: redis:alpine
+    container_name: llm-chat-engine-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - backup_network
+
+  celery-worker:
+    build: .
+    container_name: llm-chat-engine-celery-worker
+    restart: unless-stopped
+    command: celery -A proactive_messaging worker --concurrency=5 --loglevel=info --statedb=/var/lib/celery/worker_state/state.db -Q proactive_messaging
+    env_file: .env
+    environment:
+      - PYTHONPATH=/app
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/ai_bot
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - .:/app
+      - celery_worker_state:/var/lib/celery/worker_state
+    networks:
+      - backup_network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    extra_hosts:
+      - "host-machine:host-gateway"
+
+  celery-beat:
+    build: .
+    container_name: llm-chat-engine-celery-beat
+    restart: unless-stopped
+    command: celery -A proactive_messaging beat --loglevel=info --scheduler celery.beat.PersistentScheduler -s /var/lib/celery/beat_schedule/schedule
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/ai_bot
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - .:/app
+      - celery_beat_schedule:/var/lib/celery/beat_schedule
+    networks:
+      - backup_network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    extra_hosts:
+      - "host-machine:host-gateway"
+
+  celery-memory:
+    build: .
+    container_name: llm-chat-engine-celery-memory
+    restart: unless-stopped
+    command: celery -A memory.tasks:celery_app worker --concurrency=5 --loglevel=info -Q memory_tasks
+    env_file: .env
+    environment:
+      - PYTHONPATH=/app
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/ai_bot
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - .:/app
+    networks:
+      - backup_network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    extra_hosts:
+      - "host-machine:host-gateway"
+
+volumes:
+  postgres_data:
+  backups:
+  redis_data:
+  celery_beat_schedule:
+  celery_worker_state:
+
+
+networks:
+  backup_network:
+    driver: bridge

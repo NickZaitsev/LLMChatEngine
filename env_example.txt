@@ -1,0 +1,99 @@
+# Telegram Bot Configuration
+TELEGRAM_TOKEN=your_telegram_bot_token_here
+
+# Admin Bot Configuration
+ADMIN_BOT_TOKEN=your_admin_bot_token_here
+ADMIN_USER_IDS=123456789,987654321
+TOKEN_ENCRYPTION_KEY=your_generated_key_here
+
+# Database Configuration
+DATABASE_URL=postgresql+asyncpg://ai_bot:your_secure_password@localhost:5432/ai_bot
+DB_PASSWORD=your_secure_password_here
+USE_PGVECTOR=true
+
+# LLM Provider Configuration
+PROVIDER=azure                                    # Options: "azure" or "lmstudio"
+AZURE_ENDPOINT=https://your-endpoint.openai.azure.com/
+AZURE_API_KEY=your_azure_api_key_here
+AZURE_MODEL=your_azure_deployment_name
+
+# LM Studio Configuration
+LMSTUDIO_MODEL=deepseek/DeepSeek-V3-0324         # Any LM Studio model name
+LMSTUDIO_BASE_URL=http://localhost:1234/v1       # LM Studio API endpoint
+LMSTUDIO_AUTO_LOAD=true                          # Automatically load model at startup
+LMSTUDIO_MAX_LOAD_WAIT=300                       # Max seconds to wait for model loading
+LMSTUDIO_SERVER_TIMEOUT=80                       # Request timeout for LM Studio API
+LMSTUDIO_STARTUP_CHECK=true                      # Check and load model during bot startup
+
+# Bot Personality Configuration
+BOT_NAME=Luna
+BOT_PERSONALITY="You are {BOT_NAME}, a caring and attentive AI companion. You are supportive, conversational, transparent about being AI when relevant, and focused on helpful long-term conversation."
+
+# Conversation Settings
+MAX_CONVERSATION_HISTORY=100
+TEMPERATURE=0.8
+MAX_ACTIVE_MESSAGES=50
+
+# Context Management
+MAX_CONTEXT_TOKENS=8000
+RESERVED_TOKENS=500
+
+# PromptAssembler Settings
+PROMPT_MAX_MEMORY_ITEMS=3
+PROMPT_MEMORY_TOKEN_BUDGET_RATIO=0.4
+PROMPT_TRUNCATION_LENGTH=200
+PROMPT_INCLUDE_SYSTEM_TEMPLATE=true
+PROMPT_HISTORY_BUDGET=7500
+PROMPT_REPLY_TOKEN_BUDGET=500
+
+# LlamaIndex Configuration
+MEMORY_ENABLED=true
+MEMORY_SUMMARIZER_MODE=local # 'llm' or 'local'
+MEMORY_EMBEDDING_PROVIDER=lmstudio
+MEMORY_EMBED_MODEL="Qwen3-Embedding-0.6B"
+MEMORY_EMBED_DIM=1024 # Embedding dimension for the model
+VECTOR_STORE_TABLE_NAME="llama_pg_vector_store"
+MEMORY_CHUNK_OVERLAP=20
+
+# Typing Simulation
+MIN_TYPING_SPEED=10
+MAX_TYPING_SPEED=30
+MAX_DELAY=5
+RANDOM_OFFSET_MIN=0.1
+RANDOM_OFFSET_MAX=0.5
+
+# Proactive Messaging
+PROACTIVE_MESSAGING_ENABLED=true
+PROACTIVE_MESSAGING_REDIS_URL=redis://redis:6379/0
+PROACTIVE_MESSAGING_INTERVAL_1H=3600
+PROACTIVE_MESSAGING_INTERVAL_9H=32400
+PROACTIVE_MESSAGING_INTERVAL_1D=86400
+PROACTIVE_MESSAGING_INTERVAL_1W=604800
+PROACTIVE_MESSAGING_INTERVAL_1MO=2592000
+PROACTIVE_MESSAGING_JITTER_1H=900
+PROACTIVE_MESSAGING_JITTER_9H=1800
+PROACTIVE_MESSAGING_JITTER_1D=7200
+PROACTIVE_MESSAGING_JITTER_1W=43200
+PROACTIVE_MESSAGING_JITTER_1MO=86400
+PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED=true
+PROACTIVE_MESSAGING_QUIET_HOURS_START="02:30"
+PROACTIVE_MESSAGING_QUIET_HOURS_END="08:00"
+PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES=5
+PROACTIVE_MESSAGING_RETRY_DELAY=300
+PROACTIVE_MESSAGING_MAX_RETRIES=3
+PROACTIVE_MESSAGING_RESTART_DELAY_MAX=900
+PROACTIVE_MESSAGING_PROMPT="Сгенерируй дружеское, заботливое сообщение, чтобы проверить, как у пользователя дела, на том языке, на котором ты обычно с ним разговариваешь. Сообщение должно быть кратким, естественным и прозрачным: не утверждай, что ты человек. Не повторяйся"
+
+# Message Queue
+MESSAGE_QUEUE_REDIS_URL=redis://redis:6379/0
+MESSAGE_QUEUE_MAX_RETRIES=3
+MESSAGE_QUEUE_LOCK_TIMEOUT=30
+MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL=10
+MESSAGE_QUEUE_DISPATCHER_INTERVAL=0.1
+
+# Buffer Manager
+BUFFER_SHORT_MESSAGE_TIMEOUT=4
+BUFFER_LONG_MESSAGE_TIMEOUT=0.1
+BUFFER_MAX_MESSAGES=8
+BUFFER_WORD_COUNT_THRESHOLD=30
+BUFFER_CLEANUP_INTERVAL=300

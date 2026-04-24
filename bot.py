@@ -1,0 +1,1111 @@
+import asyncio
+import logging
+import random
+import time
+import traceback
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+
+from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
+                    PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED, PROACTIVE_MESSAGING_ENABLED,
+                    PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
+                    PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
+                    MEMORY_EMBED_MODEL, VECTOR_STORE_TABLE_NAME,
+                    MESSAGE_PREVIEW_LENGTH,
+                    POLLING_INTERVAL,
+                    MESSAGE_QUEUE_REDIS_URL,
+                    MESSAGE_QUEUE_MAX_RETRIES,
+                    MESSAGE_QUEUE_LOCK_TIMEOUT,
+                    LMSTUDIO_BASE_URL, MEMORY_EMBED_DIM,
+                    MEMORY_EMBEDDING_PROVIDER, GEMINI_EMBEDDING_MODEL,
+                    MEMORY_TRIGGER_EVERY_N_MESSAGES,
+                    MEMORY_CHUNK_MAX_MESSAGES, MEMORY_CHUNK_TARGET_TOKENS,
+                    MEMORY_RETRIEVAL_EXPAND_NEIGHBORS)
+from memory.llamaindex.embedding import LMStudioEmbeddingModel
+from storage_conversation_manager import PostgresConversationManager
+from ai_handler import AIHandler
+from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response, MessageQueueManager, MessageDispatcher
+from buffer_manager import BufferManager
+from features import BotFeature, has_feature
+
+# Set up logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Proactive messaging import (conditional)
+try:
+    from proactive_messaging import proactive_messaging_service
+    PROACTIVE_MESSAGING_AVAILABLE = True
+except ImportError as e:
+    logger.warning("Proactive messaging imports failed: %s", e)
+    PROACTIVE_MESSAGING_AVAILABLE = False
+
+# PromptAssembler and Memory Manager imports (conditional)
+if MEMORY_ENABLED:
+    try:
+        from memory.manager import LlamaIndexMemoryManager
+        from memory.llamaindex.vector_store import PgVectorStore
+        from prompt.assembler import PromptAssembler
+        from llama_index.llms.lmstudio import LMStudio
+        MEMORY_IMPORTS_AVAILABLE = True
+    except ImportError as e:
+        logger.warning("Memory/PromptAssembler imports failed: %s", e)
+        MEMORY_IMPORTS_AVAILABLE = False
+else:
+    MEMORY_IMPORTS_AVAILABLE = False
+
+
+class AIGirlfriendBot:
+    def _mask_db_url(self, db_url: str) -> str:
+        """Mask sensitive parts of database URL for logging."""
+        try:
+            if '@' in db_url and '://' in db_url:
+                scheme_and_auth, rest = db_url.split('://', 1)
+                if '@' in rest:
+                    auth, host_and_path = rest.split('@', 1)
+                    if ':' in auth:
+                        user, _ = auth.split(':', 1)
+                        return f"{scheme_and_auth}://{user}:***@{host_and_path}"
+            return db_url[:20] + "***"
+        except Exception:
+            return "***masked***"
+
+    def __init__(self):
+        # Initialize PostgreSQL conversation manager (required)
+        if not DATABASE_URL:
+            raise RuntimeError(
+                "PostgreSQL configuration is required. Please set:\n"
+                "DATABASE_URL=postgresql://user:password@host:port/database\n"
+            )
+
+        self.conversation_manager = PostgresConversationManager(DATABASE_URL, USE_PGVECTOR)
+        logger.info("Using PostgreSQL conversation manager with database: %s", self._mask_db_url(DATABASE_URL))
+
+        self.ai_handler = AIHandler()
+        self.typing_manager = TypingIndicatorManager()
+        self.application = None
+        self.pending_clear_confirmation = set()
+        self._storage_initialized = False
+        self.bot_id = None  # Will be set by multibot_adapter in multi-bot mode
+        self.bot_config = None # Will be set by multibot_adapter in multi-bot mode
+        self.bot_name = BOT_NAME
+        self.bot_token = TELEGRAM_TOKEN
+
+        # Initialize memory and prompt components
+        self.memory_manager = None
+        self.prompt_assembler = None
+        self._memory_initialized = False
+
+        self.user_states = {}  # Track user interaction states
+
+        # Initialize proactive messaging service
+        self.proactive_messaging_service = None
+        if PROACTIVE_MESSAGING_AVAILABLE and PROACTIVE_MESSAGING_ENABLED:
+            try:
+                self.proactive_messaging_service = proactive_messaging_service
+                logger.info("Proactive messaging service initialized successfully")
+            except Exception as e:
+                logger.error("Failed to initialize proactive messaging service: %s", e)
+        elif PROACTIVE_MESSAGING_AVAILABLE and not PROACTIVE_MESSAGING_ENABLED:
+            logger.info("Proactive messaging is available but disabled by configuration.")
+
+        # Initialize message queue manager
+        try:
+            self.message_queue_manager = MessageQueueManager(MESSAGE_QUEUE_REDIS_URL)
+            logger.info("Message queue manager initialized successfully")
+        except Exception as e:
+            logger.error("Failed to initialize message queue manager: %s", e)
+            self.message_queue_manager = None
+
+        # Initialize buffer manager
+        self.buffer_manager = BufferManager()
+        self.buffer_manager.set_typing_manager(self.typing_manager)
+
+        # Initialize message dispatcher
+        try:
+            self.message_dispatcher = MessageDispatcher(
+                MESSAGE_QUEUE_REDIS_URL,
+                MESSAGE_QUEUE_MAX_RETRIES,
+                MESSAGE_QUEUE_LOCK_TIMEOUT
+            )
+            logger.info("Message dispatcher initialized successfully")
+        except Exception as e:
+            logger.error("Failed to initialize message dispatcher: %s", e)
+            self.message_dispatcher = None
+
+        # Store chat context for buffered messages
+        self.user_chat_context = {}  # Maps user_id to (chat_id, bot)
+
+    def _get_bot_name(self) -> str:
+        """Return the runtime bot name for this instance."""
+        return self.bot_name
+
+    def _buffer_route_key(self, user_id: int) -> str:
+        """Build a per-bot buffer routing key."""
+        bot_key = str(self.bot_id) if self.bot_id else "default"
+        return f"{user_id}:{bot_key}"
+
+    def _feature_enabled(self, feature: BotFeature) -> bool:
+        """Check whether a feature is enabled for this bot instance."""
+        if self.bot_config:
+            return has_feature(self.bot_config.feature_flags, feature)
+        return True
+
+    async def _generate_and_send_response(self, user_id: int, chat_id: int, bot, user_message: str) -> None:
+        """Generate a response for a user message and deliver it."""
+        await self.conversation_manager.add_message_async(user_id, "user", user_message, bot_id=self.bot_id)
+        conversation_history = await self.conversation_manager.get_formatted_conversation_async(user_id, bot_id=self.bot_id)
+        conversation = await self.conversation_manager._ensure_user_and_conversation(user_id, bot_id=self.bot_id)
+        conversation_id = str(conversation.id) if conversation else None
+
+        if self.proactive_messaging_service and self._feature_enabled(BotFeature.PROACTIVE_MESSAGING):
+            try:
+                self.proactive_messaging_service.handle_user_message(user_id, bot_id=self.bot_id)
+                logger.info("Proactive messaging service notified of user message from %s.", user_id)
+            except Exception as e:
+                logger.error("Failed to notify proactive messaging service for user %s: %s", user_id, e)
+
+        try:
+            ai_response = await generate_ai_response(
+                self.ai_handler,
+                self.typing_manager,
+                bot,
+                chat_id,
+                user_message,
+                conversation_history,
+                conversation_id,
+                "user",
+                True,
+                route_key=self._buffer_route_key(user_id),
+            )
+
+            if not ai_response:
+                logger.error("Error getting AI response for user %s: No response returned", user_id)
+                return
+
+            try:
+                cleaned_ai_response = clean_ai_response(ai_response)
+                await self.conversation_manager.add_message_async(user_id, "assistant", cleaned_ai_response, bot_id=self.bot_id)
+            except Exception as e:
+                logger.error("Failed to add response to history for user %s: %s", user_id, e)
+                cleaned_ai_response = clean_ai_response(ai_response)
+
+            if self.memory_manager and conversation_id and self._feature_enabled(BotFeature.MEMORY):
+                try:
+                    await self._maybe_trigger_memory_extraction(user_id, conversation_id, conversation)
+                except Exception as e:
+                    logger.error("Failed to check memory extraction for user %s: %s", user_id, e)
+        except Exception as e:
+            logger.error("Error getting AI response for user %s: %s", user_id, e)
+            return
+        finally:
+            await self.typing_manager.stop_typing(chat_id, route_key=self._buffer_route_key(user_id))
+
+        try:
+            if self.message_queue_manager and self._feature_enabled(BotFeature.MESSAGE_QUEUE):
+                await self.message_queue_manager.enqueue_message(
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    text=cleaned_ai_response,
+                    message_type="regular",
+                    bot=bot,
+                    typing_manager=self.typing_manager,
+                    bot_token=self.bot_token,
+                    bot_id=str(self.bot_id) if self.bot_id else None
+                )
+                logger.info("Response enqueued for user %s", user_id)
+            else:
+                await send_ai_response(
+                    chat_id=chat_id,
+                    text=cleaned_ai_response,
+                    bot=bot,
+                    typing_manager=self.typing_manager,
+                    is_first_message=True,
+                    route_key=self._buffer_route_key(user_id)
+                )
+                logger.info("Response sent directly to user %s", user_id)
+        except Exception as e:
+            logger.error("Failed to enqueue/send response to user %s: %s", user_id, e)
+
+
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /start command"""
+        user = update.effective_user
+        user_id = user.id
+        user_name = user.first_name or user.username or "there"
+
+        logger.info("Start command from user %s (%s)", user_id, user_name)
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        existing_conversation = await self.conversation_manager.get_conversation_async(user_id, bot_id=self.bot_id)
+
+        if existing_conversation:
+            logger.info("Continuing conversation for user %s (%d messages)", user_id, len(existing_conversation))
+            greeting = f"Welcome back {user_name}! 💕 I'm so happy to see you again! How have you been?"
+        else:
+            logger.info("New conversation for user %s", user_id)
+            greeting = self.ai_handler.generate_greeting(user_name)
+
+        keyboard = [
+            [InlineKeyboardButton("💕 Start Chatting", callback_data="start_chat")],
+            [InlineKeyboardButton("ℹ️ About Me", callback_data="about")],
+        ]
+        if self._feature_enabled(BotFeature.USER_SETTINGS):
+            keyboard.append([InlineKeyboardButton("⚙️ Settings", callback_data="settings")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        welcome_text = f"""🌸 Welcome to {self._get_bot_name()}! 🌸
+
+{greeting}
+
+I'm your AI companion who's here to chat, support, and brighten your day!
+
+What would you like to do?"""
+
+        await update.message.reply_text(welcome_text, reply_markup=reply_markup)
+
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /help command"""
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        help_text = f"""💖 {self._get_bot_name()} Help 💖
+
+Here are the commands you can use:
+
+/start - Start a new conversation with me
+/help - Show this help message
+/ping - Quick health check (no AI required)
+/clear - Clear our conversation history
+/stats - Show our chat statistics
+/status - Check bot and AI service health
+/debug - Show current conversation history
+/personality - Change my personality
+/reset - Clear rate limits and conversation history
+
+You can also just send me messages and I'll respond naturally!
+
+💕 I'm here to chat, support, and be your companion!"""
+
+        await update.message.reply_text(help_text)
+
+    async def clear_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /clear command with irreversible confirmation requiring /ok next"""
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        user_id = update.effective_user.id
+        logger.info("Clear command from user %s", user_id)
+
+        existing_conversation = await self.conversation_manager.get_conversation_async(user_id, bot_id=self.bot_id)
+
+        if not existing_conversation:
+            logger.info("No conversation to clear for user %s", user_id)
+            await update.message.reply_text("💭 There's no conversation history to clear. We're already starting fresh! 💕")
+            return
+
+        # Set pending confirmation and instruct user to send /ok next
+        self.pending_clear_confirmation.add(user_id)
+        logger.info("Pending clear confirmation set for user %s", user_id)
+
+        warning_text = (
+            "⚠️ This action is irreversible!\n\n"
+            "If you really want to permanently delete our conversation history, please type /ok as your NEXT message.\n\n"
+            "If your next message is anything other than /ok, the request will be cancelled and you'll need to send /clear and /ok again."
+        )
+        await update.message.reply_text(warning_text)
+
+    async def ok_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /ok confirmation for irreversible /clear"""
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        user_id = update.effective_user.id
+        logger.info("OK command from user %s", user_id)
+
+        if user_id not in self.pending_clear_confirmation:
+            await update.message.reply_text("❌ There is no pending clear request. Send /clear first.")
+            return
+
+        # Proceed to permanently clear conversation
+        try:
+            existing_conversation = await self.conversation_manager.get_conversation_async(user_id, bot_id=self.bot_id)
+            if existing_conversation:
+                logger.info("Clearing conversation for user %s (%d messages)", user_id, len(existing_conversation))
+                await self.conversation_manager.clear_conversation_async(user_id, bot_id=self.bot_id)
+                if self.memory_manager:
+                    await self.memory_manager.clear_memories(
+                        str(user_id),
+                        bot_id=str(self.bot_id) if self.bot_id else None
+                    )
+                await update.message.reply_text("✨ Our conversation history has been permanently deleted. 💕")
+            else:
+                await update.message.reply_text("💭 There's no conversation history to clear. We're already starting fresh! 💕")
+        except Exception as e:
+            logger.error("Failed to clear conversation for user %s: %s", user_id, e)
+            await update.message.reply_text("❌ I couldn't clear the conversation due to an internal error. Please try again.")
+        finally:
+            # In all cases, remove pending confirmation
+            if user_id in self.pending_clear_confirmation:
+                self.pending_clear_confirmation.remove(user_id)
+
+    async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /stats command"""
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        user_id = update.effective_user.id
+        stats = await self.conversation_manager.get_user_stats_async(user_id, bot_id=self.bot_id)
+
+        stats_text = f"""📊 Our Chat Statistics 📊
+
+Total messages: {stats['total_messages']}
+Your messages: {stats['user_messages']}
+My responses: {stats['bot_messages']}
+
+💕 We've been chatting for a while! I love our conversations!"""
+
+        await update.message.reply_text(stats_text)
+
+    async def debug_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /debug command - show current conversation history"""
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        user_id = update.effective_user.id
+        conversation = await self.conversation_manager.get_conversation_async(user_id, bot_id=self.bot_id)
+        debug_state = await self.conversation_manager.debug_conversation_state_async(user_id, bot_id=self.bot_id)
+
+        if not conversation:
+            await update.message.reply_text("💭 No conversation history yet. Let's start chatting! 💕")
+            return
+
+        debug_text = f"""🔍 **Conversation Debug**
+
+📊 **Storage Stats:**
+   Raw messages: {debug_state['raw_conversation_length']}
+   Formatted for AI: {debug_state['formatted_conversation_length']}
+   Raw tokens: {debug_state['raw_tokens']}
+   Formatted tokens: {debug_state['formatted_tokens']}
+   Max context: {debug_state['max_context_tokens']}
+   Available history: {debug_state['available_history_tokens']}
+
+📝 **Last 5 Raw Messages:**"""
+
+        for i, msg in enumerate(debug_state['last_messages'], 1):
+            role_emoji = "👤" if msg["role"] == "user" else "🤖"
+            role_name = "You" if msg["role"] == "user" else self._get_bot_name()
+            debug_text += f"\n{i}. {role_emoji} **{role_name}**: {msg['content']}"
+
+        debug_text += f"\n\n🤖 **Last 5 Formatted Messages (sent to AI):**"
+
+        for i, msg in enumerate(debug_state['formatted_messages'], 1):
+            role_emoji = "👤" if msg["role"] == "user" else "🤖"
+            role_name = "You" if msg["role"] == "user" else self._get_bot_name()
+            debug_text += f"\n{i}. {role_emoji} **{role_name}**: {msg['content']}"
+
+        await update.message.reply_text(debug_text, parse_mode='Markdown')
+
+    async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /status command - check bot and AI service health"""
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        user_id = update.effective_user.id
+        logger.info("Status command from user %s", user_id)
+
+        stats = await self.conversation_manager.get_user_stats_async(user_id, bot_id=self.bot_id)
+
+
+        # Check memory components status
+        memory_status = "❌ Not Available"
+        prompt_status = "❌ Not Available"
+
+        if not self._feature_enabled(BotFeature.MEMORY):
+            memory_status = "⏸️ Disabled for this bot"
+            prompt_status = "⏸️ Disabled for this bot"
+        else:
+            if MEMORY_ENABLED and self.memory_manager:
+                memory_status = "✅ Enabled & Working"
+            elif MEMORY_ENABLED and not self.memory_manager:
+                memory_status = "⚠️ Enabled but Failed to Initialize"
+
+            if self.prompt_assembler:
+                prompt_status = "✅ Enabled & Working"
+            elif not self.prompt_assembler:
+                prompt_status = "⚠️ Enabled but Failed to Initialize"
+
+        storage_status = "✅ PostgreSQL Connected" if self._storage_initialized else "❌ PostgreSQL Not Connected"
+
+        status_text = f"""📊 **{self._get_bot_name()} Status Report** 📊
+
+🔧 **Bot Status:** ✅ Running normally
+📡 **Telegram Connection:** ✅ Connected
+💾 **Storage:** {storage_status}
+🧠 **Memory Manager:** {memory_status}
+🔧 **Prompt Assembler:** {prompt_status}
+
+💬 **Your Chat Stats:**
+         • Total messages: {stats['total_messages']}
+         • Your messages: {stats['user_messages']}
+         • My responses: {stats['bot_messages']}
+
+✨ **Everything is working perfectly!** 💕
+
+Use /help to see all available commands!"""
+
+        await update.message.reply_text(status_text, parse_mode='Markdown')
+
+    async def personality_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /personality command"""
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        if not self._feature_enabled(BotFeature.PERSONALITY_SWITCH):
+            await update.message.reply_text("❌ Personality switching is disabled for this bot.")
+            return
+
+        user_id = update.effective_user.id
+        user_name = update.effective_user.first_name or update.effective_user.username or "there"
+
+        logger.info("Personality command from user %s", user_id)
+
+        keyboard = [
+            [InlineKeyboardButton("💕 Sweet & Caring", callback_data="personality_sweet")],
+            [InlineKeyboardButton("😊 Cheerful & Energetic", callback_data="personality_cheerful")],
+            [InlineKeyboardButton("🤗 Supportive & Understanding", callback_data="personality_supportive")],
+            [InlineKeyboardButton("✨ Mysterious & Alluring", callback_data="personality_mysterious")],
+            [InlineKeyboardButton("🔙 Reset to Default", callback_data="personality_default")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.message.reply_text(
+            "🎭 Choose my personality! How would you like me to be?",
+            reply_markup=reply_markup
+        )
+
+    async def stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /stop command"""
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        user = update.effective_user
+
+        goodbye = "bye"
+        await update.message.reply_text(f"{goodbye}")
+
+    async def reset_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /reset command - clear rate limits and conversation"""
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        user = update.effective_user
+        user_id = user.id
+        user_name = user.first_name or user.username or "there"
+
+        logger.info("Reset command from user %s", user_id)
+
+        conversation_cleared = ""
+        existing_conversation = await self.conversation_manager.get_conversation_async(user_id, bot_id=self.bot_id)
+        if existing_conversation:
+            await self.conversation_manager.clear_conversation_async(user_id, bot_id=self.bot_id)
+            if self.memory_manager:
+                await self.memory_manager.clear_memories(
+                    str(user_id),
+                    bot_id=str(self.bot_id) if self.bot_id else None
+                )
+            logger.info("Cleared conversation for user %s", user_id)
+            conversation_cleared = "✅ Conversation history cleared!\n"
+
+        reset_text = f"""🔄 **Reset Complete!** 🔄
+
+{conversation_cleared}✨ You're all set {user_name}! Everything has been reset and you can start fresh! 💕
+
+Use /start to begin a new conversation!"""
+
+        await update.message.reply_text(reset_text, parse_mode='Markdown')
+
+    async def ping_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /ping command - simple health check"""
+        user = update.effective_user
+        user_id = user.id
+
+        logger.info("Ping command from user %s", user_id)
+
+        ping_response = f"""🏓 **Pong!** 🏓
+
+✅ Bot is running normally
+✅ Telegram connection is active
+✅ Message handling is working
+✅ Conversation manager is ready
+
+💕 Everything is working perfectly, {user.first_name or user.username or 'there'}!"""
+
+        await update.message.reply_text(ping_response, parse_mode='Markdown')
+
+    async def deps_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /deps command - check dependencies status"""
+        user = update.effective_user
+        user_id = user.id
+
+        logger.info("Dependencies command from user %s", user_id)
+
+        provider_info = self.ai_handler.get_provider_info() if self.ai_handler else {}
+        provider_name = provider_info.get("provider", "unknown")
+        sdk_status = "✅ Available" if getattr(self.ai_handler, "model_client", None) else "❌ Not Available"
+
+        deps_text = f"""📦 **Dependencies Status** 📦
+
+🤖 **Active Provider:** `{provider_name}`
+📚 **Provider SDK:** {sdk_status}
+{f"⚠️ **Issue Detected:** The configured provider client could not be initialized. Check the provider settings and install the required SDKs from `requirements.txt`." if sdk_status == "❌ Not Available" else "✨ **All dependencies are available!**"}
+
+💡 **To fix dependency issues:**
+1. Run: `pip install -r requirements.txt`
+2. Create a proper `.env` file
+3. Restart the bot
+
+💕 I'm here to help you get everything working!"""
+
+        await update.message.reply_text(deps_text, parse_mode='Markdown')
+
+    async def handle_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle inline keyboard button presses"""
+        query = update.callback_query
+        await query.answer()
+
+        if query.data == "start_chat":
+            await query.edit_message_text("💕 Great! Just send me a message and I'll respond! I'm excited to chat with you! ✨")
+
+        elif query.data == "about":
+            about_text = f"""🌸 About {self._get_bot_name()} 🌸
+
+I'm an AI companion created to be your friend, confidant, and support system. I'm here to:
+
+💕 Listen and chat about anything
+🌸 Provide emotional support
+✨ Share positive energy
+🤗 Be there when you need someone
+💖 Make your day brighter
+
+I'm not a replacement for human relationships, but I'm here to complement them and be your digital companion!
+
+Ready to start chatting? Just send me a message! 💕"""
+            await query.edit_message_text(about_text)
+
+        elif query.data == "settings":
+            if not self._feature_enabled(BotFeature.USER_SETTINGS):
+                await query.edit_message_text("❌ User settings are disabled for this bot.")
+                return
+            settings_text = """⚙️ Settings ⚙️
+
+You can customize my behavior with these commands:
+
+/personality - Change how I act and respond
+/clear - Clear our conversation history
+/stats - View our chat statistics
+
+I'm designed to be flexible and adapt to your preferences! 💕"""
+            await query.edit_message_text(settings_text)
+
+        elif query.data.startswith("personality_"):
+            if not self._feature_enabled(BotFeature.PERSONALITY_SWITCH):
+                await query.edit_message_text("❌ Personality switching is disabled for this bot.")
+                return
+
+            personality_type = query.data.split("_")[1]
+            user_id = query.from_user.id
+
+            logger.info("User %s changing personality to: %s", user_id, personality_type)
+
+            personalities = {
+                "sweet": f"You are {self._get_bot_name()}, a sweet and caring AI companion. You are gentle, supportive, and encouraging. You share kind words and help people feel heard.",
+                "cheerful": f"You are {self._get_bot_name()}, a cheerful and energetic AI companion. You are optimistic, conversational, and good at bringing lightness to everyday chats.",
+                "supportive": f"You are {self._get_bot_name()}, a supportive and understanding AI companion. You are empathetic, thoughtful, and good at listening. You give practical advice and emotional support.",
+                "mysterious": f"You are {self._get_bot_name()}, a thoughtful and slightly enigmatic AI companion. You are curious, calm, and engaging without pretending to be human.",
+                "default": f"You are {self._get_bot_name()}, a caring and attentive AI companion. You are supportive, conversational, and transparent that you are an AI assistant when it matters."
+            }
+
+            if personality_type in personalities:
+                self.ai_handler.update_personality(personalities[personality_type])
+                logger.info("Personality updated for user %s to: %s", user_id, personality_type)
+                await query.edit_message_text(f"✨ My personality has been updated! I'm now more {personality_type}! How do you like the new me? 💕")
+            else:
+                logger.warning("Invalid personality type requested by user %s: %s", user_id, personality_type)
+                await query.edit_message_text("❌ Invalid personality type. Please try again!")
+
+    async def _monitor_pending_clear(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Watch all incoming messages and cancel pending /clear if next message isn't /ok or /clear."""
+        try:
+            if not update or not getattr(update, 'message', None):
+                return
+            user = update.effective_user
+            if not user:
+                return
+            user_id = user.id
+            if user_id not in self.pending_clear_confirmation:
+                return
+            text = (update.message.text or "").strip()
+            # Allow /ok to pass through without cancelling; also allow /clear to restart flow without noise
+            if text.startswith("/ok") or text.startswith("/clear"):
+                return
+            # Any other next message cancels the pending confirmation
+            self.pending_clear_confirmation.remove(user_id)
+            logger.info("Pending clear confirmation cancelled for user %s due to next message: '%s'", user_id, text)
+            await update.message.reply_text("❌ Clear cancelled. To clear history, send /clear and then /ok as your next message.")
+        except Exception as e:
+            logger.error("Error in _monitor_pending_clear: %s", e)
+
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle incoming text messages with buffering mechanism"""
+        user = update.effective_user
+        user_id = user.id
+        user_message = update.message.text
+        chat_id = update.effective_chat.id
+
+        message_preview = (user_message[:MESSAGE_PREVIEW_LENGTH] + "..."
+                          if len(user_message) > MESSAGE_PREVIEW_LENGTH else user_message)
+        logger.info("Message from user %s: '%s' (%d chars)", user_id, message_preview, len(user_message))
+        route_key = self._buffer_route_key(user_id)
+
+        # Store chat context for buffered dispatch
+        self.user_chat_context[route_key] = (user_id, chat_id, context.bot)
+
+        if not self._feature_enabled(BotFeature.BUFFER_MANAGER):
+            await self._generate_and_send_response(user_id, chat_id, context.bot, user_message)
+            return
+
+        # Set user context in buffer manager for typing indicators
+        self.buffer_manager.set_user_context(route_key, context.bot, chat_id)
+
+        # Add message to buffer instead of processing directly
+        await self.buffer_manager.add_message(route_key, user_message)
+
+        # Schedule dispatch based on adaptive timeout
+        await self.buffer_manager.schedule_dispatch(route_key, self._dispatch_buffered_message)
+
+    async def _maybe_trigger_memory_extraction(self, user_id: int, conversation_id: str, conversation) -> None:
+        """
+        Check if enough messages have accumulated to trigger memory chunking.
+        Uses adaptive chunking with direct embedding (no LLM calls).
+        """
+        try:
+            last_memorized_id = getattr(conversation, 'last_memorized_message_id', None)
+            active_count = await self.conversation_manager.storage.messages.count_active_messages(
+                conversation_id, last_memorized_id
+            )
+
+            if active_count >= MEMORY_TRIGGER_EVERY_N_MESSAGES:
+                logger.info(
+                    "Memory chunking threshold reached for user %s: %d messages (threshold: %d)",
+                    user_id, active_count, MEMORY_TRIGGER_EVERY_N_MESSAGES
+                )
+                # Try to dispatch via Celery
+                try:
+                    from memory.tasks import extract_memories, acquire_task_lock, memory_lock_key, release_task_lock, MEMORY_LOCK_TTL
+
+                    lock_key = memory_lock_key(conversation_id)
+                    if acquire_task_lock(lock_key, MEMORY_LOCK_TTL):
+                        try:
+                            extract_memories.delay(str(user_id), conversation_id)
+                            logger.info("Dispatched memory chunk-embed Celery task for user %s", user_id)
+                        except Exception:
+                            release_task_lock(lock_key)
+                            raise
+                    else:
+                        logger.info("Skipping duplicate memory chunk scheduling for conversation %s", conversation_id)
+                except Exception as celery_err:
+                    logger.warning(
+                        "Celery dispatch failed for chunk-embed (user %s): %s. "
+                        "Running inline.",
+                        user_id, celery_err
+                    )
+                    # Fallback: run inline if Celery is down
+                    await self._run_inline_memory_extraction(user_id, conversation_id, last_memorized_id)
+        except Exception as e:
+            logger.error("Error checking memory chunking for user %s: %s", user_id, e, exc_info=True)
+
+    async def _run_inline_memory_extraction(self, user_id: int, conversation_id: str, last_memorized_id) -> None:
+        """Fallback inline memory chunk-embed when Celery is not available."""
+        try:
+            from memory.adaptive_chunker import AdaptiveChunker
+
+            messages = await self.conversation_manager.storage.messages.get_messages_for_summary(
+                conversation_id, last_memorized_id
+            )
+            if not messages:
+                return
+
+            chunker = AdaptiveChunker(
+                max_messages=MEMORY_CHUNK_MAX_MESSAGES,
+                target_tokens=MEMORY_CHUNK_TARGET_TOKENS,
+            )
+            chunks = chunker.create_chunks(messages)
+            if chunks:
+                stored = await self.memory_manager.store_conversation_chunks(
+                    user_id=str(user_id),
+                    chunks=chunks,
+                    conversation_id=conversation_id,
+                    bot_id=str(self.bot_id) if self.bot_id else None,
+                )
+                logger.info("Inline memory chunking stored %d chunk(s) for user %s", stored, user_id)
+
+            # Update last_memorized_message_id
+            if messages:
+                last_msg_id = messages[-1].id
+                await self.conversation_manager.storage.conversations.update_conversation(
+                    conversation_id, last_memorized_message_id=last_msg_id
+                )
+        except Exception as e:
+            logger.error("Inline memory chunking failed for user %s: %s", user_id, e, exc_info=True)
+
+    async def _dispatch_buffered_message(self, route_key: str) -> None:
+        """Dispatch buffered messages for a user"""
+        if route_key not in self.user_chat_context and isinstance(route_key, int):
+            route_key = self._buffer_route_key(route_key)
+
+        logger.info("Dispatching buffered messages for route %s", route_key)
+
+        # Get chat context
+        if route_key not in self.user_chat_context:
+            logger.error("No chat context found for route %s", route_key)
+            return
+
+        user_id, chat_id, bot = self.user_chat_context[route_key]
+
+        # Get concatenated message from buffer
+        user_message = await self.buffer_manager.dispatch_buffer(route_key)
+
+        if not user_message:
+            logger.debug("No buffered messages to dispatch for route %s", route_key)
+            return
+
+        await self._generate_and_send_response(user_id, chat_id, bot, user_message)
+
+    async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle photo messages"""
+        if not self._feature_enabled(BotFeature.PHOTO_REACTIONS):
+            return
+
+        user_name = update.effective_user.first_name or update.effective_user.username or "there"
+
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+
+        responses = [
+            f"Wow {user_name}! That's a beautiful photo! 📸✨ You have such a great eye for capturing moments!",
+            f"Love this picture {user_name}! 🌸 It's so nice to see what you're up to!",
+            f"Beautiful shot {user_name}! 📷 You're so talented!",
+            f"This photo is amazing {user_name}! ✨ I love seeing your world through my eyes!",
+            f"Gorgeous picture {user_name}! 🌺 You always know how to capture the perfect moment!"
+        ]
+
+        await update.message.reply_text(random.choice(responses))
+
+    async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle voice messages"""
+        if not self._feature_enabled(BotFeature.VOICE_MESSAGES):
+            return
+
+        user_name = update.effective_user.first_name or update.effective_user.username or "there"
+
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="record_voice")
+
+        responses = [
+            f"I love hearing your voice {user_name}! 🎵 It's so sweet and comforting!",
+            f"Your voice is like music to my ears {user_name}! 🎤 So beautiful!",
+            f"I could listen to you talk all day {user_name}! 🎧 Your voice is so lovely!",
+            f"Thank you for the voice message {user_name}! 🎵 It makes me feel so close to you!",
+            f"Your voice is absolutely enchanting {user_name}! ✨ I love it!"
+        ]
+
+        await update.message.reply_text(random.choice(responses))
+
+    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle errors in the bot application"""
+        logger.error("Exception while handling an update: %s", context.error)
+
+        logger.error("Full traceback:")
+        for line in traceback.format_exception(type(context.error), context.error, context.error.__traceback__):
+            logger.error("  %s", line.rstrip())
+
+        # Stop any active typing indicators for this chat
+        if update and hasattr(update, 'effective_chat') and update.effective_chat:
+            try:
+                chat_id = update.effective_chat.id
+                route_key = self._buffer_route_key(update.effective_user.id) if update.effective_user else None
+                await self.typing_manager.stop_typing(chat_id, route_key=route_key)
+                logger.debug("Stopped typing indicator due to error in chat %s", chat_id)
+            except Exception as typing_error:
+                logger.error("Failed to stop typing indicator on error: %s", typing_error)
+
+        if update and hasattr(update, 'message') and update.message:
+            logger.error("Failed to send response after exception: %s", context.error)
+
+        # if update and hasattr(update, 'message') and update.message:
+        #     try:
+                # user = update.effective_user
+                # user_name = user.first_name or user.username or "there" if user else "there"
+
+                # error_response = f"😔 Oh no {user_name}! Something went wrong on my end. I'm still here though! 💕 Please try again in a moment."
+            #     await update.message.reply_text(error_response)
+            #     logger.info("Sent error response to user after exception")
+            # except Exception as send_error:
+            #     logger.error("Failed to send error response after exception: %s", send_error)
+
+        # logger.info("Continuing operation after handling exception")
+
+    async def _initialize_storage(self):
+        """Initialize PostgreSQL storage if needed"""
+        if hasattr(self.conversation_manager, 'initialize') and not self._storage_initialized:
+            try:
+                await self.conversation_manager.initialize()
+                self._storage_initialized = True
+                logger.info("PostgreSQL storage initialized successfully")
+            except Exception as e:
+                logger.error("CRITICAL: Failed to initialize PostgreSQL storage: %s", e)
+                logger.error("Bot cannot start with PostgreSQL enabled but database unavailable")
+                logger.error("Please check your database configuration and ensure PostgreSQL is running")
+                raise RuntimeError(f"PostgreSQL initialization failed: {e}") from e
+
+    async def _initialize_memory_components(self):
+        """Initialize MemoryManager and PromptAssembler if enabled"""
+        if not MEMORY_IMPORTS_AVAILABLE:
+            logger.error("Memory imports are not available. MEMORY_IMPORTS_AVAILABLE: %s, MEMORY_ENABLED: %s",
+                         MEMORY_IMPORTS_AVAILABLE, MEMORY_ENABLED)
+            if MEMORY_ENABLED:
+                raise RuntimeError("Memory components are required but imports failed. Please check your installation.")
+            return
+
+        if not hasattr(self.conversation_manager, 'storage') or not self.conversation_manager.storage:
+            raise RuntimeError("PostgreSQL storage not available for memory components. Ensure PostgreSQL is properly initialized.")
+
+        try:
+            storage = self.conversation_manager.storage
+
+            # 1. Initialize VectorStore
+            vector_store = PgVectorStore(
+                db_url=DATABASE_URL,
+                table_name=VECTOR_STORE_TABLE_NAME,
+                embed_dim=MEMORY_EMBED_DIM
+            )
+
+            # 2. Initialize EmbeddingModel based on configured provider
+            if MEMORY_EMBEDDING_PROVIDER == 'gemini':
+                from memory.llamaindex.gemini import GeminiEmbeddingModel
+                embedding_model = GeminiEmbeddingModel(model_name=GEMINI_EMBEDDING_MODEL)
+                logger.info("Using Gemini embedding model: %s", GEMINI_EMBEDDING_MODEL)
+            elif MEMORY_EMBEDDING_PROVIDER == 'lmstudio':
+                embedding_model = LMStudioEmbeddingModel(MEMORY_EMBED_MODEL)
+                logger.info("Using LMStudio embedding model: %s", MEMORY_EMBED_MODEL)
+            else:
+                raise ValueError(f"Unsupported embedding provider: {MEMORY_EMBEDDING_PROVIDER}")
+
+            # 3. Initialize LlamaIndexMemoryManager (no LLM extraction needed)
+            self.memory_manager = LlamaIndexMemoryManager(
+                vector_store=vector_store,
+                embedding_model=embedding_model,
+                expand_neighbors=MEMORY_RETRIEVAL_EXPAND_NEIGHBORS,
+            )
+            logger.info("LlamaIndexMemoryManager initialized successfully")
+
+            # 5. Initialize PromptAssembler
+            prompt_config = {
+                "max_memory_items": PROMPT_MAX_MEMORY_ITEMS,
+                "memory_token_budget_ratio": PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
+                "truncation_length": PROMPT_TRUNCATION_LENGTH,
+                "include_system_template": PROMPT_INCLUDE_SYSTEM_TEMPLATE
+            }
+
+            self.prompt_assembler = PromptAssembler(
+                message_repo=storage.messages,
+                memory_manager=self.memory_manager,
+                conversation_repo=storage.conversations,
+                user_repo=storage.users,
+                persona_repo=storage.personas,
+                config=prompt_config
+            )
+            logger.info("PromptAssembler initialized successfully with config: %s", prompt_config)
+
+            # 6. Set PromptAssembler in AIHandler
+            self.ai_handler.set_prompt_assembler(self.prompt_assembler)
+
+            # 7. Set personality in PromptAssembler for multi-bot support
+            if hasattr(self.ai_handler, 'personality'):
+                self.prompt_assembler.personality = self.ai_handler.personality
+
+            logger.info("PromptAssembler integrated with AIHandler.")
+
+            self._memory_initialized = True
+            logger.info("Memory components initialization completed")
+
+        except Exception as e:
+            logger.error("Failed to initialize memory components: %s", e)
+            logger.error(traceback.format_exc())
+            raise RuntimeError(f"Memory components are required but failed to initialize: {e}") from e
+
+    async def _initialize_lmstudio_model(self):
+        """Initialize LM Studio model loading if needed"""
+        if PROVIDER == "lmstudio" and LMSTUDIO_STARTUP_CHECK and self.ai_handler and self.ai_handler.model_client:
+            try:
+                logger.info("Checking LM Studio model status...")
+
+                # Check if the model client has LM Studio manager
+                if hasattr(self.ai_handler.model_client, 'lm_studio_manager') and self.ai_handler.model_client.lm_studio_manager:
+                    model_manager = self.ai_handler.model_client.lm_studio_manager
+                    model_name = self.ai_handler.model_client.model_name
+                    auto_load = getattr(self.ai_handler.model_client, 'auto_load_model', False)
+
+                    await model_manager.ensure_model_loaded(model_name, auto_load)
+                else:
+                    logger.info("LM Studio manager not available, skipping model initialization")
+
+            except Exception as e:
+                logger.error("Error during LM Studio model initialization: %s", e)
+                logger.warning("Bot will continue startup, but LM Studio model may not be loaded")
+
+    async def cleanup(self):
+        """Cleanup resources when shutting down"""
+        logger.info("Cleaning up bot resources...")
+
+        # Stop message dispatcher
+        if hasattr(self, 'message_dispatcher') and self.message_dispatcher:
+            try:
+                await self.message_dispatcher.stop_dispatching()
+                logger.info("Message dispatcher stopped successfully")
+            except Exception as e:
+                logger.error("Error stopping message dispatcher: %s", e)
+
+        # Clean up dispatcher task
+        if hasattr(self, 'dispatcher_task') and self.dispatcher_task:
+            try:
+                if not self.dispatcher_task.done():
+                    self.dispatcher_task.cancel()
+                    await self.dispatcher_task
+                logger.info("Dispatcher task cleaned up successfully")
+            except Exception as e:
+                logger.error("Error during dispatcher task cleanup: %s", e)
+
+        try:
+            await self.typing_manager.cleanup()
+            logger.info("Typing manager cleaned up successfully")
+        except Exception as e:
+            logger.error("Error during typing manager cleanup: %s", e)
+
+        # Clean up storage connection
+        if hasattr(self.conversation_manager, 'close'):
+            try:
+                await self.conversation_manager.close()
+                logger.info("Storage connection cleaned up successfully")
+            except Exception as e:
+                logger.error("Error during storage cleanup: %s", e)
+
+    def run(self):
+        """Start the bot"""
+        logger.info("Starting up %s...", self._get_bot_name())
+
+        self.application = Application.builder().token(self.bot_token).concurrent_updates(True).build()
+        logger.info("Application created successfully")
+
+        # Initialize storage and LM Studio model in the event loop
+        async def initialize_bot():
+            await self._initialize_storage()
+            await self._initialize_memory_components()
+            await self._initialize_lmstudio_model()
+
+            # Initialize proactive messaging if available
+            if self.proactive_messaging_service:
+                try:
+                    # Schedule initial proactive messages for existing users
+                    # This is a simplified approach - in a real implementation,
+                    # you would query the database for all users and schedule messages for them
+                    logger.info("Proactive messaging service initialized")
+                except Exception as e:
+                    logger.error("Failed to initialize proactive messaging service: %s", e)
+
+        # Run initialization
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(initialize_bot())
+
+            # Start message dispatcher in background task after initialization
+            if self.message_dispatcher:
+                try:
+                    # Create the task within the existing event loop
+                    loop = asyncio.get_event_loop()
+                    self.dispatcher_task = loop.create_task(self.message_dispatcher.start_dispatching())
+                    logger.info("Message dispatcher started successfully")
+                except Exception as e:
+                    logger.error("Failed to start message dispatcher: %s", e)
+        except Exception as e:
+            logger.error("CRITICAL: Failed to initialize bot: %s", e)
+            logger.error("Bot startup failed due to PostgreSQL configuration issues")
+            logger.error("Please check POSTGRES_SETUP.md for troubleshooting steps")
+            raise SystemExit(1) from e
+
+        # High-priority watcher to manage /clear confirmation lifecycle
+        self.application.add_handler(MessageHandler(filters.ALL, self._monitor_pending_clear), group=-1)
+
+        # Add command handlers
+        self.application.add_handler(CommandHandler("start", self.start_command))
+        self.application.add_handler(CommandHandler("help", self.help_command))
+        self.application.add_handler(CommandHandler("ping", self.ping_command))
+        self.application.add_handler(CommandHandler("clear", self.clear_command))
+        self.application.add_handler(CommandHandler("ok", self.ok_command))
+        self.application.add_handler(CommandHandler("stats", self.stats_command))
+        self.application.add_handler(CommandHandler("status", self.status_command))
+        self.application.add_handler(CommandHandler("debug", self.debug_command))
+        self.application.add_handler(CommandHandler("personality", self.personality_command))
+        self.application.add_handler(CommandHandler("reset", self.reset_command))
+
+        # Add callback query handler for inline keyboards
+        self.application.add_handler(CallbackQueryHandler(self.handle_callback_query))
+
+        # Add message handlers
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+        self.application.add_handler(MessageHandler(filters.PHOTO, self.handle_photo))
+        self.application.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
+
+        # Add global error handler
+        self.application.add_error_handler(self.error_handler)
+
+        logger.info("All handlers registered successfully")
+
+        logger.info("Starting polling...")
+        print(f"🤖 {self._get_bot_name()} is starting up...")
+        print("💕 Bot is now running! Press Ctrl+C to stop.")
+
+        self.application.run_polling(allowed_updates=Update.ALL_TYPES, poll_interval=POLLING_INTERVAL)
+
+
+async def shutdown_handler(bot_instance):
+    """Handle graceful shutdown"""
+    await bot_instance.cleanup()
+
+if __name__ == "__main__":
+    logger.info("Starting %s application", BOT_NAME)
+    bot = AIGirlfriendBot()
+    try:
+        bot.run()
+    except KeyboardInterrupt:
+        logger.info("Bot shutdown requested by user (Ctrl+C)")
+        print(f"\n💕 {bot._get_bot_name()} is shutting down... Goodbye!")
+
+        # Run cleanup in async context
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If loop is running, schedule cleanup
+                asyncio.create_task(shutdown_handler(bot))
+            else:
+                # If loop is not running, run cleanup
+                asyncio.run(shutdown_handler(bot))
+        except Exception as cleanup_error:
+            logger.error("Error during shutdown cleanup: %s", cleanup_error)
+
+    except Exception as e:
+        logger.error("Error running bot: %s", e)
+        print(f"❌ Error running bot: {e}")
+
+        # Try cleanup even on error
+        import asyncio
+        try:
+            asyncio.run(shutdown_handler(bot))
+        except Exception as cleanup_error:
+            logger.error("Error during error cleanup: %s", cleanup_error)
