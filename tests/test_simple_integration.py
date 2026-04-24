@@ -62,7 +62,7 @@ async def test_basic_integration():
             
             # Verify user was added to active users set
             # We can't directly test this with our current mock setup, but we know rpush and sadd were called
-            mock_sadd.assert_called_once_with("dispatcher:active_users", user_id)
+            mock_sadd.assert_called_once_with("dispatcher:active_users", f"{user_id}:default")
             
             print("[PASS] User added to active users set")
             

@@ -40,6 +40,18 @@ def clean_ai_response(text: str) -> str:
     return text
 
 
+def _split_ai_response(text: str) -> list:
+    text = clean_ai_response(text)
+    parts = text.split("\n\n")
+
+    safe_parts = []
+    for part in parts:
+        chunks = textwrap.wrap(part, width=4000, break_long_words=False, break_on_hyphens=False)
+        safe_parts.extend(chunks)
+
+    return safe_parts
+
+
 class TypingIndicatorManager:
     """Manages typing indicators for concurrent conversations"""
 
@@ -196,19 +208,7 @@ class MessageQueueManager:
         Returns:
             List of message parts
         """
-        # Clean the text before processing
-        text = clean_ai_response(text)
-
-        # Split by paragraphs
-        parts = text.split("\n\n")
-
-        # Chunk long parts
-        safe_parts = []
-        for part in parts:
-            chunks = textwrap.wrap(part, width=4000, break_long_words=False, break_on_hyphens=False)
-            safe_parts.extend(chunks)
-
-        return safe_parts
+        return _split_ai_response(text)
 
     async def enqueue_message(self, user_id: int, chat_id: int, text: str, message_type: str = "regular", bot=None, typing_manager=None, bot_token: str = None, bot_id: str = None):
         """
@@ -921,60 +921,44 @@ class MessageDispatcher:
 
 async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'TypingIndicatorManager' = None, is_first_message: bool = True, route_key: Optional[Hashable] = None):
     """
-    Sends a single message part with intelligent delays if it's not the first part in a sequence.
-    Note: The message is already pre-split when using the queue system.
+    Send an AI response, splitting long or multi-paragraph text into safe Telegram messages.
 
     :param chat_id: Telegram chat ID
-    :param text: Pre-split message text (string)
+    :param text: Message text
     :param bot: Telegram bot instance
     :param typing_manager: TypingIndicatorManager instance (optional)
-    :param is_first_message: Whether this is the first message in a sequence (no delay before first)
+    :param is_first_message: Whether the first emitted message should skip the typing delay
     """
-    # Clean the text before processing
-    text = clean_ai_response(text)
+    message_parts = _split_ai_response(text)
+    if not message_parts:
+        logger.warning("No message parts to send to chat %s", chat_id)
+        return
 
-    # Add delay before sending (but not before the first message in a sequence)
-    if not is_first_message:
-        # Calculate delay based on message length and random variation
-        message_length = len(text)
+    for index, part_text in enumerate(message_parts):
+        should_delay = not (is_first_message and index == 0)
 
-        # Select a random typing speed between min and max
-        typing_speed = random.randint(MIN_TYPING_SPEED, MAX_TYPING_SPEED)
+        if should_delay:
+            message_length = len(part_text)
+            typing_speed = random.randint(MIN_TYPING_SPEED, MAX_TYPING_SPEED)
+            base_delay = message_length / typing_speed
+            random_offset = random.uniform(RANDOM_OFFSET_MIN, RANDOM_OFFSET_MAX)
+            delay = min(base_delay + random_offset, MAX_DELAY)
 
-        # Calculate base delay
-        base_delay = message_length / typing_speed
+            if typing_manager and delay > 0.7:
+                await typing_manager.start_typing(bot, chat_id, route_key=route_key)
+                await asyncio.sleep(delay)
+                await typing_manager.stop_typing(chat_id, route_key=route_key)
+            else:
+                await asyncio.sleep(delay)
 
-        # Add random offset
-        random_offset = random.uniform(RANDOM_OFFSET_MIN, RANDOM_OFFSET_MAX)
-
-        # Calculate total delay
-        delay = base_delay + random_offset
-
-        # Ensure delay doesn't exceed maximum
-        delay = min(delay, MAX_DELAY)
-
-        # Start typing indicator if manager is provided and wait for the delay concurrently
-        if typing_manager and delay > 0.7:
-            # Start typing indicator
-            await typing_manager.start_typing(bot, chat_id, route_key=route_key)
-
-            # Wait for the calculated delay
-            await asyncio.sleep(delay)
-
-            # Stop typing indicator
-            await typing_manager.stop_typing(chat_id, route_key=route_key)
-        else:
-            # Wait for the calculated delay without typing indicator
-            await asyncio.sleep(delay)
-
-    try:
-        logger.info("Sending message to chat %s: '%s...'", chat_id, text[:50])
-        await bot.send_message(chat_id=chat_id, text=text)
-        logger.info("Successfully sent message to chat %s", chat_id)
-    except Exception as e:
-        logger.error("Failed to send message to chat %s: %s", chat_id, e)
-        logger.error(traceback.format_exc())
-        raise
+        try:
+            logger.info("Sending message to chat %s: '%s...'", chat_id, part_text[:50])
+            await bot.send_message(chat_id=chat_id, text=part_text)
+            logger.info("Successfully sent message to chat %s", chat_id)
+        except Exception as e:
+            logger.error("Failed to send message to chat %s: %s", chat_id, e)
+            logger.error(traceback.format_exc())
+            raise
 
 
 async def generate_ai_response(

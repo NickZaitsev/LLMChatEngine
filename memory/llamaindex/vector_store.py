@@ -26,6 +26,15 @@ from core.abstractions import VectorStore as VectorStoreAbstraction
 logger = logging.getLogger(__name__)
 
 
+def _to_async_db_url(db_url: str) -> str:
+    url = make_url(db_url)
+    if url.drivername == "postgresql":
+        return str(url.set(drivername="postgresql+asyncpg"))
+    if url.drivername == "postgresql+psycopg2":
+        return str(url.set(drivername="postgresql+asyncpg"))
+    return db_url
+
+
 class PgVectorStore(VectorStoreAbstraction):
     """
     PGVectorStore implementation for LlamaIndex.
@@ -52,7 +61,7 @@ class PgVectorStore(VectorStoreAbstraction):
             table_name=table_name,
             embed_dim=embed_dim,
         )
-        self._engine: AsyncEngine = create_async_engine(db_url)
+        self._engine: AsyncEngine = create_async_engine(_to_async_db_url(db_url))
 
     async def upsert(self, nodes: List[Any]) -> None:
         """

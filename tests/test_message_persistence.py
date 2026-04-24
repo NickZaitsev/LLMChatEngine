@@ -77,7 +77,7 @@ async def test_message_persistence():
              patch.object(new_dispatcher.redis_client, 'sadd') as mock_new_sadd:
             
             # Mock scan to return test keys
-            mock_new_scan.side_effect = [(1, [b'queue:12345']), (0, [])]
+            mock_new_scan.side_effect = [(1, [b'queue:12345:default']), (0, [])]
             # Mock llen to return non-zero values (non-empty queues)
             mock_new_llen.return_value = 1
             # Mock sadd to track calls
@@ -88,8 +88,8 @@ async def test_message_persistence():
             
             # Verify that existing queues are properly identified and added to active users set
             mock_new_scan.assert_called()
-            mock_new_llen.assert_called_with('queue:12345')
-            mock_new_sadd.assert_called_with('dispatcher:active_users', user_id)
+            mock_new_llen.assert_called_with('queue:12345:default')
+            mock_new_sadd.assert_called_with('dispatcher:active_users', f"{user_id}:default")
         
         print("[PASS] Startup processing correctly identifies existing queues")
         

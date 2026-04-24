@@ -1,6 +1,7 @@
 import pytest
 import asyncio
 from uuid import uuid4
+from unittest.mock import AsyncMock, MagicMock, patch
 from app_context import AppContext
 from ai_handler import AIHandler
 from prompt.assembler import PromptAssembler
@@ -31,7 +32,12 @@ async def test_summarization_flow(app_context: AppContext):
         )
 
     # 3. Manually trigger the summarization task
-    await create_conversation_summary_async(str(conversation.id))
+    ai_handler = MagicMock()
+    ai_handler.get_response = AsyncMock(return_value="Test conversation summary")
+    app_context.get_ai_runtime_for_bot = AsyncMock(return_value=(ai_handler, None))
+
+    with patch("memory.tasks.get_app_context", AsyncMock(return_value=app_context)):
+        await create_conversation_summary_async(str(conversation.id))
 
     # 4. Verification
     updated_conversation = await conversation_repo.get_conversation(str(conversation.id))

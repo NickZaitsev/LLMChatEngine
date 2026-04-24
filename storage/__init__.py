@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncEngine
-from sqlalchemy.pool import NullPool, QueuePool
+from sqlalchemy.pool import NullPool, QueuePool, StaticPool
 from sqlalchemy import text
 
 from .models import Base, PGVECTOR_AVAILABLE
@@ -132,9 +132,13 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
         }
 
         if 'sqlite' in db_url:
-            # SQLite doesn't support connection pooling the same way
-            engine_kwargs["poolclass"] = NullPool
-            logger.info("Using SQLite with NullPool")
+            if ":memory:" in db_url:
+                engine_kwargs["poolclass"] = StaticPool
+                logger.info("Using in-memory SQLite with StaticPool")
+            else:
+                # File-based SQLite doesn't benefit from the PostgreSQL pool settings.
+                engine_kwargs["poolclass"] = NullPool
+                logger.info("Using SQLite with NullPool")
         else:
             # PostgreSQL with connection pooling - don't specify poolclass for async engines
             engine_kwargs.update({
@@ -164,10 +168,10 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
             autocommit=False
         )
 
-        # Tables should be created via Alembic migrations
-        # async with engine.begin() as conn:
-        #     await conn.run_sync(Base.metadata.create_all)
-        # logger.info("Database schema created/updated successfully")
+        if 'sqlite' in db_url:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("SQLite database schema created/updated successfully")
 
         # Initialize repositories
         messages_repo = PostgresMessageRepo(session_maker)

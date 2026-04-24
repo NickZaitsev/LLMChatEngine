@@ -23,8 +23,8 @@ class TestMessageQueueIntegration:
         # Clean up test data
         try:
             redis_client = redis.from_url(self.redis_url)
-            redis_client.delete(f"queue:{self.user_id}")
-            redis_client.srem("dispatcher:active_users", self.user_id)
+            redis_client.delete(f"queue:{self.user_id}:default")
+            redis_client.srem("dispatcher:active_users", f"{self.user_id}:default")
         except Exception:
             pass  # Ignore cleanup errors
     
@@ -64,7 +64,7 @@ class TestMessageQueueIntegration:
                         # Verify the message was enqueued
                         mock_rpush.assert_called_once()
                         args = mock_rpush.call_args[0]
-                        assert args[0] == f"queue:{self.user_id}"
+                        assert args[0] == f"queue:{self.user_id}:default"
                         
                         # Verify the message content
                         message_json = args[1]
@@ -105,7 +105,7 @@ class TestMessageQueueIntegration:
                     # Verify the message was enqueued
                     mock_rpush.assert_called_once()
                     args = mock_rpush.call_args[0]
-                    assert args[0] == f"queue:{self.user_id}"
+                    assert args[0] == f"queue:{self.user_id}:default"
                     
                     # Verify the message content
                     message_json = args[1]
