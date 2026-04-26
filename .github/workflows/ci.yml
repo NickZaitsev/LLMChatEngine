@@ -38,6 +38,6 @@ jobs:
         run: |
           python tests/verify_code_structure.py
 
-      - name: Run focused tests
+      - name: Run deterministic test suite
         run: |
-          pytest tests/test_prompt_assembler.py tests/test_memory_manager.py tests/test_ai_handler_task_dedupe.py -q
+          pytest -q

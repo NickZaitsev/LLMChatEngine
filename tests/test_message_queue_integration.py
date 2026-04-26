@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch, AsyncMock
 import redis
 
 from message_manager import MessageQueueManager
-from bot import AIGirlfriendBot
+from bot import TelegramChatBot
 from proactive_messaging import ProactiveMessagingService
 
 class TestMessageQueueIntegration:
@@ -35,11 +35,11 @@ class TestMessageQueueIntegration:
             mock_ping.return_value = True
             
             # Create a mock bot instance
-            with patch('bot.AIGirlfriendBot._initialize_storage'), \
-                 patch('bot.AIGirlfriendBot._initialize_memory_components'), \
-                 patch('bot.AIGirlfriendBot._initialize_lmstudio_model'):
+            with patch('bot.TelegramChatBot._initialize_storage'), \
+                 patch('bot.TelegramChatBot._initialize_memory_components'), \
+                 patch('bot.TelegramChatBot._initialize_lmstudio_model'):
                 
-                bot = AIGirlfriendBot()
+                bot = TelegramChatBot()
                 
                 # Mock the message queue manager
                 bot.message_queue_manager = MessageQueueManager(self.redis_url)
@@ -122,11 +122,11 @@ class TestMessageQueueIntegration:
             mock_ping.return_value = True
             
             # Create a mock bot instance
-            with patch('bot.AIGirlfriendBot._initialize_storage'), \
-                 patch('bot.AIGirlfriendBot._initialize_memory_components'), \
-                 patch('bot.AIGirlfriendBot._initialize_lmstudio_model'):
+            with patch('bot.TelegramChatBot._initialize_storage'), \
+                 patch('bot.TelegramChatBot._initialize_memory_components'), \
+                 patch('bot.TelegramChatBot._initialize_lmstudio_model'):
                 
-                bot = AIGirlfriendBot()
+                bot = TelegramChatBot()
                 
                 # Mock the message dispatcher's _scan_existing_queues method directly
                 with patch.object(bot.message_dispatcher, '_scan_existing_queues') as mock_scan:

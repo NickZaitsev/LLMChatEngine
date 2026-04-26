@@ -1356,6 +1356,7 @@ class PostgresUserBotSettingsRepo:
         self.session_maker = session_maker
 
     async def get_or_create_settings(self, user_id: str, bot_id: str) -> UserBotSettings:
+        """Fetch user bot settings or create an empty settings record."""
         settings = await self.get_settings(user_id, bot_id)
         if settings:
             return settings
@@ -1385,6 +1386,7 @@ class PostgresUserBotSettingsRepo:
             )
 
     async def get_settings(self, user_id: str, bot_id: str) -> Optional[UserBotSettings]:
+        """Fetch settings for a user and bot pair."""
         try:
             user_uuid = UUID(user_id)
             bot_uuid = UUID(bot_id)
@@ -1414,6 +1416,7 @@ class PostgresUserBotSettingsRepo:
             )
 
     async def update_settings(self, user_id: str, bot_id: str, settings: Dict[str, Any]) -> UserBotSettings:
+        """Merge and persist settings for a user and bot pair."""
         try:
             user_uuid = UUID(user_id)
             bot_uuid = UUID(bot_id)

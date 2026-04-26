@@ -1,3 +1,5 @@
+"""Redis-backed message queueing, dispatch, splitting, and typing indicators."""
+
 import asyncio
 import logging
 import random
@@ -6,7 +8,7 @@ import json
 import redis
 import uuid
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from config import MIN_TYPING_SPEED, MAX_TYPING_SPEED, MAX_DELAY, RANDOM_OFFSET_MIN, RANDOM_OFFSET_MAX, MESSAGE_QUEUE_MAX_RETRIES, MESSAGE_QUEUE_LOCK_TIMEOUT, MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL, MESSAGE_QUEUE_DISPATCHER_INTERVAL
 import textwrap
 import re
@@ -259,7 +261,7 @@ class MessageQueueManager:
                     "user_id": user_id,
                     "chat_id": chat_id,
                     "text": part_text,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "message_type": message_type,
                     "retry_count": 0,
                     "part_index": i,

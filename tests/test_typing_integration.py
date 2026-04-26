@@ -63,14 +63,14 @@ async def test_bot_integration():
     """Test the bot integration"""
     try:
         # Test imports
-        from bot import AIGirlfriendBot
+        from bot import TelegramChatBot
         from message_manager import TypingIndicatorManager
         
         logger.info("✓ Bot and TypingIndicatorManager imported successfully")
         
         # Test bot initialization
-        bot = AIGirlfriendBot()
-        logger.info("✓ AIGirlfriendBot instance created")
+        bot = TelegramChatBot()
+        logger.info("TelegramChatBot instance created")
         
         # Check if typing manager is initialized
         if hasattr(bot, 'typing_manager'):

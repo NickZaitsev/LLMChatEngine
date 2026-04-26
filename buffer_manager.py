@@ -1,3 +1,5 @@
+"""User message buffering utilities for combining rapid chat messages."""
+
 import asyncio
 import time
 from dataclasses import dataclass

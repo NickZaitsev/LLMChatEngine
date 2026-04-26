@@ -1,3 +1,5 @@
+"""Root pytest configuration for deterministic local test defaults."""
+
 import os
 
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///tests/test_suite.db"
@@ -9,6 +11,7 @@ pytest_plugins = ("pytest_asyncio",)
 
 
 def pytest_configure(config):
+    """Register project-wide pytest defaults and markers."""
     os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///tests/test_suite.db")
     os.environ.setdefault("PROACTIVE_MESSAGING_REDIS_URL", "redis://redis:6379/0")
     os.environ.setdefault("MESSAGE_QUEUE_REDIS_URL", "redis://redis:6379/0")

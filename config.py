@@ -1,3 +1,5 @@
+"""Centralized environment-backed configuration for LLMChatEngine."""
+
 import os
 import re
 import warnings

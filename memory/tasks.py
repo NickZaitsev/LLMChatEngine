@@ -53,10 +53,12 @@ def release_task_lock(lock_key: str) -> None:
 
 
 def summary_lock_key(conversation_id: str) -> str:
+    """Build the Redis lock key for conversation summary tasks."""
     return f"memory_tasks:summary:{conversation_id}"
 
 
 def memory_lock_key(conversation_id: str) -> str:
+    """Build the Redis lock key for memory extraction tasks."""
     return f"memory_tasks:extract:{conversation_id}"
 
 

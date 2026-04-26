@@ -83,6 +83,7 @@ async def main():
     shutdown_event = asyncio.Event()
 
     def signal_handler():
+        """Request a graceful shutdown from OS signal handlers."""
         logger.info("Shutdown signal received")
         shutdown_event.set()
 
@@ -97,6 +98,7 @@ async def main():
 
     # Create tasks for both admin bot and bot manager
     async def run_admin():
+        """Run the admin bot until cancellation."""
         try:
             await admin_bot.run()
         except asyncio.CancelledError:
@@ -109,6 +111,7 @@ async def main():
                 logger.error("Failed to stop admin bot cleanly: %s", e)
 
     async def run_bots():
+        """Run all managed user bots until cancellation."""
         try:
             await bot_manager.run_all()
         except asyncio.CancelledError:
@@ -124,6 +127,7 @@ async def main():
     bots_task = asyncio.create_task(run_bots(), name="bot_manager")
 
     def monitor_task(task: asyncio.Task) -> None:
+        """Stop the process when a critical background task crashes."""
         if task.cancelled():
             return
         error = task.exception()

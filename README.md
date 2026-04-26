@@ -1,190 +1,194 @@
 # LLMChatEngine
 
-A modular LLM chat engine with advanced memory management, semantic search, and multi-provider support. Built with modern Python practices and designed for scalable conversational AI applications.
+LLMChatEngine is a modular Telegram chat engine for building contextual LLM assistants with persistent storage, semantic memory, multi-bot management, and background task processing.
 
-## Features
+The project is structured as a production-style Python service rather than a single bot script: it uses async SQLAlchemy, PostgreSQL with pgvector, Redis-backed queues, Celery workers, Alembic migrations, Docker Compose, and deterministic CI tests.
 
-- **Multi-LLM Provider Support**: Clean integration with Azure OpenAI, LM Studio, and other LLM providers
-- **Advanced Memory Management**: LlamaIndex-based memory system with semantic search via pgvector and automated conversation summarization
-- **PostgreSQL Storage**: Scalable database backend with async SQLAlchemy 2.x and pgvector extension
-- **Deployment Ready**: Multi-stage Docker build, database migrations, comprehensive logging, and GitHub Actions checks
-- **Modular Architecture**: Extensible design for different chat platforms and interfaces
-- **Message Buffering**: Intelligent message buffering to capture complete user thoughts
-- **Proactive Features**: Scheduled messaging with Celery Beat and automated conversation management
-- **Centralized App Context**: Singleton pattern for shared service initialization and management
-- **Conversation Summarization**: Automatic periodic summarization of long conversations using Celery tasks
+## What This Demonstrates
 
-## Quick Start with Docker
+- Multi-provider LLM integration for Azure OpenAI, LM Studio, and Gemini.
+- LlamaIndex-based semantic memory backed by PostgreSQL and pgvector.
+- Multi-bot Telegram runtime managed by a central admin bot.
+- Ordered message delivery through Redis queues and a message dispatcher.
+- Message buffering to combine rapid user input into coherent turns.
+- Proactive scheduled messaging with Celery Beat and worker queues.
+- Conversation summarization for long-running chats and context control.
+- Dockerized deployment with PostgreSQL, Redis, Celery workers, and backup service.
+- Async repository layer with focused tests for storage, memory, prompts, and message flow.
+
+## Architecture
+
+```text
+User Message
+  -> TelegramChatBot
+  -> BufferManager
+  -> StorageConversationManager
+  -> AIHandler
+  -> PromptAssembler
+  -> MemoryManager / PostgreSQL + pgvector
+  -> LLM Provider
+  -> MessageQueueManager / Redis
+  -> MessageDispatcher
+  -> Telegram API
+```
+
+The repository also includes an architecture diagram at [docs/architecture.png](docs/architecture.png) and a Mermaid source file at [docs/architecture.md](docs/architecture.md).
+
+## Core Components
+
+- `bot.py`: Telegram-facing runtime and command handlers.
+- `ai_handler.py`: LLM provider orchestration, retries, and response generation.
+- `memory/manager.py`: LlamaIndex memory manager and semantic retrieval.
+- `prompt/assembler.py`: Prompt assembly with history, summaries, and memory budgeting.
+- `storage/`: SQLAlchemy models, repository interfaces, and persistence implementation.
+- `message_manager.py`: Redis queueing, ordered dispatch, typing indicators, and delivery retries.
+- `buffer_manager.py`: User message buffering and adaptive dispatch timing.
+- `proactive_messaging.py`: Celery-backed proactive messaging workflow.
+- `admin_bot.py` and `bot_manager.py`: Multi-bot administration and runtime management.
+
+## Quick Start
 
 ### Prerequisites
 
-- Docker Engine (20.10.0 or higher)
-- Docker Compose (v2.0.0 or higher)
-- LLM Provider API credentials (Azure OpenAI or LM Studio)
+- Python 3.11+
+- Docker Engine 20.10+
+- Docker Compose v2+
+- Telegram bot token
+- LLM provider credentials or a reachable LM Studio server
 
-### Installation
+### Configure
 
-1. Clone the repository:
 ```bash
-git clone https://github.com/your-user/llm-chat-engine.git
-cd llm-chat-engine
-```
-
-2. Create a `.env` file from the example:
-```bash
+git clone https://github.com/NickZaitsev/LLMChatEngine.git
+cd LLMChatEngine
 cp env_example.txt .env
 ```
 
-3. Edit the `.env` file with your API keys and configuration:
-```bash
-nano .env
-```
-
-### Configuration
-
-Edit the `.env` file with your specific configuration:
+Edit `.env` with your database, Telegram, and provider settings:
 
 ```env
-# Database Configuration
-DATABASE_URL=postgresql+asyncpg://llm_engine:your_secure_password@postgres:5432/llm_engine
+DATABASE_URL=postgresql+asyncpg://ai_bot:your_secure_password@postgres:5432/ai_bot
 DB_PASSWORD=your_secure_password_here
 USE_PGVECTOR=true
 
-# LLM Provider Configuration
-PROVIDER=azure                                    # Options: "azure", "lmstudio", or "gemini"
-AZURE_ENDPOINT=https://your-endpoint.openai.azure.com/
-AZURE_API_KEY=your_azure_api_key_here
-AZURE_MODEL=your_azure_deployment_name
+ADMIN_BOT_TOKEN=your_admin_bot_token_here
+ADMIN_USER_IDS=123456789
+TOKEN_ENCRYPTION_KEY=your_fernet_key_here
 
-# LM Studio Configuration (alternative to Azure)
+PROVIDER=lmstudio
 LMSTUDIO_MODEL=your_model
 LMSTUDIO_BASE_URL=http://host-machine:1234/v1
-
-# Gemini Configuration
-GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-pro
-GEMINI_EMBEDDING_MODEL=models/embedding-001
 ```
 
-Gemma 3 recommended for optimal performance.
+For Azure or Gemini, set `PROVIDER=azure` or `PROVIDER=gemini` and fill the matching keys from `env_example.txt`.
 
-### Usage
-
-Start the engine using Docker Compose:
+### Run
 
 ```bash
 docker-compose up --build -d
-```
-
-This will start all required services:
-- The main chat engine application
-- PostgreSQL database with pgvector support
-- Redis for message queuing and background tasks
-- Celery worker for background processing
-- PostgreSQL backup service
-
-To view logs:
-```bash
 docker-compose logs -f llm-chat-engine
 ```
 
-To stop the services:
+This starts:
+
+- Main Telegram chat engine.
+- PostgreSQL with pgvector.
+- Redis.
+- Celery worker for proactive messaging.
+- Celery Beat scheduler.
+- Celery worker for memory tasks.
+- PostgreSQL backup service.
+
+Stop the stack with:
+
 ```bash
 docker-compose down
 ```
 
-## Architecture Overview
+## Multi-Bot Setup
 
-LLMChatEngine provides a modular architecture that can be adapted for various chat platforms:
+1. Create an admin bot with [@BotFather](https://t.me/BotFather).
+2. Get your Telegram user ID from [@userinfobot](https://t.me/userinfobot).
+3. Generate a Fernet key:
 
-- **App Context**: Singleton pattern for centralized service initialization and management
-- **AI Handler**: Orchestrates LLM interactions across multiple providers (Azure, LM Studio, Gemini) with retry logic and timeout handling
-- **Memory Manager**: LlamaIndex-based system for creating and managing semantic memories with vector search
-- **Prompt Assembler**: Constructs contextual prompts integrating conversation history, memories, and summaries
-- **Message Manager**: Handles message queuing and ordered delivery with interaction indicators
-- **Buffer Manager**: Buffers user input for coherent processing and complete thought capture
-- **Storage Layer**: PostgreSQL with pgvector extension for persistent data management and vector storage
-- **Proactive Messaging**: Celery Beat-based system for scheduled user engagement and automated messaging
-- **Conversation Summarization**: Celery-based periodic summarization of long conversations to manage context length
+```python
+from cryptography.fernet import Fernet
 
-![Architecture Diagram](docs/architecture.png)
+print(Fernet.generate_key().decode())
+```
 
-## API Integration
-
-The engine can be integrated with various chat platforms through its modular interface design. Current implementation includes Telegram bot support, with extensible architecture for additional platforms.
-
-## Multi-Bot Setup & Usage
-
-The system now supports running multiple AI bots simultaneously, managed by a central Admin Bot.
-
-### 1. Admin Bot Setup
-1.  **Create Admin Bot**: Talk to [@BotFather](https://t.me/BotFather) on Telegram and create a new bot (e.g., `MyAdminBot`). Get the **token**.
-2.  **Get Your User ID**: Talk to [@userinfobot](https://t.me/userinfobot) to get your numerical Telegram User ID (e.g., `123456789`).
-3.  **Generate Encryption Key**: Run the following Python snippet to generate a secure key for token encryption:
-    ```python
-    from cryptography.fernet import Fernet
-    print(Fernet.generate_key().decode())
-    ```
-
-### 2. Configuration
-Add the following to your `.env` file:
+Add the values to `.env`:
 
 ```env
-# Admin Bot Configuration
 ADMIN_BOT_TOKEN=your_admin_bot_token_here
-ADMIN_USER_IDS=123456789,987654321  # Comma-separated list of authorized admin IDs
+ADMIN_USER_IDS=123456789,987654321
 TOKEN_ENCRYPTION_KEY=your_generated_key_here
 ```
 
-### 3. Running the System
-Update your Docker containers:
-```bash
-docker-compose up --build -d
-```
-This will start the `AdminBot` and the `BotManager`.
+Admin bot commands:
 
-### 4. Managing Bots
-Open your Admin Bot in Telegram and use these commands:
-
-- **/addbot**: Start a wizard to add a new user bot. You will need:
-    - The new bot's token (from BotFather).
-    - A name for the bot.
-    - A personality/system prompt.
-- **/listbots**: View all running bots and their status.
-- **/setprompt <bot_id>**: Update a bot's personality on the fly.
-- **/togglefeature <bot_id> <feature>**: Enable/disable features (e.g., `VOICE_MESSAGES`, `MEMORY`).
-- **/removebot <bot_id>**: Stop and remove a bot.
+- `/addbot`: Add a managed Telegram bot with its own token, name, and personality prompt.
+- `/listbots`: Show managed bots and runtime status.
+- `/setprompt <bot_id>`: Update a bot personality prompt.
+- `/togglefeature <bot_id> <feature>`: Toggle features such as `VOICE_MESSAGES` or `MEMORY`.
+- `/removebot <bot_id>`: Stop and remove a managed bot.
 
 ## Development
 
-### Testing
-```bash
-# Create and use the pinned project environment
+Create the pinned local environment:
+
+```powershell
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements-lock.txt
-
-# Run all tests
-.\.venv\Scripts\python -m pytest
-
-# Run with coverage
-.\.venv\Scripts\python -m pytest --cov=.
-
-# Run specific test file
-.\.venv\Scripts\python -m pytest tests/test_memory_manager.py
 ```
 
-### Code Quality
-```bash
-# Install development tooling
-pip install -r requirements-lock.txt
+Run the deterministic default test suite:
 
-# Run linting and formatting checks
-ruff check .
-
-# Run pre-commit hooks
-pre-commit run --all-files
+```powershell
+.\.venv\Scripts\python -m pytest -q
 ```
+
+Run all collected tests, including external/manual/performance categories:
+
+```powershell
+.\.venv\Scripts\python -m pytest -q -o addopts=
+```
+
+Run only the non-default categories:
+
+```powershell
+.\.venv\Scripts\python -m pytest -q -o addopts= -m "external or performance or manual"
+```
+
+Run coverage for the deterministic suite:
+
+```powershell
+.\.venv\Scripts\python -m pytest --cov=. --cov-report=term-missing
+```
+
+Run code quality checks:
+
+```powershell
+.\.venv\Scripts\python -m ruff check .
+.\.venv\Scripts\pre-commit run --all-files
+```
+
+## Test Strategy
+
+The default `pytest` command excludes tests marked as:
+
+- `external`: requires services such as LM Studio, Redis, PostgreSQL, or Telegram.
+- `performance`: benchmark or load-style checks.
+- `manual`: script-style verification checks.
+
+This keeps CI deterministic while preserving deeper local verification commands for development and deployment validation.
+
+## Security Notes
+
+- `.env` and local runtime state are ignored by Git.
+- Managed bot tokens are encrypted before storage with `TOKEN_ENCRYPTION_KEY`.
+- Do not commit local database files, Celery state, Redis state, embeddings dumps, or provider credentials.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See [LICENSE](LICENSE).

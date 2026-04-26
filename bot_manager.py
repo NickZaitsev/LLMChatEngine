@@ -171,6 +171,7 @@ class BotManager:
 
         # Start bot in background
         async def run_bot():
+            """Initialize and poll one managed bot application."""
             try:
                 await self._ensure_shared_dispatcher()
 

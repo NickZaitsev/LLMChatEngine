@@ -1,3 +1,5 @@
+"""LM Studio API helper for model discovery, status checks, and loading."""
+
 import asyncio
 import logging
 import requests

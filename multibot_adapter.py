@@ -1,5 +1,5 @@
 """
-Multi-Bot Adapter for wrapping AIGirlfriendBot with custom configurations.
+Multi-bot adapter for wrapping TelegramChatBot with custom configurations.
 
 This module provides a way to instantiate bots with custom configurations
 without modifying the original bot.py file.
@@ -31,7 +31,7 @@ class BotConfig:
 
 def create_bot_with_config(bot_config: Optional[BotConfig] = None):
     """
-    Create an AIGirlfriendBot instance with custom configuration.
+    Create a TelegramChatBot instance with custom configuration.
 
     This function patches the necessary config values before instantiation
     and restores them afterward to avoid side effects.
@@ -41,14 +41,14 @@ def create_bot_with_config(bot_config: Optional[BotConfig] = None):
                    If None, creates a standard single-bot instance.
 
     Returns:
-        AIGirlfriendBot instance with the specified configuration
+        TelegramChatBot instance with the specified configuration
     """
     import config
-    from bot import AIGirlfriendBot
+    from bot import TelegramChatBot
 
     if bot_config is None:
         # Standard single-bot mode
-        bot = AIGirlfriendBot()
+        bot = TelegramChatBot()
         bot.bot_config = None
         bot.bot_id = None
         bot.bot_name = BOT_NAME
@@ -68,7 +68,7 @@ def create_bot_with_config(bot_config: Optional[BotConfig] = None):
         config.BOT_PERSONALITY = bot_config.personality
 
         # Create bot with patched config
-        bot = AIGirlfriendBot()
+        bot = TelegramChatBot()
 
         # Attach multi-bot configuration
         bot.bot_config = bot_config
@@ -97,7 +97,7 @@ def build_application_for_bot(bot, token: str) -> Application:
     Build a Telegram Application for a bot with the specified token.
 
     Args:
-        bot: AIGirlfriendBot instance
+        bot: TelegramChatBot instance
         token: Bot token to use
 
     Returns:

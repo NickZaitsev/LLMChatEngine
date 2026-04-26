@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot import AIGirlfriendBot
+from bot import TelegramChatBot
 from features import BotFeature, DEFAULT_FEATURE_FLAGS, has_feature, get_enabled_features
 
 
@@ -39,7 +39,7 @@ def bot_instance():
             buffer_manager.schedule_dispatch = AsyncMock()
             mock_buffer_manager.return_value = buffer_manager
 
-            bot = AIGirlfriendBot()
+            bot = TelegramChatBot()
             bot.bot_id = uuid.uuid4()
             bot.bot_config = SimpleNamespace(feature_flags=dict(DEFAULT_FEATURE_FLAGS))
             bot.conversation_manager = conversation_manager

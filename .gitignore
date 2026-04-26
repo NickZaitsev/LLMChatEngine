@@ -18,6 +18,8 @@ env/
 # Bytecode / caches
 *.cache
 *.log
+.coverage
+htmlcov/
 container_logs*.txt
 .pytest_cache/
 

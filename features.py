@@ -94,8 +94,10 @@ def require_feature(feature: BotFeature):
             ...
     """
     def decorator(func):
+        """Wrap a handler with a feature-flag check."""
         @wraps(func)
         async def wrapper(self, *args, **kwargs):
+            """Execute the handler when the required feature is enabled."""
             # Check if bot_config exists and has the feature
             if hasattr(self, 'bot_config') and self.bot_config:
                 if not has_feature(self.bot_config.feature_flags, feature):

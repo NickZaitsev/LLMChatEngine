@@ -11,7 +11,7 @@ import os
 # Add the parent directory to the path to import bot and proactive_messaging
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from bot import AIGirlfriendBot
+from bot import TelegramChatBot
 from proactive_messaging import ProactiveMessagingService
 
 
@@ -45,7 +45,7 @@ def bot_instance():
                     mock_tm.return_value = mock_tm_instance
                     
                     # Create the bot instance
-                    bot = AIGirlfriendBot()
+                    bot = TelegramChatBot()
                     bot.bot_id = uuid.uuid4()
                     
                     # Set up mock objects

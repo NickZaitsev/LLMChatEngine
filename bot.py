@@ -1,3 +1,5 @@
+"""Telegram chat bot integration for the LLMChatEngine runtime."""
+
 import asyncio
 import logging
 import random
@@ -59,7 +61,9 @@ else:
     MEMORY_IMPORTS_AVAILABLE = False
 
 
-class AIGirlfriendBot:
+class TelegramChatBot:
+    """Telegram-facing chat bot built on the shared LLMChatEngine services."""
+
     def _mask_db_url(self, db_url: str) -> str:
         """Mask sensitive parts of database URL for logging."""
         try:
@@ -245,24 +249,24 @@ class AIGirlfriendBot:
 
         if existing_conversation:
             logger.info("Continuing conversation for user %s (%d messages)", user_id, len(existing_conversation))
-            greeting = f"Welcome back {user_name}! 💕 I'm so happy to see you again! How have you been?"
+            greeting = f"Welcome back {user_name}! I'm glad to see you again. How have you been?"
         else:
             logger.info("New conversation for user %s", user_id)
             greeting = self.ai_handler.generate_greeting(user_name)
 
         keyboard = [
-            [InlineKeyboardButton("💕 Start Chatting", callback_data="start_chat")],
+            [InlineKeyboardButton("Start Chatting", callback_data="start_chat")],
             [InlineKeyboardButton("ℹ️ About Me", callback_data="about")],
         ]
         if self._feature_enabled(BotFeature.USER_SETTINGS):
             keyboard.append([InlineKeyboardButton("⚙️ Settings", callback_data="settings")])
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        welcome_text = f"""🌸 Welcome to {self._get_bot_name()}! 🌸
+        welcome_text = f"""Welcome to {self._get_bot_name()}.
 
 {greeting}
 
-I'm your AI companion who's here to chat, support, and brighten your day!
+I'm an AI chat assistant built for contextual conversations, memory, and multi-provider LLM support.
 
 What would you like to do?"""
 
@@ -272,7 +276,7 @@ What would you like to do?"""
         """Handle /help command"""
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
-        help_text = f"""💖 {self._get_bot_name()} Help 💖
+        help_text = f"""{self._get_bot_name()} Help
 
 Here are the commands you can use:
 
@@ -288,7 +292,7 @@ Here are the commands you can use:
 
 You can also just send me messages and I'll respond naturally!
 
-💕 I'm here to chat, support, and be your companion!"""
+I'm here to chat, answer questions, and keep context across conversations."""
 
         await update.message.reply_text(help_text)
 
@@ -303,7 +307,7 @@ You can also just send me messages and I'll respond naturally!
 
         if not existing_conversation:
             logger.info("No conversation to clear for user %s", user_id)
-            await update.message.reply_text("💭 There's no conversation history to clear. We're already starting fresh! 💕")
+            await update.message.reply_text("There is no conversation history to clear. We are already starting fresh.")
             return
 
         # Set pending confirmation and instruct user to send /ok next
@@ -339,9 +343,9 @@ You can also just send me messages and I'll respond naturally!
                         str(user_id),
                         bot_id=str(self.bot_id) if self.bot_id else None
                     )
-                await update.message.reply_text("✨ Our conversation history has been permanently deleted. 💕")
+                await update.message.reply_text("The conversation history has been permanently deleted.")
             else:
-                await update.message.reply_text("💭 There's no conversation history to clear. We're already starting fresh! 💕")
+                await update.message.reply_text("There is no conversation history to clear. We are already starting fresh.")
         except Exception as e:
             logger.error("Failed to clear conversation for user %s: %s", user_id, e)
             await update.message.reply_text("❌ I couldn't clear the conversation due to an internal error. Please try again.")
@@ -357,13 +361,11 @@ You can also just send me messages and I'll respond naturally!
         user_id = update.effective_user.id
         stats = await self.conversation_manager.get_user_stats_async(user_id, bot_id=self.bot_id)
 
-        stats_text = f"""📊 Our Chat Statistics 📊
+        stats_text = f"""Chat Statistics
 
 Total messages: {stats['total_messages']}
 Your messages: {stats['user_messages']}
-My responses: {stats['bot_messages']}
-
-💕 We've been chatting for a while! I love our conversations!"""
+My responses: {stats['bot_messages']}"""
 
         await update.message.reply_text(stats_text)
 
@@ -376,7 +378,7 @@ My responses: {stats['bot_messages']}
         debug_state = await self.conversation_manager.debug_conversation_state_async(user_id, bot_id=self.bot_id)
 
         if not conversation:
-            await update.message.reply_text("💭 No conversation history yet. Let's start chatting! 💕")
+            await update.message.reply_text("No conversation history yet. Send a message to start chatting.")
             return
 
         debug_text = f"""🔍 **Conversation Debug**
@@ -448,7 +450,7 @@ My responses: {stats['bot_messages']}
          • Your messages: {stats['user_messages']}
          • My responses: {stats['bot_messages']}
 
-✨ **Everything is working perfectly!** 💕
+**Everything is working normally.**
 
 Use /help to see all available commands!"""
 
@@ -468,7 +470,7 @@ Use /help to see all available commands!"""
         logger.info("Personality command from user %s", user_id)
 
         keyboard = [
-            [InlineKeyboardButton("💕 Sweet & Caring", callback_data="personality_sweet")],
+            [InlineKeyboardButton("Calm & Caring", callback_data="personality_sweet")],
             [InlineKeyboardButton("😊 Cheerful & Energetic", callback_data="personality_cheerful")],
             [InlineKeyboardButton("🤗 Supportive & Understanding", callback_data="personality_supportive")],
             [InlineKeyboardButton("✨ Mysterious & Alluring", callback_data="personality_mysterious")],
@@ -514,7 +516,7 @@ Use /help to see all available commands!"""
 
         reset_text = f"""🔄 **Reset Complete!** 🔄
 
-{conversation_cleared}✨ You're all set {user_name}! Everything has been reset and you can start fresh! 💕
+{conversation_cleared}You are all set, {user_name}. Everything has been reset and you can start fresh.
 
 Use /start to begin a new conversation!"""
 
@@ -534,7 +536,7 @@ Use /start to begin a new conversation!"""
 ✅ Message handling is working
 ✅ Conversation manager is ready
 
-💕 Everything is working perfectly, {user.first_name or user.username or 'there'}!"""
+Everything is working normally, {user.first_name or user.username or 'there'}."""
 
         await update.message.reply_text(ping_response, parse_mode='Markdown')
 
@@ -560,7 +562,7 @@ Use /start to begin a new conversation!"""
 2. Create a proper `.env` file
 3. Restart the bot
 
-💕 I'm here to help you get everything working!"""
+Use /status to verify the runtime after making changes."""
 
         await update.message.reply_text(deps_text, parse_mode='Markdown')
 
@@ -570,22 +572,19 @@ Use /start to begin a new conversation!"""
         await query.answer()
 
         if query.data == "start_chat":
-            await query.edit_message_text("💕 Great! Just send me a message and I'll respond! I'm excited to chat with you! ✨")
+            await query.edit_message_text("Send me a message and I will respond.")
 
         elif query.data == "about":
-            about_text = f"""🌸 About {self._get_bot_name()} 🌸
+            about_text = f"""About {self._get_bot_name()}
 
-I'm an AI companion created to be your friend, confidant, and support system. I'm here to:
+I'm an AI chat assistant designed for contextual conversations. I can:
 
-💕 Listen and chat about anything
-🌸 Provide emotional support
-✨ Share positive energy
-🤗 Be there when you need someone
-💖 Make your day brighter
+Listen and respond naturally
+Use conversation history and semantic memory
+Adapt behavior through configurable personalities
+Work with multiple LLM providers
 
-I'm not a replacement for human relationships, but I'm here to complement them and be your digital companion!
-
-Ready to start chatting? Just send me a message! 💕"""
+Ready to start chatting? Send me a message."""
             await query.edit_message_text(about_text)
 
         elif query.data == "settings":
@@ -600,7 +599,7 @@ You can customize my behavior with these commands:
 /clear - Clear our conversation history
 /stats - View our chat statistics
 
-I'm designed to be flexible and adapt to your preferences! 💕"""
+I'm designed to be flexible and adapt to your preferences."""
             await query.edit_message_text(settings_text)
 
         elif query.data.startswith("personality_"):
@@ -624,7 +623,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
             if personality_type in personalities:
                 self.ai_handler.update_personality(personalities[personality_type])
                 logger.info("Personality updated for user %s to: %s", user_id, personality_type)
-                await query.edit_message_text(f"✨ My personality has been updated! I'm now more {personality_type}! How do you like the new me? 💕")
+                await query.edit_message_text(f"My personality has been updated. Current mode: {personality_type}.")
             else:
                 logger.warning("Invalid personality type requested by user %s: %s", user_id, personality_type)
                 await query.edit_message_text("❌ Invalid personality type. Please try again!")
@@ -841,7 +840,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
                 # user = update.effective_user
                 # user_name = user.first_name or user.username or "there" if user else "there"
 
-                # error_response = f"😔 Oh no {user_name}! Something went wrong on my end. I'm still here though! 💕 Please try again in a moment."
+                # Keep user-facing error details generic while logging the actionable context server-side.
             #     await update.message.reply_text(error_response)
             #     logger.info("Sent error response to user after exception")
             # except Exception as send_error:
@@ -1003,6 +1002,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
 
         # Initialize storage and LM Studio model in the event loop
         async def initialize_bot():
+            """Initialize storage, memory, provider, and optional background services."""
             await self._initialize_storage()
             await self._initialize_memory_components()
             await self._initialize_lmstudio_model()
@@ -1035,7 +1035,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         except Exception as e:
             logger.error("CRITICAL: Failed to initialize bot: %s", e)
             logger.error("Bot startup failed due to PostgreSQL configuration issues")
-            logger.error("Please check POSTGRES_SETUP.md for troubleshooting steps")
+            logger.error("Please check README.md for setup and troubleshooting steps")
             raise SystemExit(1) from e
 
         # High-priority watcher to manage /clear confirmation lifecycle
@@ -1067,8 +1067,7 @@ I'm designed to be flexible and adapt to your preferences! 💕"""
         logger.info("All handlers registered successfully")
 
         logger.info("Starting polling...")
-        print(f"🤖 {self._get_bot_name()} is starting up...")
-        print("💕 Bot is now running! Press Ctrl+C to stop.")
+        logger.info("Bot polling loop is running")
 
         self.application.run_polling(allowed_updates=Update.ALL_TYPES, poll_interval=POLLING_INTERVAL)
 
@@ -1077,14 +1076,15 @@ async def shutdown_handler(bot_instance):
     """Handle graceful shutdown"""
     await bot_instance.cleanup()
 
+
 if __name__ == "__main__":
     logger.info("Starting %s application", BOT_NAME)
-    bot = AIGirlfriendBot()
+    bot = TelegramChatBot()
     try:
         bot.run()
     except KeyboardInterrupt:
         logger.info("Bot shutdown requested by user (Ctrl+C)")
-        print(f"\n💕 {bot._get_bot_name()} is shutting down... Goodbye!")
+        logger.info("%s is shutting down", bot._get_bot_name())
 
         # Run cleanup in async context
         import asyncio
@@ -1101,7 +1101,6 @@ if __name__ == "__main__":
 
     except Exception as e:
         logger.error("Error running bot: %s", e)
-        print(f"❌ Error running bot: {e}")
 
         # Try cleanup even on error
         import asyncio

@@ -1,3 +1,5 @@
+"""LLM provider clients and response orchestration for chat generation."""
+
 import asyncio
 import logging
 import random
@@ -223,6 +225,8 @@ class ModelClient:
 
 
 class AIHandler:
+    """Coordinate prompt assembly, provider calls, retries, and background memory tasks."""
+
     def __init__(self, prompt_assembler=None):
         self.personality = BOT_PERSONALITY
         self.max_tokens = PROMPT_REPLY_TOKEN_BUDGET

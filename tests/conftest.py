@@ -161,6 +161,40 @@ async def sample_conversation(conversation_repo: PostgresConversationRepo, sampl
 
 import config
 
+
+PERFORMANCE_TEST_FILES = {
+    "test_buffer_performance.py",
+}
+
+EXTERNAL_TEST_FILES = {
+    "test_lmstudio_integration.py",
+}
+
+MANUAL_TEST_FILES = {
+    "test_db_creation.py",
+    "test_table_creation.py",
+    "test_table_creation_debug.py",
+    "test_typing_during_delay.py",
+    "test_message_dispatcher.py",
+    "test_message_queue.py",
+    "test_send_ai_response.py",
+    "test_send_ai_response_delay.py",
+    "test_send_ai_response_typing.py",
+}
+
+
+def pytest_collection_modifyitems(items):
+    """Tag non-default test categories by file name."""
+    for item in items:
+        filename = item.path.name
+        if filename in PERFORMANCE_TEST_FILES:
+            item.add_marker(pytest.mark.performance)
+        if filename in EXTERNAL_TEST_FILES:
+            item.add_marker(pytest.mark.external)
+        if filename in MANUAL_TEST_FILES:
+            item.add_marker(pytest.mark.manual)
+
+
 @pytest.fixture
 def sample_embedding():
     """Create a sample embedding vector for testing."""

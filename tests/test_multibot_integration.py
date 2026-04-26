@@ -5,7 +5,7 @@ import asyncio
 import pytest
 import uuid
 from unittest.mock import MagicMock, AsyncMock, patch
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from storage.models import Bot, UserBotSettings
@@ -39,8 +39,8 @@ def test_bot_model_creation():
         is_active=True,
         feature_flags={"feature": True},
         llm_config={"model": "gpt-4"},
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc)
     )
     assert bot.name == "TestBot"
     assert bot.is_active is True
@@ -53,14 +53,14 @@ def test_user_bot_settings_model_creation():
         user_id=uuid.uuid4(),
         bot_id=uuid.uuid4(),
         settings={"theme": "dark"},
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc)
     )
     assert settings.settings["theme"] == "dark"
 
 @patch('config.TELEGRAM_TOKEN', 'original_token')
 @patch('config.BOT_NAME', 'OriginalBot')
-@patch('bot.AIGirlfriendBot')
+@patch('bot.TelegramChatBot')
 def test_multibot_adapter(mock_bot_cls, mock_bot_config):
     """Test that the adapter correctly patches config and creates bot."""
     # Setup mock

@@ -52,13 +52,18 @@ class TokenCounter:
                 encoding = tiktoken.get_encoding("cl100k_base")
 
                 class TiktokenWrapper:
+                    """Adapter exposing the tokenizer protocol for tiktoken encodings."""
+
                     def __init__(self, encoding):
+                        """Store the concrete tiktoken encoding."""
                         self._encoding = encoding
 
                     def encode(self, text: str) -> List[int]:
+                        """Encode text using the wrapped tiktoken encoding."""
                         return self._encoding.encode(text)
 
                     def count_tokens(self, text: str) -> int:
+                        """Count tokens using the wrapped tiktoken encoding."""
                         return len(self._encoding.encode(text))
 
                 self.tokenizer = TiktokenWrapper(encoding)
