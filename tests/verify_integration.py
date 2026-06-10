@@ -14,7 +14,6 @@ from typing import Dict, List
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-from config import MEMORY_EMBED_DIM
 
 
 async def verify_storage_system():
@@ -98,41 +97,7 @@ async def verify_storage_system():
         total_tokens = sum(msg.token_count for msg in recent_messages)
         logger.info(f"✅ Retrieved {len(recent_messages)} messages within 50 token budget (used {total_tokens} tokens)")
         
-        # Test 3: Memory operations with embeddings
-        logger.info("🧠 Testing memory operations...")
-        
-        # Create test embeddings
-        embedding_1 = [0.1, 0.2, 0.3] + [0.0] * (MEMORY_EMBED_DIM-3)  
-        embedding_2 = [0.9, 0.1, 0.0] + [0.0] * (MEMORY_EMBED_DIM-3)  # Different similarity
-        
-        # Store memories
-        memory_1 = await storage.memories.store_memory(
-            str(conversation.id),
-            "User enjoys humor and jokes",
-            embedding_1,
-            memory_type="episodic"
-        )
-        
-        memory_2 = await storage.memories.store_memory(
-            str(conversation.id), 
-            "User is curious about AI personalities",
-            embedding_2,
-            memory_type="episodic"
-        )
-        
-        logger.info(f"✅ Stored {len([memory_1, memory_2])} memories with embeddings")
-        
-        # Test similarity search
-        query_embedding = [0.15, 0.25, 0.35] + [0.0] * (MEMORY_EMBED_DIM-3)  # Similar to embedding_1
-        similar_memories = await storage.memories.search_memories(
-            query_embedding,
-            top_k=5,
-            similarity_threshold=0.3
-        )
-        
-        logger.info(f"✅ Found {len(similar_memories)} similar memories")
-        
-        # Test 4: Token estimation
+        # Test 3: Token estimation
         logger.info("🔢 Testing token estimation...")
         
         estimator = TokenEstimator()
@@ -147,7 +112,7 @@ async def verify_storage_system():
             tokens = estimator.estimate_tokens(text)
             logger.info(f"✅ '{text[:20]}...' estimated at {tokens} tokens")
         
-        # Test 5: Database health and cleanup
+        # Test 4: Database health and cleanup
         logger.info("🏥 Testing database health...")
         
         health = await storage.health_check()
@@ -155,12 +120,10 @@ async def verify_storage_system():
         
         # Test repository statistics
         all_messages = await storage.messages.list_messages(str(conversation.id))
-        all_memories = await storage.memories.list_memories(str(conversation.id))
         all_conversations = await storage.conversations.list_conversations(str(user.id))
         
         logger.info(f"📊 Final statistics:")
         logger.info(f"   - Messages: {len(all_messages)}")
-        logger.info(f"   - Memories: {len(all_memories)}")
         logger.info(f"   - Conversations: {len(all_conversations)}")
         
         # Cleanup
@@ -193,7 +156,6 @@ def verify_file_structure():
         'requirements.txt',
         'tests/conftest.py',
         'tests/test_message_repo.py',
-        'tests/test_memory_repo.py',
         'tests/test_storage_factory.py',
         'pytest.ini'
     ]

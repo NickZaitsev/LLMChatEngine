@@ -19,9 +19,6 @@ from storage.interfaces import (
     Message,
 )
 from memory.manager import LlamaIndexMemoryManager
-from .templates import (
-    create_memory_context_message,
-)
 import config
 logger = logging.getLogger(__name__)
 

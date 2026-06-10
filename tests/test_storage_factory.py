@@ -14,7 +14,6 @@ from unittest.mock import patch
 
 from storage import create_storage, Storage
 from storage.models import PGVECTOR_AVAILABLE
-from config import MEMORY_EMBED_DIM
 
 
 @pytest.mark.asyncio
@@ -32,7 +31,6 @@ class TestStorageFactory:
         # Assert
         assert isinstance(storage, Storage)
         assert storage.messages is not None
-        assert storage.memories is not None
         assert storage.conversations is not None
         assert storage.users is not None
         assert storage.personas is not None
@@ -70,7 +68,6 @@ class TestStorageFactory:
         """Test that all repositories are properly initialized"""
         # Assert
         assert storage.messages is not None
-        assert storage.memories is not None
         assert storage.conversations is not None
         assert storage.users is not None
         assert storage.personas is not None
@@ -79,8 +76,6 @@ class TestStorageFactory:
         # Test that repositories have expected methods
         assert hasattr(storage.messages, 'append_message')
         assert hasattr(storage.messages, 'fetch_recent_messages')
-        assert hasattr(storage.memories, 'store_memory')
-        assert hasattr(storage.memories, 'search_memories')
         assert hasattr(storage.conversations, 'create_conversation')
         assert hasattr(storage.users, 'create_user')
         assert hasattr(storage.personas, 'create_persona')
@@ -177,24 +172,11 @@ class TestStorageIntegration:
             content="Hello! How can I help you today?"
         )
 
-        # Store memory
-        embedding = [0.1] * MEMORY_EMBED_DIM
-        memory = await storage.memories.store_memory(
-            conversation_id=str(conversation.id),
-            text="User greeted the assistant",
-            embedding=embedding,
-            memory_type="episodic"
-        )
-
         # Verify everything is connected properly
         messages = await storage.messages.list_messages(str(conversation.id))
         assert len(messages) == 2
         assert messages[0].content == "Hello, this is a test!"
         assert messages[1].content == "Hello! How can I help you today?"
-
-        memories = await storage.memories.list_memories(str(conversation.id))
-        assert len(memories) == 1
-        assert memories[0].text == "User greeted the assistant"
 
         conversations = await storage.conversations.list_conversations(str(user.id))
         assert len(conversations) == 1
@@ -259,55 +241,6 @@ class TestStorageIntegration:
         # More tokens should mean more messages (up to the limit)
         assert len(recent_50) >= len(recent_20) >= len(recent_10)
 
-    async def test_memory_search_across_conversations(self, storage):
-        """Test that memory search works correctly across multiple conversations"""
-        # Create test data
-        user = await storage.users.create_user(username="memory_search_user")
-        persona = await storage.personas.create_persona(
-            user_id=str(user.id),
-            name="Search Test Persona"
-        )
-
-        # Create two conversations
-        conv1 = await storage.conversations.create_conversation(
-            user_id=str(user.id),
-            persona_id=str(persona.id),
-            title="Conversation 1"
-        )
-        conv2 = await storage.conversations.create_conversation(
-            user_id=str(user.id),
-            persona_id=str(persona.id),
-            title="Conversation 2"
-        )
-
-        # Store memories with similar embeddings in both conversations
-        similar_embedding = [0.9, 0.1] + [0.0] * (MEMORY_EMBED_DIM - 2)
-        different_embedding = [0.1, 0.9] + [0.0] * (MEMORY_EMBED_DIM - 2)
-
-        await storage.memories.store_memory(
-            str(conv1.id), "Discussion about cats", similar_embedding
-        )
-        await storage.memories.store_memory(
-            str(conv2.id), "Talk about dogs", similar_embedding
-        )
-        await storage.memories.store_memory(
-            str(conv1.id), "Conversation about space", different_embedding
-        )
-
-        # Search for similar memories
-        query_embedding = [0.8, 0.2] + [0.0] * (MEMORY_EMBED_DIM - 2)
-        results = await storage.memories.search_memories(
-            query_embedding=query_embedding,
-            top_k=5,
-            similarity_threshold=0.5
-        )
-
-        # Should find memories from both conversations
-        assert len(results) >= 2
-        conversation_ids = {str(mem.conversation_id) for mem in results}
-        # Should include memories from both conversations
-        assert len(conversation_ids) <= 2  # At most 2 conversations
-
     async def test_cascade_deletion_behavior(self, storage):
         """Test that cascade deletions work properly (conceptually)"""
         # Note: This test demonstrates the expected behavior
@@ -324,21 +257,15 @@ class TestStorageIntegration:
             persona_id=str(persona.id)
         )
 
-        # Add messages and memories
+        # Add messages
         message = await storage.messages.append_message(
             str(conversation.id), "user", "Test message"
-        )
-        memory = await storage.memories.store_memory(
-            str(conversation.id), "Test memory", [0.1] * MEMORY_EMBED_DIM
         )
 
         # Verify everything exists
         messages = await storage.messages.list_messages(str(conversation.id))
-        memories = await storage.memories.list_memories(str(conversation.id))
         assert len(messages) == 1
-        assert len(memories) == 1
 
         # This test verifies the structure is set up correctly for cascade deletion
         # The actual CASCADE behavior is handled by the database constraints
         assert message.conversation_id == conversation.id
-        assert memory.conversation_id == conversation.id

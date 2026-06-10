@@ -73,15 +73,15 @@ def verify_storage_module():
             'expected_functions': ['create_storage']
         },
         'storage/models.py': {
-            'expected_classes': ['Base', 'User', 'Persona', 'Conversation', 'Message', 'Memory'],
+            'expected_classes': ['Base', 'User', 'Persona', 'Conversation', 'Message'],
             'expected_functions': []
         },
         'storage/repos.py': {
-            'expected_classes': ['PostgresMessageRepo', 'PostgresMemoryRepo', 'PostgresConversationRepo', 'PostgresUserRepo', 'PostgresPersonaRepo'],
+            'expected_classes': ['PostgresMessageRepo', 'PostgresConversationRepo', 'PostgresUserRepo', 'PostgresPersonaRepo'],
             'expected_functions': []
         },
         'storage/interfaces.py': {
-            'expected_classes': ['Message', 'Memory', 'Conversation', 'User', 'Persona'],
+            'expected_classes': ['Message', 'Conversation', 'User', 'Persona'],
             'expected_functions': []
         }
     }
@@ -135,7 +135,6 @@ def verify_test_structure():
         'tests/__init__.py',
         'tests/conftest.py',
         'tests/test_message_repo.py',
-        'tests/test_memory_repo.py',
         'tests/test_storage_factory.py'
     ]
     

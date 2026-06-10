@@ -5,13 +5,10 @@ This module implements the repository interfaces defined in storage.interfaces
 using SQLAlchemy 2.x async ORM with PostgreSQL backend.
 """
 
-import json
 import logging
-import math
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Union
 from uuid import UUID, uuid4
-from pathlib import Path
 
 from core.tokens import TokenCounter
 from sqlalchemy import select, func, desc, and_, or_, text, delete
@@ -20,20 +17,18 @@ from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.exc import IntegrityError, NoResultFound
 
 from .interfaces import (
-    Message, Memory, Conversation, User, Persona, MessageLog, MessageUser,
-    MessageRepo, MemoryRepo, ConversationRepo, UserRepo, PersonaRepo, MessageHistoryRepo,
+    Message, Conversation, User, Persona, MessageLog, MessageUser,
+    MessageRepo, ConversationRepo, UserRepo, PersonaRepo, MessageHistoryRepo,
     UserBotSettings
 )
 from .models import (
     Message as MessageModel,
-    Memory as MemoryModel,
     Conversation as ConversationModel,
     User as UserModel,
     Persona as PersonaModel,
     UserBotSettings as UserBotSettingsModel,
     MessageLog as MessageLogModel,
     MessageUser as MessageUserModel,
-    PGVECTOR_AVAILABLE
 )
 
 logger = logging.getLogger(__name__)
@@ -584,280 +579,6 @@ class PostgresMessageHistoryRepo:
                 await session.rollback()
                 logger.error("Failed to clear user history: %s", e)
                 return 0
-
-
-class PostgresMemoryRepo:
-    """PostgreSQL implementation of MemoryRepo interface with optional pgvector support"""
-
-    def __init__(self, session_maker: async_sessionmaker[AsyncSession], use_pgvector: bool = True):
-        """
-        Initialize the memory repository.
-
-        Args:
-            session_maker: SQLAlchemy async session maker
-            use_pgvector: Whether to use pgvector for similarity search
-        """
-        self.session_maker = session_maker
-        self.use_pgvector = use_pgvector and PGVECTOR_AVAILABLE
-        self.fallback_file = Path("memories_embeddings.json")
-
-        if not self.use_pgvector:
-            logger.info("pgvector not available, using file-based embedding storage")
-
-    async def store_memory(
-        self,
-        conversation_id: str,
-        text: str,
-        embedding: List[float],
-        memory_type: str = "episodic",
-        bot_id: Optional[str] = None,
-    ) -> Memory:
-        """
-        Store a memory with optional vector embedding.
-
-        Args:
-            conversation_id: UUID string of the conversation
-            text: The memory text content
-            embedding: Vector embedding of the text
-            memory_type: Type of memory ("episodic" | "summary")
-
-        Returns:
-            The created Memory object
-        """
-        try:
-            conversation_uuid = UUID(conversation_id)
-        except ValueError as e:
-            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
-
-        bot_uuid = None
-        if bot_id:
-            try:
-                bot_uuid = UUID(bot_id)
-            except ValueError as e:
-                raise ValueError(f"Invalid bot_id format: {bot_id}") from e
-
-        async with self.session_maker() as session:
-            try:
-                if bot_uuid is None:
-                    conversation_model = await session.get(ConversationModel, conversation_uuid)
-                    if conversation_model:
-                        bot_uuid = conversation_model.bot_id
-
-                memory_model = MemoryModel(
-                    conversation_id=conversation_uuid,
-                    bot_id=bot_uuid,
-                    memory_type=memory_type,
-                    text=text,
-                    embedding=embedding
-                )
-
-                session.add(memory_model)
-                await session.commit()
-                await session.refresh(memory_model)
-
-                # Store embedding in file if not using pgvector
-                if not self.use_pgvector:
-                    await self._store_embedding_to_file(str(memory_model.id), embedding)
-
-                return Memory(
-                    id=memory_model.id,
-                    conversation_id=memory_model.conversation_id,
-                    memory_type=memory_model.memory_type,
-                    text=memory_model.text,
-                    created_at=memory_model.created_at,
-                    bot_id=memory_model.bot_id,
-                    embedding=embedding
-                )
-
-            except IntegrityError as e:
-                await session.rollback()
-                raise IntegrityError(f"Failed to create memory: {e}") from e
-
-    async def search_memories(
-        self,
-        query_embedding: List[float],
-        top_k: int = 10,
-        similarity_threshold: float = 0.7,
-        user_id: Optional[str] = None,
-        bot_id: Optional[str] = None,
-    ) -> List[Memory]:
-        """
-        Search for memories using vector similarity.
-
-        Args:
-            query_embedding: Query vector for similarity search
-            top_k: Maximum number of results to return
-            similarity_threshold: Minimum similarity score (0-1)
-
-        Returns:
-            List of Memory objects ordered by similarity (highest first)
-        """
-        user_uuid = None
-        bot_uuid = None
-        if user_id:
-            try:
-                user_uuid = UUID(user_id)
-            except ValueError as e:
-                raise ValueError(f"Invalid user_id format: {user_id}") from e
-        if bot_id:
-            try:
-                bot_uuid = UUID(bot_id)
-            except ValueError as e:
-                raise ValueError(f"Invalid bot_id format: {bot_id}") from e
-
-        async with self.session_maker() as session:
-            if self.use_pgvector:
-                # Use pgvector for efficient similarity search
-                stmt = select(MemoryModel).join(
-                    ConversationModel, MemoryModel.conversation_id == ConversationModel.id
-                )
-                if user_uuid:
-                    stmt = stmt.where(ConversationModel.user_id == user_uuid)
-                if bot_uuid:
-                    stmt = stmt.where(MemoryModel.bot_id == bot_uuid)
-                stmt = stmt.order_by(
-                    MemoryModel.embedding.cosine_distance(query_embedding)
-                ).limit(top_k)
-
-                result = await session.execute(stmt)
-                memories = result.scalars().all()
-
-                # Filter by similarity threshold
-                filtered_memories = []
-                for memory in memories:
-                    if memory.embedding is not None and len(memory.embedding) > 0:
-                        similarity = self._cosine_similarity(query_embedding, memory.embedding)
-                        if similarity >= similarity_threshold:
-                            filtered_memories.append((memory, similarity))
-
-                # Sort by similarity descending
-                filtered_memories.sort(key=lambda x: x[1], reverse=True)
-                memories = [mem for mem, _ in filtered_memories]
-
-            else:
-                # Fallback: load all memories and compute similarity in Python
-                stmt = select(MemoryModel).join(
-                    ConversationModel, MemoryModel.conversation_id == ConversationModel.id
-                )
-                if user_uuid:
-                    stmt = stmt.where(ConversationModel.user_id == user_uuid)
-                if bot_uuid:
-                    stmt = stmt.where(MemoryModel.bot_id == bot_uuid)
-                result = await session.execute(stmt)
-                all_memories = result.scalars().all()
-
-                memory_similarities = []
-                for memory in all_memories:
-                    if memory.embedding is not None and len(memory.embedding) > 0:
-                        similarity = self._cosine_similarity(query_embedding, memory.embedding)
-                        if similarity >= similarity_threshold:
-                            memory_similarities.append((memory, similarity))
-
-                # Sort by similarity descending and take top_k
-                memory_similarities.sort(key=lambda x: x[1], reverse=True)
-                memories = [mem for mem, _ in memory_similarities[:top_k]]
-
-            return [
-                Memory(
-                    id=mem.id,
-                    conversation_id=mem.conversation_id,
-                    memory_type=mem.memory_type,
-                    text=mem.text,
-                    created_at=mem.created_at,
-                    bot_id=mem.bot_id,
-                    embedding=mem.embedding
-                )
-                for mem in memories
-            ]
-
-    async def list_memories(
-        self,
-        conversation_id: str,
-        memory_type: Optional[str] = None,
-        bot_id: Optional[str] = None,
-    ) -> List[Memory]:
-        """
-        List memories for a conversation, optionally filtered by type.
-
-        Args:
-            conversation_id: UUID string of the conversation
-            memory_type: Optional memory type filter
-
-        Returns:
-            List of Memory objects ordered by creation time
-        """
-        try:
-            conversation_uuid = UUID(conversation_id)
-        except ValueError as e:
-            raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
-
-        bot_uuid = None
-        if bot_id:
-            try:
-                bot_uuid = UUID(bot_id)
-            except ValueError as e:
-                raise ValueError(f"Invalid bot_id format: {bot_id}") from e
-
-        async with self.session_maker() as session:
-            conditions = [MemoryModel.conversation_id == conversation_uuid]
-            if memory_type:
-                conditions.append(MemoryModel.memory_type == memory_type)
-            if bot_uuid is not None:
-                conditions.append(MemoryModel.bot_id == bot_uuid)
-
-            stmt = select(MemoryModel).where(
-                and_(*conditions)
-            ).order_by(MemoryModel.created_at)
-
-            result = await session.execute(stmt)
-            memories = result.scalars().all()
-
-            return [
-                Memory(
-                    id=mem.id,
-                    conversation_id=mem.conversation_id,
-                    memory_type=mem.memory_type,
-                    text=mem.text,
-                    created_at=mem.created_at,
-                    bot_id=mem.bot_id,
-                    embedding=mem.embedding
-                )
-                for mem in memories
-            ]
-
-    async def _store_embedding_to_file(self, memory_id: str, embedding: List[float]):
-        """Store embedding to file when pgvector is not available"""
-        try:
-            # Load existing embeddings
-            embeddings = {}
-            if self.fallback_file.exists():
-                with open(self.fallback_file, 'r') as f:
-                    embeddings = json.load(f)
-
-            # Add new embedding
-            embeddings[memory_id] = embedding
-
-            # Save back to file
-            with open(self.fallback_file, 'w') as f:
-                json.dump(embeddings, f)
-
-        except Exception as e:
-            logger.error(f"Failed to store embedding to file: {e}")
-
-    @staticmethod
-    def _cosine_similarity(a: List[float], b: List[float]) -> float:
-        """Calculate cosine similarity between two vectors"""
-        try:
-            dot_product = sum(x * y for x, y in zip(a, b))
-            norm_a = math.sqrt(sum(x * x for x in a))
-            norm_b = math.sqrt(sum(x * x for x in b))
-
-            if norm_a == 0 or norm_b == 0:
-                return 0.0
-
-            return dot_product / (norm_a * norm_b)
-        except (ValueError, ZeroDivisionError):
-            return 0.0
 
 
 class PostgresConversationRepo:
@@ -1414,11 +1135,8 @@ __all__ = [
     'TokenEstimator',
     'PostgresMessageRepo',
     'PostgresMessageHistoryRepo',
-    'PostgresMemoryRepo',
     'PostgresConversationRepo',
     'PostgresUserRepo',
     'PostgresPersonaRepo',
     'PostgresUserBotSettingsRepo',
-    'TIKTOKEN_AVAILABLE',
-    'PGVECTOR_AVAILABLE'
 ]

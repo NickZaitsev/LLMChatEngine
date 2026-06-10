@@ -9,7 +9,6 @@ import logging
 import os
 import sys
 from typing import Optional
-from config import MEMORY_EMBED_DIM
 # Add the project root to Python path
 sys.path.insert(0, '.')
 
@@ -90,25 +89,6 @@ async def _test_storage_connection(db_url: str) -> bool:
             str(conversation.id), token_budget=1000
         )
         logger.info("✓ Retrieved %d recent messages within token budget", len(recent_messages))
-        
-        # Test memory storage (if pgvector available)
-        logger.info("Testing memory operations...")
-        try:
-            fake_embedding = [0.1] * MEMORY_EMBED_DIM  # Mock embedding vector
-            memory = await storage.memories.store_memory(
-                conversation_id=str(conversation.id),
-                text="This is a test memory",
-                embedding=fake_embedding,
-                memory_type="episodic"
-            )
-            logger.info("✓ Memory created: %s", memory.id)
-            
-            # Test memory retrieval
-            memories = await storage.memories.list_memories(str(conversation.id))
-            logger.info("✓ Retrieved %d memories", len(memories))
-            
-        except Exception as e:
-            logger.warning("Memory operations failed (may be expected without pgvector): %s", e)
         
         # Clean up
         await storage.close()

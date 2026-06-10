@@ -367,12 +367,6 @@ class Conversation(Base):
         order_by="Message.created_at",
         foreign_keys="[Message.conversation_id]"
     )
-    memories: Mapped[List["Memory"]] = relationship(
-        "Memory", 
-        back_populates="conversation",
-        cascade="all, delete-orphan"
-    )
-    
     last_summarized_message: Mapped[Optional["Message"]] = relationship(
         "Message",
         foreign_keys=[last_summarized_message_id]
@@ -578,92 +572,6 @@ class MessageUser(Base):
         return f"<MessageUser(id={self.id}, user_id={self.user_id}, role='{self.role}', content='{content_preview}')>"
 
 
-class Memory(Base):
-    """
-    Memory model representing stored conversation memories with optional vector embeddings.
-    
-    Attributes:
-        id: Unique identifier for the memory
-        conversation_id: Foreign key reference to the conversation
-        bot_id: Foreign key reference to the bot (for vector isolation)
-        memory_type: Type of memory ("summary" | "episodic")
-        text: The memory content text
-        created_at: Timestamp when the memory was created
-        embedding: Optional vector embedding for semantic search (if pgvector available)
-    """
-    __tablename__ = 'memories'
-    
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), 
-        primary_key=True, 
-        default=uuid.uuid4,
-        doc="Unique identifier for the memory"
-    )
-    conversation_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), 
-        ForeignKey('conversations.id', ondelete='CASCADE'), 
-        nullable=False,
-        doc="Foreign key reference to the conversation"
-    )
-    bot_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), 
-        ForeignKey('bots.id', ondelete='CASCADE'), 
-        nullable=True,  # Nullable for migration compatibility
-        doc="Foreign key reference to the bot (for vector isolation)"
-    )
-    memory_type: Mapped[str] = mapped_column(
-        String(50), 
-        nullable=False, 
-        default="episodic",
-        doc="Type of memory (summary|episodic)"
-    )
-    text: Mapped[str] = mapped_column(
-        Text, 
-        nullable=False,
-        doc="The memory content text"
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), 
-        nullable=False, 
-        default=func.now(),
-        doc="Timestamp when the memory was created"
-    )
-    
-    # Conditional embedding column based on pgvector availability
-    if PGVECTOR_AVAILABLE and Vector:
-        embedding: Mapped[Optional[List[float]]] = mapped_column(
-            Vector(config.MEMORY_EMBED_DIM),
-            nullable=True,
-            doc=f"Vector embedding for semantic search ({config.MEMORY_EMBED_DIM} dimensions)"
-        )
-        
-        # Create index for vector similarity search if pgvector is available
-        __table_args__ = (
-            Index('ix_memories_embedding', 'embedding', postgresql_using='ivfflat', postgresql_with={'lists': 100}),
-            Index('ix_memories_conversation_type', 'conversation_id', 'memory_type'),
-            Index('ix_memories_bot_id', 'bot_id'),
-        )
-    else:
-        # Fallback for systems without pgvector - store as JSON
-        embedding: Mapped[Optional[List[float]]] = mapped_column(
-            JSON,
-            nullable=True,
-            doc="Vector embedding stored as JSON (fallback without pgvector)"
-        )
-        
-        __table_args__ = (
-            Index('ix_memories_conversation_type', 'conversation_id', 'memory_type'),
-            Index('ix_memories_bot_id', 'bot_id'),
-        )
-    
-    # Relationships
-    conversation: Mapped["Conversation"] = relationship("Conversation", back_populates="memories")
-    
-    def __repr__(self) -> str:
-        text_preview = self.text[:50] + "..." if len(self.text) > 50 else self.text
-        return f"<Memory(id={self.id}, type='{self.memory_type}', text='{text_preview}')>"
-
-
 # Export the availability flag for use by repositories
 __all__ = [
     'Base',
@@ -675,6 +583,5 @@ __all__ = [
     'Message',
     'MessageLog',
     'MessageUser',
-    'Memory',
     'PGVECTOR_AVAILABLE'
 ]

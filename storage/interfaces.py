@@ -41,18 +41,6 @@ class MessageUser:
 
 
 @dataclass
-class Memory:
-    """Data class representing a memory entry"""
-    id: UUID
-    conversation_id: UUID
-    memory_type: str
-    text: str
-    created_at: datetime
-    bot_id: Optional[UUID] = None
-    embedding: Optional[List[float]] = None
-
-
-@dataclass
 class Conversation:
     """Data class representing a conversation"""
     id: UUID
@@ -162,22 +150,6 @@ class MessageHistoryRepo(Protocol):
     
     async def clear_user_history(self, user_id: UUID, bot_id: Optional[UUID] = None) -> int:
         """Delete user-facing history and return the count."""
-        ...
-
-
-class MemoryRepo(Protocol):
-    """Protocol for memory repository operations"""
-    
-    async def store_memory(self, conversation_id: str, text: str, embedding: List[float], memory_type: str = "episodic", bot_id: Optional[str] = None) -> Memory:
-        """Persist a vectorized memory entry."""
-        ...
-    
-    async def search_memories(self, query_embedding: List[float], top_k: int = 10, similarity_threshold: float = 0.7, user_id: Optional[str] = None, bot_id: Optional[str] = None) -> List[Memory]:
-        """Search memories by embedding similarity."""
-        ...
-    
-    async def list_memories(self, conversation_id: str, memory_type: Optional[str] = None, bot_id: Optional[str] = None) -> List[Memory]:
-        """List memories for a conversation."""
         ...
 
 

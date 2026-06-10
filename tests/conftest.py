@@ -14,7 +14,7 @@ from typing import AsyncGenerator, Generator
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from storage.models import Base
 from storage.repos import (
-    PostgresMessageRepo, PostgresMessageHistoryRepo, PostgresMemoryRepo, PostgresConversationRepo,
+    PostgresMessageRepo, PostgresMessageHistoryRepo, PostgresConversationRepo,
     PostgresUserRepo, PostgresPersonaRepo, PostgresUserBotSettingsRepo
 )
 from storage import create_storage, Storage
@@ -79,14 +79,13 @@ async def storage(engine) -> AsyncGenerator[Storage, None]:
     
     # Create storage using the shared engine components
     from storage.repos import (
-        PostgresMessageRepo, PostgresMemoryRepo, PostgresConversationRepo,
+        PostgresMessageRepo, PostgresConversationRepo,
         PostgresUserRepo, PostgresPersonaRepo, PostgresUserBotSettingsRepo
     )
     
     storage = Storage(
         messages=PostgresMessageRepo(session_maker),
         message_history=PostgresMessageHistoryRepo(session_maker),
-        memories=PostgresMemoryRepo(session_maker, use_pgvector=False),
         conversations=PostgresConversationRepo(session_maker),
         users=PostgresUserRepo(session_maker),
         personas=PostgresPersonaRepo(session_maker),
@@ -104,12 +103,6 @@ async def storage(engine) -> AsyncGenerator[Storage, None]:
 async def message_repo(session_maker) -> PostgresMessageRepo:
     """Create a message repository for testing."""
     return PostgresMessageRepo(session_maker)
-
-
-@pytest_asyncio.fixture
-async def memory_repo(session_maker) -> PostgresMemoryRepo:
-    """Create a memory repository for testing."""
-    return PostgresMemoryRepo(session_maker, use_pgvector=False)
 
 
 @pytest_asyncio.fixture
@@ -231,7 +224,6 @@ async def app_context(engine) -> "AppContext":
     context.conversation_manager.storage = Storage(
         messages=PostgresMessageRepo(session_maker),
         message_history=PostgresMessageHistoryRepo(session_maker),
-        memories=PostgresMemoryRepo(session_maker, use_pgvector=False),
         conversations=PostgresConversationRepo(session_maker),
         users=PostgresUserRepo(session_maker),
         personas=PostgresPersonaRepo(session_maker),

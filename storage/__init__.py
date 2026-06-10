@@ -20,7 +20,6 @@ from .models import Base, PGVECTOR_AVAILABLE
 from .repos import (
     PostgresMessageRepo,
     PostgresMessageHistoryRepo,
-    PostgresMemoryRepo,
     PostgresConversationRepo,
     PostgresUserRepo,
     PostgresPersonaRepo,
@@ -38,7 +37,6 @@ class Storage:
     Attributes:
         messages: Message repository instance
         message_history: Message history repository instance
-        memories: Memory repository instance
         conversations: Conversation repository instance
         users: User repository instance
         personas: Persona repository instance
@@ -48,7 +46,6 @@ class Storage:
     """
     messages: PostgresMessageRepo
     message_history: PostgresMessageHistoryRepo
-    memories: PostgresMemoryRepo
     conversations: PostgresConversationRepo
     users: PostgresUserRepo
     personas: PostgresPersonaRepo
@@ -177,7 +174,6 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
         # Initialize repositories
         messages_repo = PostgresMessageRepo(session_maker)
         message_history_repo = PostgresMessageHistoryRepo(session_maker)
-        memories_repo = PostgresMemoryRepo(session_maker, use_pgvector)
         conversations_repo = PostgresConversationRepo(session_maker)
         users_repo = PostgresUserRepo(session_maker)
         personas_repo = PostgresPersonaRepo(session_maker)
@@ -186,7 +182,6 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
         storage = Storage(
             messages=messages_repo,
             message_history=message_history_repo,
-            memories=memories_repo,
             conversations=conversations_repo,
             users=users_repo,
             personas=personas_repo,

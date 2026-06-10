@@ -14,8 +14,7 @@ from uuid import uuid4, UUID
 from typing import List, Dict, Any
 
 from llama_index.core.schema import TextNode
-from storage.interfaces import Message, Memory
-from memory.manager import LlamaIndexMemoryManager as MemoryManager
+from storage.interfaces import Message
 from prompt.assembler import PromptAssembler, TokenCounter, Tokenizer
 import config
 
@@ -51,8 +50,6 @@ def mock_memory_manager():
     """Create a mock MemoryManager for testing"""
     manager = AsyncMock()
     manager.retrieve_relevant_memories = AsyncMock()
-    manager.memory_repo = AsyncMock()
-    manager.memory_repo.list_memories = AsyncMock()
     return manager
 
 
@@ -126,18 +123,6 @@ def sample_memories():
 
 
 @pytest.fixture
-def sample_summary_memory():
-    """Create a sample summary memory"""
-    return Memory(
-        id=uuid4(),
-        conversation_id=uuid4(),
-        memory_type="summary", 
-        text='{"profile": "User is a friendly software engineer who loves pizza and hiking. Prefers casual conversation style."}',
-        created_at=datetime.now(timezone.utc)
-    )
-
-
-@pytest.fixture
 def prompt_assembler(mock_message_repo, mock_memory_manager, mock_persona_repo, mock_tokenizer):
     """Create a PromptAssembler instance for testing"""
     config = {
@@ -198,14 +183,13 @@ class TestPromptAssembler:
     
     @pytest.mark.asyncio
     async def test_build_prompt_basic(self, prompt_assembler, sample_conversation_id,
-                                     sample_messages, sample_memories, sample_summary_memory):
+                                     sample_messages, sample_memories):
         """Test basic prompt building with all components"""
         # Setup mocks
         prompt_assembler.message_repo.fetch_active_messages.return_value = sample_messages
         prompt_assembler.message_repo.get_last_user_message.return_value = sample_messages[-1]
         prompt_assembler.memory_manager.get_context.return_value = "User likes pizza and prefers Italian food"
         prompt_assembler.memory_manager.retrieve_relevant_memories.return_value = sample_memories
-        prompt_assembler.memory_manager.memory_repo.list_memories.return_value = [sample_summary_memory]
         
         # Build prompt
         messages = await prompt_assembler.build_prompt(
@@ -223,14 +207,13 @@ class TestPromptAssembler:
     
     @pytest.mark.asyncio
     async def test_build_prompt_and_metadata(self, prompt_assembler, sample_conversation_id,
-                                            sample_messages, sample_memories, sample_summary_memory):
+                                            sample_messages, sample_memories):
         """Test prompt building with metadata tracking"""
         # Setup mocks
         prompt_assembler.message_repo.fetch_active_messages.return_value = sample_messages
         prompt_assembler.message_repo.get_last_user_message.return_value = sample_messages[-1]
         prompt_assembler.memory_manager.get_context.return_value = "User likes pizza and prefers Italian food"
         prompt_assembler.memory_manager.retrieve_relevant_memories.return_value = sample_memories
-        prompt_assembler.memory_manager.memory_repo.list_memories.return_value = [sample_summary_memory]
         
         # Build prompt with metadata
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
@@ -270,7 +253,6 @@ class TestPromptAssembler:
         prompt_assembler.message_repo.get_last_user_message.return_value = None
         prompt_assembler.memory_manager.get_context.return_value = ""
         prompt_assembler.memory_manager.retrieve_relevant_memories.return_value = sample_memories
-        prompt_assembler.memory_manager.memory_repo.list_memories.return_value = []
         
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id,
@@ -298,7 +280,6 @@ class TestPromptAssembler:
         prompt_assembler.message_repo.get_last_user_message.return_value = None
         prompt_assembler.memory_manager.get_context.return_value = ""
         prompt_assembler.memory_manager.retrieve_relevant_memories.return_value = many_memories
-        prompt_assembler.memory_manager.memory_repo.list_memories.return_value = []
         
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id,
@@ -328,7 +309,6 @@ class TestPromptAssembler:
         prompt_assembler.message_repo.get_last_user_message.return_value = long_message
         prompt_assembler.memory_manager.get_context.return_value = ""
         prompt_assembler.memory_manager.retrieve_relevant_memories.return_value = []
-        prompt_assembler.memory_manager.memory_repo.list_memories.return_value = []
         
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id,
@@ -377,7 +357,6 @@ class TestPromptAssembler:
         # Setup mocks with no memories
         prompt_assembler.message_repo.fetch_recent_messages.return_value = sample_messages
         prompt_assembler.memory_manager.retrieve_relevant_memories.return_value = []
-        prompt_assembler.memory_manager.memory_repo.list_memories.return_value = []
         
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id
@@ -395,7 +374,6 @@ class TestPromptAssembler:
         # Setup mocks with no history
         prompt_assembler.message_repo.fetch_recent_messages.return_value = []
         prompt_assembler.memory_manager.retrieve_relevant_memories.return_value = []
-        prompt_assembler.memory_manager.memory_repo.list_memories.return_value = []
         
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id
@@ -431,7 +409,6 @@ class TestPromptAssembler:
         
         # Setup mocks
         mock_memory_manager.retrieve_relevant_memories.return_value = []
-        mock_memory_manager.memory_repo.list_memories.return_value = []
         
         messages, metadata = await assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id
@@ -493,14 +470,13 @@ class TestPromptAssembler:
     
     @pytest.mark.asyncio
     async def test_message_ordering(self, prompt_assembler, sample_conversation_id, 
-                                   sample_messages, sample_memories, sample_summary_memory):
+                                   sample_messages, sample_memories):
         """Test that messages are properly ordered"""
         # Setup mocks
         prompt_assembler.message_repo.fetch_active_messages.return_value = sample_messages
         prompt_assembler.message_repo.get_last_user_message.return_value = sample_messages[-1]
         prompt_assembler.memory_manager.get_context.return_value = "User likes pizza and prefers Italian food"
         prompt_assembler.memory_manager.retrieve_relevant_memories.return_value = sample_memories
-        prompt_assembler.memory_manager.memory_repo.list_memories.return_value = [sample_summary_memory]
         
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id
@@ -532,7 +508,6 @@ class TestEdgeCases:
         # Setup mocks to raise exceptions
         prompt_assembler.message_repo.fetch_recent_messages.side_effect = Exception("DB Error")
         prompt_assembler.memory_manager.retrieve_relevant_memories.side_effect = Exception("Memory Error")
-        prompt_assembler.memory_manager.memory_repo.list_memories.side_effect = Exception("Summary Error")
         
         # Should still work despite errors (with warnings logged)
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
@@ -549,7 +524,6 @@ class TestEdgeCases:
         # Setup minimal mocks
         prompt_assembler.message_repo.fetch_recent_messages.return_value = []
         prompt_assembler.memory_manager.retrieve_relevant_memories.return_value = []
-        prompt_assembler.memory_manager.memory_repo.list_memories.return_value = []
         
         messages, metadata = await prompt_assembler.build_prompt_and_metadata(
             conversation_id=sample_conversation_id,

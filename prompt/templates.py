@@ -8,7 +8,6 @@ for formatting memory snippets and other prompt components.
 import json
 from datetime import datetime
 from typing import Dict, Any, Optional
-from storage.interfaces import Memory
 
 
 
@@ -30,7 +29,7 @@ SPECIAL INSTRUCTIONS:
 Remember to stay in character while being helpful and engaging."""
 
 
-def format_memory_snippet(memory: Memory) -> str:
+def format_memory_snippet(memory: Any) -> str:
     """
     Format a memory into a concise snippet for inclusion in prompts.
     
@@ -63,7 +62,7 @@ def format_memory_snippet(memory: Memory) -> str:
     return f"MEMORY [{short_id} | {date_str} | {memory_type}]: {summary}"
 
 
-def format_memory_snippet_from_record(memory_record: Memory) -> str:
+def format_memory_snippet_from_record(memory_record: Any) -> str:
     """
     Format a MemoryRecord into a concise snippet for inclusion in prompts.
 
