@@ -8,7 +8,7 @@ from typing import Any, Iterable
 from llama_index.core.schema import TextNode
 
 from config import BOOK_EMBED_BATCH_SIZE, BOOK_RAG_EXPAND_NEIGHBORS
-from core.abstractions import EmbeddingModel
+from core.abstractions import EmbeddingModel, KnowledgeStore
 from knowledge.chunker import chunk_text
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ class BookKnowledgeManager:
 
     def __init__(
         self,
-        store: Any,
+        store: KnowledgeStore,
         embedding_model: EmbeddingModel,
         expand_neighbors: int = BOOK_RAG_EXPAND_NEIGHBORS,
         embed_batch_size: int = BOOK_EMBED_BATCH_SIZE,

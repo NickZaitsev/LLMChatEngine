@@ -9,7 +9,7 @@ refactoring the core logic.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Any, Dict, Optional
+from typing import List, Any, Optional, Protocol
 
 class VectorStore(ABC):
     """
@@ -50,6 +50,28 @@ class VectorStore(ABC):
             user_id: The ID of the user whose data should be cleared.
         """
         pass
+
+
+class KnowledgeStore(Protocol):
+    """Bot-scoped vector store contract for immutable reference knowledge."""
+
+    async def upsert(self, nodes: List[Any]) -> None:
+        """Upsert knowledge nodes into the store."""
+        ...
+
+    async def query(
+        self,
+        query_embedding: List[float],
+        top_k: int,
+        bot_id: str,
+        min_score: Optional[float] = None,
+    ) -> List[Any]:
+        """Query similar knowledge nodes scoped to a bot."""
+        ...
+
+    async def delete_book(self, book_id: str) -> None:
+        """Delete all nodes for a specific book."""
+        ...
 
 
 class EmbeddingModel(ABC):
