@@ -232,8 +232,8 @@ class MessageQueueManager:
             if not isinstance(user_id, int) or user_id <= 0:
                 raise ValueError("user_id must be a positive integer")
 
-            if not isinstance(chat_id, int) or chat_id <= 0:
-                raise ValueError("chat_id must be a positive integer")
+            if not isinstance(chat_id, int):
+                raise ValueError("chat_id must be an integer")
 
             if not text or not isinstance(text, str):
                 raise ValueError("text must be a non-empty string")
@@ -799,7 +799,7 @@ class MessageDispatcher:
                 logger.error("Invalid user_id in message: %s", user_id)
                 return False
 
-            if not isinstance(chat_id, int) or chat_id <= 0:
+            if not isinstance(chat_id, int):
                 logger.error("Invalid chat_id in message: %s", chat_id)
                 return False
 
@@ -903,7 +903,7 @@ class MessageDispatcher:
                 state = json.loads(state_json)
                 state['is_active'] = False
                 state['last_error'] = "Permanent failure (Chat not found / Forbidden)"
-                state['error_time'] = datetime.now().isoformat()
+                state['error_time'] = datetime.now(timezone.utc).isoformat()
                 self.redis_client.set(state_key, json.dumps(state, default=str))
                 logger.info("Proactive messaging disabled for user %s bot %s in Redis", user_id, bot_id)
             else:
@@ -913,7 +913,7 @@ class MessageDispatcher:
                     'user_id': user_id,
                     'bot_id': bot_id,
                     'last_error': "Permanent failure (Chat not found / Forbidden)",
-                    'error_time': datetime.now().isoformat()
+                    'error_time': datetime.now(timezone.utc).isoformat()
                 }
                 self.redis_client.set(state_key, json.dumps(state, default=str))
                 logger.info("Created inactive state for user %s bot %s in Redis", user_id, bot_id)
@@ -1001,14 +1001,19 @@ async def generate_ai_response(
             await typing_manager.start_typing(bot, chat_id, route_key=route_key)
             typing_started = True
 
-        # Make the actual AI request with timeout from config
-        from config import REQUEST_TIMEOUT
+        # Make the actual AI request. AIHandler owns provider timeout/retry policy;
+        # this wrapper owns typing-indicator lifetime and failure isolation.
         logger.info("Generating AI response for chat %s", chat_id)
         try:
-            ai_response = await asyncio.wait_for(
-                ai_handler.generate_response(additional_prompt, conversation_history, conversation_id, role),
-                timeout=REQUEST_TIMEOUT
+            ai_response = await ai_handler.generate_response(
+                additional_prompt,
+                conversation_history,
+                conversation_id,
+                role,
             )
+            if ai_response is None:
+                logger.warning("AI generation returned no response for chat %s", chat_id)
+                return None
             logger.info("AI response received for chat %s (%d chars)", chat_id, len(ai_response))
             return ai_response
         except asyncio.TimeoutError:

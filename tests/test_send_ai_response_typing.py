@@ -137,6 +137,30 @@ class TestSendAIResponseTyping:
         mock_typing_manager.start_typing.assert_awaited_once_with(mock_bot, 123, route_key="123:bot-a")
         mock_typing_manager.stop_typing.assert_awaited_once_with(123, route_key="123:bot-a")
 
+    @pytest.mark.asyncio
+    async def test_generate_ai_response_does_not_wrap_handler_timeout(self):
+        """AIHandler owns timeout/retry policy; the send helper should not add another timeout."""
+        mock_bot = AsyncMock()
+        mock_typing_manager = MagicMock()
+        mock_typing_manager.start_typing = AsyncMock()
+        mock_typing_manager.stop_typing = AsyncMock()
+        mock_ai_handler = MagicMock()
+        mock_ai_handler.generate_response = AsyncMock(return_value="ok")
+
+        with patch("asyncio.wait_for") as wait_for:
+            response = await generate_ai_response(
+                ai_handler=mock_ai_handler,
+                typing_manager=mock_typing_manager,
+                bot=mock_bot,
+                chat_id=123,
+                additional_prompt="hello",
+                conversation_history=[],
+                route_key="123:bot-a",
+            )
+
+        assert response == "ok"
+        wait_for.assert_not_called()
+
 
 if __name__ == "__main__":
     pytest.main([__file__])

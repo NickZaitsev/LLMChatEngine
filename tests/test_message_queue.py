@@ -94,11 +94,20 @@ class TestMessageQueueManager:
                     text=self.test_message
                 )
             
-            # Test invalid chat_id
+            # Negative chat IDs are valid Telegram group/supergroup IDs.
+            with patch.object(manager.redis_client, 'rpush', return_value=1), \
+                 patch.object(manager.redis_client, 'sadd', return_value=1):
+                await manager.enqueue_message(
+                    user_id=self.user_id,
+                    chat_id=-1,
+                    text=self.test_message
+                )
+
+            # Test invalid chat_id type
             with pytest.raises(ValueError):
                 await manager.enqueue_message(
                     user_id=self.user_id,
-                    chat_id=-1,  # Invalid chat_id
+                    chat_id="not-an-int",
                     text=self.test_message
                 )
             
