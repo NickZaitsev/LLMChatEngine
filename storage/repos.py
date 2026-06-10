@@ -17,7 +17,7 @@ from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.exc import IntegrityError, NoResultFound
 
 from .interfaces import (
-    Message, Conversation, User, Persona, Bot, MessageLog, MessageUser,
+    Message, Conversation, User, Persona, Bot, Book, MessageLog, MessageUser,
     MessageRepo, ConversationRepo, UserRepo, PersonaRepo, MessageHistoryRepo,
     UserBotSettings
 )
@@ -27,6 +27,7 @@ from .models import (
     User as UserModel,
     Persona as PersonaModel,
     Bot as BotModel,
+    Book as BookModel,
     UserBotSettings as UserBotSettingsModel,
     MessageLog as MessageLogModel,
     MessageUser as MessageUserModel,
@@ -1128,6 +1129,126 @@ class PostgresBotRepo:
     async def delete_bot(self, bot_id: str) -> bool:
         deactivated = await self.set_active(bot_id, False)
         return deactivated is not None
+
+
+class PostgresBookRepo:
+    """PostgreSQL implementation of BookRepo interface."""
+
+    def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
+        self.session_maker = session_maker
+
+    @staticmethod
+    def _to_dto(book: BookModel) -> Book:
+        return Book(
+            id=book.id,
+            bot_id=book.bot_id,
+            title=book.title,
+            author=book.author,
+            source_filename=book.source_filename,
+            file_format=book.file_format,
+            file_hash=book.file_hash,
+            status=book.status,
+            error=book.error,
+            chunk_count=book.chunk_count,
+            char_count=book.char_count,
+            created_at=book.created_at,
+            updated_at=book.updated_at,
+        )
+
+    async def create_book(
+        self,
+        bot_id: str,
+        title: str,
+        author: Optional[str],
+        source_filename: str,
+        file_format: str,
+        file_hash: str,
+    ) -> Book:
+        async with self.session_maker() as session:
+            book = BookModel(
+                bot_id=UUID(str(bot_id)),
+                title=title,
+                author=author,
+                source_filename=source_filename,
+                file_format=file_format,
+                file_hash=file_hash,
+                status='pending',
+                chunk_count=0,
+                char_count=0,
+            )
+            session.add(book)
+            await session.commit()
+            await session.refresh(book)
+            return self._to_dto(book)
+
+    async def get_book(self, book_id: str) -> Optional[Book]:
+        book_uuid = UUID(str(book_id))
+        async with self.session_maker() as session:
+            result = await session.execute(select(BookModel).where(BookModel.id == book_uuid))
+            book = result.scalar_one_or_none()
+            return self._to_dto(book) if book else None
+
+    async def list_books(self, bot_id: str) -> List[Book]:
+        bot_uuid = UUID(str(bot_id))
+        async with self.session_maker() as session:
+            result = await session.execute(
+                select(BookModel)
+                .where(BookModel.bot_id == bot_uuid)
+                .order_by(desc(BookModel.created_at))
+            )
+            return [self._to_dto(book) for book in result.scalars().all()]
+
+    async def update_status(
+        self,
+        book_id: str,
+        status: str,
+        error: Optional[str] = None,
+        chunk_count: Optional[int] = None,
+        char_count: Optional[int] = None,
+    ) -> Optional[Book]:
+        book_uuid = UUID(str(book_id))
+        async with self.session_maker() as session:
+            result = await session.execute(select(BookModel).where(BookModel.id == book_uuid))
+            book = result.scalar_one_or_none()
+            if not book:
+                return None
+
+            book.status = status
+            book.error = error
+            if chunk_count is not None:
+                book.chunk_count = chunk_count
+            if char_count is not None:
+                book.char_count = char_count
+
+            await session.commit()
+            await session.refresh(book)
+            return self._to_dto(book)
+
+    async def delete_book(self, book_id: str) -> bool:
+        book_uuid = UUID(str(book_id))
+        async with self.session_maker() as session:
+            result = await session.execute(select(BookModel).where(BookModel.id == book_uuid))
+            book = result.scalar_one_or_none()
+            if not book:
+                return False
+
+            await session.delete(book)
+            await session.commit()
+            return True
+
+    async def find_by_hash(self, bot_id: str, file_hash: str) -> Optional[Book]:
+        bot_uuid = UUID(str(bot_id))
+        async with self.session_maker() as session:
+            result = await session.execute(
+                select(BookModel).where(
+                    and_(
+                        BookModel.bot_id == bot_uuid,
+                        BookModel.file_hash == file_hash,
+                    )
+                )
+            )
+            book = result.scalar_one_or_none()
+            return self._to_dto(book) if book else None
 
 
 class PostgresUserBotSettingsRepo:

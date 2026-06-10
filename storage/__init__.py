@@ -24,6 +24,7 @@ from .repos import (
     PostgresUserRepo,
     PostgresPersonaRepo,
     PostgresBotRepo,
+    PostgresBookRepo,
     PostgresUserBotSettingsRepo,
 )
 
@@ -51,6 +52,7 @@ class Storage:
     users: PostgresUserRepo
     personas: PostgresPersonaRepo
     bots: PostgresBotRepo
+    books: PostgresBookRepo
     engine: AsyncEngine
     session_maker: async_sessionmaker
     use_pgvector: bool
@@ -180,6 +182,7 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
         users_repo = PostgresUserRepo(session_maker)
         personas_repo = PostgresPersonaRepo(session_maker)
         bots_repo = PostgresBotRepo(session_maker)
+        books_repo = PostgresBookRepo(session_maker)
         user_settings_repo = PostgresUserBotSettingsRepo(session_maker)
 
         storage = Storage(
@@ -189,6 +192,7 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
             users=users_repo,
             personas=personas_repo,
             bots=bots_repo,
+            books=books_repo,
             user_settings=user_settings_repo,
             engine=engine,
             session_maker=session_maker,

@@ -162,9 +162,105 @@ class Bot(Base):
         back_populates="bot",
         cascade="all, delete-orphan"
     )
+    books: Mapped[List["Book"]] = relationship(
+        "Book",
+        back_populates="bot",
+        cascade="all, delete-orphan"
+    )
     
     def __repr__(self) -> str:
         return f"<Bot(id={self.id}, name='{self.name}', is_active={self.is_active})>"
+
+
+class Book(Base):
+    """
+    Uploaded book metadata for per-bot knowledge bases.
+    """
+    __tablename__ = 'books'
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        doc="Unique identifier for the book"
+    )
+    bot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey('bots.id', ondelete='CASCADE'),
+        nullable=False,
+        doc="Bot that owns this book"
+    )
+    title: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+        doc="Book title"
+    )
+    author: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        doc="Book author"
+    )
+    source_filename: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+        doc="Original uploaded filename"
+    )
+    file_format: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        doc="Uploaded file format"
+    )
+    file_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        doc="SHA-256 hash of the uploaded file"
+    )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default='pending',
+        doc="Ingestion status"
+    )
+    error: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Last ingestion error shown to admins"
+    )
+    chunk_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        doc="Number of ingested chunks"
+    )
+    char_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        doc="Number of extracted source characters"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=func.now(),
+        doc="Timestamp when the book was created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=func.now(),
+        onupdate=func.now(),
+        doc="Timestamp when the book was last updated"
+    )
+
+    bot: Mapped["Bot"] = relationship("Bot", back_populates="books")
+
+    __table_args__ = (
+        Index('ix_books_bot_id', 'bot_id'),
+        Index('ix_books_bot_hash', 'bot_id', 'file_hash', unique=True),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Book(id={self.id}, bot_id={self.bot_id}, title='{self.title}', status='{self.status}')>"
 
 
 class UserBotSettings(Base):
@@ -577,6 +673,7 @@ __all__ = [
     'Base',
     'User', 
     'Bot',
+    'Book',
     'UserBotSettings',
     'Persona',
     'Conversation',

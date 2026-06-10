@@ -87,6 +87,24 @@ class Bot:
 
 
 @dataclass
+class Book:
+    """Data class representing uploaded book metadata."""
+    id: UUID
+    bot_id: UUID
+    title: str
+    author: Optional[str]
+    source_filename: str
+    file_format: str
+    file_hash: str
+    status: str
+    error: Optional[str]
+    chunk_count: int
+    char_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass
 class UserBotSettings:
     """Data class representing per-user per-bot settings"""
     id: UUID
@@ -242,6 +260,34 @@ class BotRepo(Protocol):
     
     async def delete_bot(self, bot_id: str) -> bool:
         """Delete or deactivate a managed bot."""
+        ...
+
+
+class BookRepo(Protocol):
+    """Protocol for book metadata repository operations."""
+
+    async def create_book(self, bot_id: str, title: str, author: Optional[str], source_filename: str, file_format: str, file_hash: str) -> Book:
+        """Create a pending book metadata row."""
+        ...
+
+    async def get_book(self, book_id: str) -> Optional[Book]:
+        """Fetch a book by ID."""
+        ...
+
+    async def list_books(self, bot_id: str) -> List[Book]:
+        """List books attached to a bot."""
+        ...
+
+    async def update_status(self, book_id: str, status: str, error: Optional[str] = None, chunk_count: Optional[int] = None, char_count: Optional[int] = None) -> Optional[Book]:
+        """Update ingestion status and optional counters."""
+        ...
+
+    async def delete_book(self, book_id: str) -> bool:
+        """Delete a book metadata row."""
+        ...
+
+    async def find_by_hash(self, bot_id: str, file_hash: str) -> Optional[Book]:
+        """Find an existing book upload by bot and file hash."""
         ...
 
 
