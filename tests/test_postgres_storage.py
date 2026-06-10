@@ -136,11 +136,9 @@ async def _test_conversation_manager(db_url: str) -> bool:
         test_user_id = 789012
         
         # Add messages
-        manager.add_message(test_user_id, "user", "Hello from conversation manager!")
-        await asyncio.sleep(0.1)  # Give async operations time to complete
+        await manager.add_message_async(test_user_id, "user", "Hello from conversation manager!")
         
-        manager.add_message(test_user_id, "assistant", "Hello! Nice to meet you through the conversation manager.")
-        await asyncio.sleep(0.1)
+        await manager.add_message_async(test_user_id, "assistant", "Hello! Nice to meet you through the conversation manager.")
         
         # Get conversation
         conversation = await manager.get_conversation_async(test_user_id)

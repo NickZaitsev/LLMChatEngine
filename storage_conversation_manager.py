@@ -5,7 +5,6 @@ This module provides a drop-in replacement for the in-memory ConversationManager
 while using the new PostgreSQL storage system for persistence and scalability.
 """
 
-import asyncio
 import logging
 import time
 import uuid
@@ -170,41 +169,9 @@ class PostgresConversationManager:
 
         return await self.storage.message_history.get_user_history(user_uuid, limit, bot_id=bot_id)
 
-    def add_message(self, user_id: int, role: str, content: str) -> None:
-        """
-        Add a message to the user's conversation history (sync wrapper for async).
-
-        This method maintains compatibility with the existing sync interface.
-        """
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If we're in an async context, schedule the task
-                asyncio.create_task(self._add_message_async(user_id, role, content))
-            else:
-                # If not in async context, run it
-                asyncio.run(self._add_message_async(user_id, role, content))
-        except RuntimeError:
-            # No event loop, create one
-            asyncio.run(self._add_message_async(user_id, role, content))
-
     async def add_message_async(self, user_id: int, role: str, content: str, bot_id: Optional[uuid.UUID] = None) -> Message:
         """
-        Add a message to the user's conversation history (async version).
-
-        Args:
-            user_id: Telegram user ID
-            role: Message role ("user" or "assistant")
-            content: Message content
-
-        Returns:
-            The created Message object
-        """
-        return await self._add_message_async(user_id, role, content, bot_id=bot_id)
-
-    async def _add_message_async(self, user_id: int, role: str, content: str, bot_id: Optional[uuid.UUID] = None) -> Message:
-        """
-        Add a message to the user's conversation history (async implementation).
+        Add a message to the user's conversation history.
 
         Args:
             user_id: Telegram user ID
