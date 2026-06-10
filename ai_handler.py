@@ -1,10 +1,11 @@
 """LLM provider clients and response orchestration for chat generation."""
 
 import asyncio
+from functools import partial
 import logging
 import random
 import sys
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from config import BOT_PERSONALITY, PROMPT_REPLY_TOKEN_BUDGET, TEMPERATURE, MEMORY_ENABLED
 
@@ -128,7 +129,7 @@ class ModelClient:
         else:
             raise ValueError(f"Unsupported provider: {provider}. Supported providers: 'azure', 'lmstudio', 'gemini'")
     
-    def ask(self, messages):
+    def ask(self, messages, temperature: Optional[float] = None, max_tokens: Optional[int] = None):
         """Send a message to the LLM and get a response"""
         try:
             logger.info("Sending request to %s provider with %d messages", self.provider, len(messages))
@@ -168,13 +169,29 @@ class ModelClient:
                     else:
                         gemini_messages.append({"role": role, "parts": [msg["content"]]})
 
-                resp = client.generate_content(gemini_messages)
+                generation_kwargs = {}
+                if temperature is not None or max_tokens is not None:
+                    config_kwargs = {}
+                    if temperature is not None:
+                        config_kwargs["temperature"] = temperature
+                    if max_tokens is not None:
+                        config_kwargs["max_output_tokens"] = max_tokens
+                    generation_config = genai.types.GenerationConfig(**config_kwargs)
+                    generation_kwargs["generation_config"] = generation_config
+
+                resp = client.generate_content(gemini_messages, **generation_kwargs)
                 content = resp.text
             else:
-                resp = self.client.chat.completions.create(
-                    model=self.model_name,
-                    messages=messages
-                )
+                completion_kwargs = {
+                    "model": self.model_name,
+                    "messages": messages,
+                }
+                if temperature is not None:
+                    completion_kwargs["temperature"] = temperature
+                if max_tokens is not None:
+                    completion_kwargs["max_tokens"] = max_tokens
+
+                resp = self.client.chat.completions.create(**completion_kwargs)
                 content = resp.choices[0].message.content
             logger.info("Received response from %s provider (%d chars)", self.provider, len(content))
             logger.debug("LLM Response content preview: %s", content[:500] + "..." if len(content) > 500 else content)
@@ -254,7 +271,7 @@ class AIHandler:
         self.prompt_assembler = prompt_assembler
         logger.info("Prompt assembler has been set for AIHandler.")
 
-    async def get_response(self, prompt: str, user_id: str = None) -> str:
+    async def get_response(self, prompt: str, user_id: str = None) -> Optional[str]:
         """Get a direct response from the LLM for a given prompt."""
         if self.prompt_assembler and user_id:
             messages = await self.prompt_assembler.build_prompt(
@@ -265,13 +282,17 @@ class AIHandler:
             messages = [{"role": "user", "content": prompt}]
         return await self._make_ai_request(messages)
 
-    async def generate_response(self, user_message: str, conversation_history: List[Dict], conversation_id: str = None, role: str = "user") -> str:
-        """Generate a response using ModelClient with proper timeout handling."""
+    async def generate_response(self, user_message: str, conversation_history: List[Dict], conversation_id: str = None, role: str = "user") -> Optional[str]:
+        """Generate a response.
+
+        Returns None when generation fails after retry handling; callers decide
+        whether to stay silent or send a user-facing fallback.
+        """
         logger.info("generate_response called with user_message: %s, conversation_id: %s, prompt_assembler: %s",
                    user_message[:50] if user_message else "None", conversation_id, self.prompt_assembler)
         if not self.model_client:
             logger.error("ModelClient not available; cannot generate AI response")
-            return "" # I'm having technical difficulties right now. Please try again later! 💕
+            return None
 
         try:
             logger.info("Generating response for message (%d chars), history: %d messages",
@@ -332,7 +353,7 @@ class AIHandler:
             # Check if messages were successfully created
             if messages is None:
                 logger.error("Failed to create messages for LLM")
-                return "" # I'm having technical difficulties right now. Please try again later! 💕
+                return None
 
             logger.info("Sending %d messages to LLM", len(messages))
             
@@ -422,27 +443,7 @@ class AIHandler:
         
         except Exception as e:
             logger.exception("Error in AI generation: %s", e)
-            # return self._get_error_response(str(e))
-    
-    
-    # def _get_error_response(self, error_message: str) -> str:
-    #     """Generate appropriate error response based on error type"""
-    #     error_lower = error_message.lower()
-        
-    #     if any(pattern in error_lower for pattern in ["rate limit", "429", "ratelimitreached"]):
-    #         return "😔 I'm getting a bit overwhelmed right now! Too many people are chatting with me at once. Please wait a few minutes and try again! 💕"
-    #     elif any(pattern in error_lower for pattern in ["timeout", "timed out"]):
-    #         return "⏰ I'm taking longer than usual to think! The AI service is a bit slow right now. Please try again in a moment! 💕"
-    #     elif any(pattern in error_lower for pattern in ["unauthorized", "401"]):
-    #         return "🔑 I'm having trouble with my credentials right now. Please check my configuration! 💕"
-    #     elif any(pattern in error_lower for pattern in ["quota exceeded", "quota"]):
-    #         return "💳 I've reached my conversation limit for today! Please try again tomorrow! 💕"
-    #     elif any(pattern in error_lower for pattern in ["service unavailable", "503"]):
-    #         return "🔧 The AI service is temporarily unavailable! Please try again in a few minutes! 💕"
-    #     elif any(pattern in error_lower for pattern in ["network", "connection"]):
-    #         return "🌐 I'm having trouble connecting to my brain right now! Please check your internet connection and try again! 💕"
-    #     else:
-    #         return "😔 I'm having some technical difficulties right now. Please try again later! 💕"
+            return None
     
     async def _make_ai_request(self, messages):
         """Make the actual AI API request using ModelClient"""
@@ -450,11 +451,13 @@ class AIHandler:
             logger.info("Making LLM API call via ModelClient")
             
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None, 
-                self.model_client.ask, 
-                messages
+            ask = partial(
+                self.model_client.ask,
+                messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
             )
+            response = await loop.run_in_executor(None, ask)
             
             logger.info("LLM API call completed successfully")
             return response
