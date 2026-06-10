@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from storage.models import Base
 from storage.repos import (
     PostgresMessageRepo, PostgresMessageHistoryRepo, PostgresConversationRepo,
-    PostgresUserRepo, PostgresPersonaRepo, PostgresUserBotSettingsRepo
+    PostgresUserRepo, PostgresPersonaRepo, PostgresBotRepo, PostgresUserBotSettingsRepo
 )
 from storage import create_storage, Storage
 from storage_conversation_manager import PostgresConversationManager
@@ -80,7 +80,7 @@ async def storage(engine) -> AsyncGenerator[Storage, None]:
     # Create storage using the shared engine components
     from storage.repos import (
         PostgresMessageRepo, PostgresConversationRepo,
-        PostgresUserRepo, PostgresPersonaRepo, PostgresUserBotSettingsRepo
+        PostgresUserRepo, PostgresPersonaRepo, PostgresBotRepo, PostgresUserBotSettingsRepo
     )
     
     storage = Storage(
@@ -89,6 +89,7 @@ async def storage(engine) -> AsyncGenerator[Storage, None]:
         conversations=PostgresConversationRepo(session_maker),
         users=PostgresUserRepo(session_maker),
         personas=PostgresPersonaRepo(session_maker),
+        bots=PostgresBotRepo(session_maker),
         user_settings=PostgresUserBotSettingsRepo(session_maker),
         engine=engine,
         session_maker=session_maker,
@@ -227,6 +228,7 @@ async def app_context(engine) -> "AppContext":
         conversations=PostgresConversationRepo(session_maker),
         users=PostgresUserRepo(session_maker),
         personas=PostgresPersonaRepo(session_maker),
+        bots=PostgresBotRepo(session_maker),
         user_settings=PostgresUserBotSettingsRepo(session_maker),
         engine=engine,
         session_maker=session_maker,

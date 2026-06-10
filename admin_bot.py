@@ -200,24 +200,14 @@ Use these commands to manage your bot fleet."""
             # Encrypt token and create bot in database
             encrypted_token = encrypt_token(token)
 
-            # Create bot using repository
-            from storage.models import Bot
-            from sqlalchemy import select
-            from sqlalchemy.ext.asyncio import AsyncSession
-
-            async with self.storage.session_maker() as session:
-                new_bot = Bot(
-                    token_encrypted=encrypted_token,
-                    name=name,
-                    personality=personality,
-                    is_active=True,
-                    feature_flags=DEFAULT_FEATURE_FLAGS.copy(),
-                    llm_config={}  # Will use global config
-                )
-                session.add(new_bot)
-                await session.commit()
-                await session.refresh(new_bot)
-                bot_id = new_bot.id
+            new_bot = await self.storage.bots.create_bot(
+                token_encrypted=encrypted_token,
+                name=name,
+                personality=personality,
+                feature_flags=DEFAULT_FEATURE_FLAGS.copy(),
+                llm_config={}
+            )
+            bot_id = new_bot.id
 
             # Clean up pending data
             del self._pending_bot_data[self._session_key(update)]
@@ -273,12 +263,7 @@ Use these commands to manage your bot fleet."""
         await self._init_storage()
 
         try:
-            from storage.models import Bot
-            from sqlalchemy import select
-
-            async with self.storage.session_maker() as session:
-                result = await session.execute(select(Bot).order_by(Bot.created_at.desc()))
-                bots = result.scalars().all()
+            bots = await self.storage.bots.list_bots()
 
             if not bots:
                 await update.message.reply_text("📭 No bots configured yet. Use /addbot to add one.")
@@ -322,12 +307,7 @@ Use these commands to manage your bot fleet."""
         bot_id = args[0]
 
         try:
-            from storage.models import Bot
-            from sqlalchemy import select
-
-            async with self.storage.session_maker() as session:
-                result = await session.execute(select(Bot).where(Bot.id == uuid.UUID(bot_id)))
-                bot = result.scalar_one_or_none()
+            bot = await self.storage.bots.get_bot(bot_id)
 
             if not bot:
                 await update.message.reply_text(f"❌ Bot not found: {bot_id}")
@@ -367,20 +347,10 @@ Use these commands to manage your bot fleet."""
             return ConversationHandler.END
 
         try:
-            from storage.models import Bot
-            from sqlalchemy import select
-
-            async with self.storage.session_maker() as session:
-                result = await session.execute(select(Bot).where(Bot.id == uuid.UUID(bot_id)))
-                bot = result.scalar_one_or_none()
-
-                if not bot:
-                    await update.message.reply_text(f"❌ Bot not found: {bot_id}")
-                    return ConversationHandler.END
-
-                # Update personality in database
-                bot.personality = new_personality
-                await session.commit()
+            bot = await self.storage.bots.update_personality(bot_id, new_personality)
+            if not bot:
+                await update.message.reply_text(f"❌ Bot not found: {bot_id}")
+                return ConversationHandler.END
 
             # Clean up pending data
             del self._pending_bot_data[self._session_key(update)]
@@ -436,36 +406,26 @@ Use these commands to manage your bot fleet."""
             return
 
         try:
-            from storage.models import Bot
-            from sqlalchemy import select
+            bot = await self.storage.bots.get_bot(bot_id)
+            if not bot:
+                await update.message.reply_text(f"❌ Bot not found: {bot_id}")
+                return
 
-            async with self.storage.session_maker() as session:
-                result = await session.execute(select(Bot).where(Bot.id == uuid.UUID(bot_id)))
-                bot = result.scalar_one_or_none()
+            feature = BotFeature(feature_name)
+            current_value = has_feature(bot.feature_flags or {}, feature)
+            new_value = not current_value
 
-                if not bot:
-                    await update.message.reply_text(f"❌ Bot not found: {bot_id}")
-                    return
+            new_flags = (bot.feature_flags or {}).copy()
+            new_flags[feature_name] = new_value
+            bot = await self.storage.bots.update_flags(bot_id, new_flags)
 
-                # Toggle the feature
-                feature = BotFeature(feature_name)
-                current_value = has_feature(bot.feature_flags or {}, feature)
-                new_value = not current_value
-
-                # Update feature flags
-                new_flags = (bot.feature_flags or {}).copy()
-                new_flags[feature_name] = new_value
-                bot.feature_flags = new_flags
-
-                await session.commit()
-
-                status = "✅ Enabled" if new_value else "❌ Disabled"
-                await update.message.reply_text(
-                    f"🔧 **`{bot.name}`**\n\n"
-                    f"Feature `{feature_name}`: {status}\n\n"
-                    f"Use /reloadbot {bot_id} to apply changes.",
-                    parse_mode='Markdown'
-                )
+            status = "✅ Enabled" if new_value else "❌ Disabled"
+            await update.message.reply_text(
+                f"🔧 **`{bot.name}`**\n\n"
+                f"Feature `{feature_name}`: {status}\n\n"
+                f"Use /reloadbot {bot_id} to apply changes.",
+                parse_mode='Markdown'
+            )
 
         except Exception as e:
             logger.error(f"Failed to toggle feature: {e}")
@@ -489,12 +449,7 @@ Use these commands to manage your bot fleet."""
         bot_id = args[0]
 
         try:
-            from storage.models import Bot
-            from sqlalchemy import select
-
-            async with self.storage.session_maker() as session:
-                result = await session.execute(select(Bot).where(Bot.id == uuid.UUID(bot_id)))
-                bot = result.scalar_one_or_none()
+            bot = await self.storage.bots.get_bot(bot_id)
 
             if not bot:
                 await update.message.reply_text(f"❌ Bot not found: {bot_id}")
@@ -530,17 +485,15 @@ Use these commands to manage your bot fleet."""
         await self._init_storage()
 
         try:
-            from storage.models import Bot, Conversation
+            from storage.models import Conversation
             from sqlalchemy import select, func
 
+            bots = await self.storage.bots.list_bots()
+            if not bots:
+                await update.message.reply_text("📭 No bots configured.")
+                return
+
             async with self.storage.session_maker() as session:
-                result = await session.execute(select(Bot))
-                bots = result.scalars().all()
-
-                if not bots:
-                    await update.message.reply_text("📭 No bots configured.")
-                    return
-
                 text = "📊 **Bot Status Report**\n\n"
 
                 for bot in bots:
@@ -619,30 +572,21 @@ Use these commands to manage your bot fleet."""
         bot_id = args[0]
 
         try:
-            from storage.models import Bot
-            from sqlalchemy import select
+            bot = await self.storage.bots.set_active(bot_id, False)
+            if not bot:
+                await update.message.reply_text(f"❌ Bot not found: {bot_id}")
+                return
 
-            async with self.storage.session_maker() as session:
-                result = await session.execute(select(Bot).where(Bot.id == uuid.UUID(bot_id)))
-                bot = result.scalar_one_or_none()
+            await update.message.reply_text(
+                f"✅ Bot **`{bot.name}`** has been deactivated.\n\n"
+                "The running instance will be stopped now if the bot manager is connected.",
+                parse_mode='Markdown'
+            )
 
-                if not bot:
-                    await update.message.reply_text(f"❌ Bot not found: {bot_id}")
-                    return
-
-                bot.is_active = False
-                await session.commit()
-
-                await update.message.reply_text(
-                    f"✅ Bot **`{bot.name}`** has been deactivated.\n\n"
-                    "The running instance will be stopped now if the bot manager is connected.",
-                    parse_mode='Markdown'
-                )
-
-                # Reload config so BotManager sees the inactive state and stops the runtime cleanly.
-                if self.bot_manager:
-                    await self.bot_manager.reload_bot_config(bot.id)
-                    await update.message.reply_text("Bot deactivated in runtime successfully.")
+            # Reload config so BotManager sees the inactive state and stops the runtime cleanly.
+            if self.bot_manager:
+                await self.bot_manager.reload_bot_config(bot.id)
+                await update.message.reply_text("Bot deactivated in runtime successfully.")
 
         except Exception as e:
             logger.error(f"Failed to remove bot: {e}")

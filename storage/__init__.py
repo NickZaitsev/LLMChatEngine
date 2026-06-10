@@ -23,6 +23,7 @@ from .repos import (
     PostgresConversationRepo,
     PostgresUserRepo,
     PostgresPersonaRepo,
+    PostgresBotRepo,
     PostgresUserBotSettingsRepo,
 )
 
@@ -49,6 +50,7 @@ class Storage:
     conversations: PostgresConversationRepo
     users: PostgresUserRepo
     personas: PostgresPersonaRepo
+    bots: PostgresBotRepo
     engine: AsyncEngine
     session_maker: async_sessionmaker
     use_pgvector: bool
@@ -177,6 +179,7 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
         conversations_repo = PostgresConversationRepo(session_maker)
         users_repo = PostgresUserRepo(session_maker)
         personas_repo = PostgresPersonaRepo(session_maker)
+        bots_repo = PostgresBotRepo(session_maker)
         user_settings_repo = PostgresUserBotSettingsRepo(session_maker)
 
         storage = Storage(
@@ -185,6 +188,7 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
             conversations=conversations_repo,
             users=users_repo,
             personas=personas_repo,
+            bots=bots_repo,
             user_settings=user_settings_repo,
             engine=engine,
             session_maker=session_maker,

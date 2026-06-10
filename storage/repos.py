@@ -17,7 +17,7 @@ from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.exc import IntegrityError, NoResultFound
 
 from .interfaces import (
-    Message, Conversation, User, Persona, MessageLog, MessageUser,
+    Message, Conversation, User, Persona, Bot, MessageLog, MessageUser,
     MessageRepo, ConversationRepo, UserRepo, PersonaRepo, MessageHistoryRepo,
     UserBotSettings
 )
@@ -26,6 +26,7 @@ from .models import (
     Conversation as ConversationModel,
     User as UserModel,
     Persona as PersonaModel,
+    Bot as BotModel,
     UserBotSettings as UserBotSettingsModel,
     MessageLog as MessageLogModel,
     MessageUser as MessageUserModel,
@@ -1019,6 +1020,114 @@ class PostgresPersonaRepo:
                 )
                 for persona in personas
             ]
+
+
+class PostgresBotRepo:
+    """PostgreSQL implementation of BotRepo interface."""
+
+    def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
+        self.session_maker = session_maker
+
+    @staticmethod
+    def _to_dto(bot: BotModel) -> Bot:
+        return Bot(
+            id=bot.id,
+            token_encrypted=bot.token_encrypted,
+            name=bot.name,
+            personality=bot.personality,
+            is_active=bot.is_active,
+            feature_flags=bot.feature_flags or {},
+            llm_config=bot.llm_config or {},
+            created_at=bot.created_at,
+            updated_at=bot.updated_at,
+        )
+
+    async def create_bot(
+        self,
+        token_encrypted: str,
+        name: str,
+        personality: str,
+        feature_flags: Optional[Dict[str, Any]] = None,
+        llm_config: Optional[Dict[str, Any]] = None,
+    ) -> Bot:
+        async with self.session_maker() as session:
+            bot = BotModel(
+                token_encrypted=token_encrypted,
+                name=name,
+                personality=personality,
+                is_active=True,
+                feature_flags=feature_flags or {},
+                llm_config=llm_config or {},
+            )
+            session.add(bot)
+            await session.commit()
+            await session.refresh(bot)
+            return self._to_dto(bot)
+
+    async def get_bot(self, bot_id: str) -> Optional[Bot]:
+        bot_uuid = UUID(str(bot_id))
+        async with self.session_maker() as session:
+            result = await session.execute(select(BotModel).where(BotModel.id == bot_uuid))
+            bot = result.scalar_one_or_none()
+            return self._to_dto(bot) if bot else None
+
+    async def list_bots(self, is_active: Optional[bool] = None) -> List[Bot]:
+        async with self.session_maker() as session:
+            stmt = select(BotModel).order_by(desc(BotModel.created_at))
+            if is_active is not None:
+                stmt = stmt.where(BotModel.is_active == is_active)
+            result = await session.execute(stmt)
+            return [self._to_dto(bot) for bot in result.scalars().all()]
+
+    async def update_bot(
+        self,
+        bot_id: str,
+        name: Optional[str] = None,
+        personality: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        feature_flags: Optional[Dict[str, Any]] = None,
+        llm_config: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Bot]:
+        bot_uuid = UUID(str(bot_id))
+        async with self.session_maker() as session:
+            result = await session.execute(select(BotModel).where(BotModel.id == bot_uuid))
+            bot = result.scalar_one_or_none()
+            if not bot:
+                return None
+
+            if name is not None:
+                bot.name = name
+            if personality is not None:
+                bot.personality = personality
+            if is_active is not None:
+                bot.is_active = is_active
+            if feature_flags is not None:
+                bot.feature_flags = feature_flags
+            if llm_config is not None:
+                bot.llm_config = llm_config
+
+            await session.commit()
+            await session.refresh(bot)
+            return self._to_dto(bot)
+
+    async def update_personality(self, bot_id: str, personality: str) -> Optional[Bot]:
+        return await self.update_bot(bot_id, personality=personality)
+
+    async def update_flags(self, bot_id: str, feature_flags: Dict[str, Any]) -> Optional[Bot]:
+        return await self.update_bot(bot_id, feature_flags=feature_flags)
+
+    async def set_active(self, bot_id: str, is_active: bool) -> Optional[Bot]:
+        return await self.update_bot(bot_id, is_active=is_active)
+
+    async def get_personality_and_flags(self, bot_id: str) -> Optional[tuple[str, Dict[str, Any]]]:
+        bot = await self.get_bot(bot_id)
+        if not bot:
+            return None
+        return bot.personality, bot.feature_flags or {}
+
+    async def delete_bot(self, bot_id: str) -> bool:
+        deactivated = await self.set_active(bot_id, False)
+        return deactivated is not None
 
 
 class PostgresUserBotSettingsRepo:

@@ -60,14 +60,7 @@ class BotManager:
         """Load all active bots from database."""
         await self._init_storage()
 
-        from storage.models import Bot
-        from sqlalchemy import select
-
-        async with self.storage.session_maker() as session:
-            result = await session.execute(
-                select(Bot).where(Bot.is_active == True)
-            )
-            bots = result.scalars().all()
+        bots = await self.storage.bots.list_bots(is_active=True)
 
         logger.info(f"Found {len(bots)} active bots in database")
 
@@ -287,14 +280,7 @@ class BotManager:
         """Load a single bot's config from database."""
         await self._init_storage()
 
-        from storage.models import Bot
-        from sqlalchemy import select
-
-        async with self.storage.session_maker() as session:
-            result = await session.execute(
-                select(Bot).where(Bot.id == bot_id)
-            )
-            bot = result.scalar_one_or_none()
+        bot = await self.storage.bots.get_bot(str(bot_id))
 
         if not bot:
             logger.warning(f"Bot not found in database: {bot_id}")

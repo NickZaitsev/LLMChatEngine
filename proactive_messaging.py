@@ -542,16 +542,12 @@ async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str]
     if conversation and conversation.bot_id:
         resolved_bot_id = conversation.bot_id
         try:
-            from storage.models import Bot as BotModel
-            from sqlalchemy import select
             from token_encryption import decrypt_token
 
-            async with app_context.conversation_manager.storage.session_maker() as session:
-                result = await session.execute(select(BotModel).where(BotModel.id == conversation.bot_id))
-                bot_record = result.scalar_one_or_none()
-                if bot_record:
-                    bot_token = decrypt_token(bot_record.token_encrypted)
-                    logger.info(f"Using custom bot token for user {user_id} (bot: {bot_record.name})")
+            bot_record = await app_context.conversation_manager.storage.bots.get_bot(str(conversation.bot_id))
+            if bot_record:
+                bot_token = decrypt_token(bot_record.token_encrypted)
+                logger.info(f"Using custom bot token for user {user_id} (bot: {bot_record.name})")
         except Exception as e:
             logger.error(f"Failed to retrieve bot token for user {user_id}: {e}")
             # Fallback to default token

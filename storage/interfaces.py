@@ -223,6 +223,22 @@ class BotRepo(Protocol):
     async def update_bot(self, bot_id: str, name: Optional[str] = None, personality: Optional[str] = None, is_active: Optional[bool] = None, feature_flags: Optional[Dict[str, Any]] = None, llm_config: Optional[Dict[str, Any]] = None) -> Optional[Bot]:
         """Update a managed bot record."""
         ...
+
+    async def update_personality(self, bot_id: str, personality: str) -> Optional[Bot]:
+        """Update a bot personality prompt."""
+        ...
+
+    async def update_flags(self, bot_id: str, feature_flags: Dict[str, Any]) -> Optional[Bot]:
+        """Replace a bot feature flag dictionary."""
+        ...
+
+    async def set_active(self, bot_id: str, is_active: bool) -> Optional[Bot]:
+        """Set whether a bot is active."""
+        ...
+
+    async def get_personality_and_flags(self, bot_id: str) -> Optional[tuple[str, Dict[str, Any]]]:
+        """Fetch prompt-time bot settings."""
+        ...
     
     async def delete_bot(self, bot_id: str) -> bool:
         """Delete or deactivate a managed bot."""

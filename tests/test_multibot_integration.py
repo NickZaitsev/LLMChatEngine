@@ -8,7 +8,8 @@ from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from storage.models import Bot, UserBotSettings
+from storage.interfaces import Bot
+from storage.models import UserBotSettings
 from features import BotFeature, DEFAULT_FEATURE_FLAGS
 from multibot_adapter import create_bot_with_config, BotConfig
 from bot_manager import BotManager
@@ -301,6 +302,7 @@ async def test_run_multibot_sets_shutdown_when_background_task_crashes():
 async def test_admin_togglefeature_uses_default_feature_values():
     admin = AdminBot("token", [1], "postgresql://u:p@h:5432/db")
     admin.storage = MagicMock()
+    admin.storage.bots = MagicMock()
 
     bot_id = uuid.uuid4()
     bot_record = SimpleNamespace(
@@ -308,11 +310,13 @@ async def test_admin_togglefeature_uses_default_feature_values():
         name="TestBot",
         feature_flags={},
     )
-    session = MagicMock()
-    session.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: bot_record))
-    session.commit = AsyncMock()
-    admin.storage.session_maker.return_value.__aenter__ = AsyncMock(return_value=session)
-    admin.storage.session_maker.return_value.__aexit__ = AsyncMock(return_value=None)
+
+    async def update_flags(bot_id_arg, flags):
+        bot_record.feature_flags = flags
+        return bot_record
+
+    admin.storage.bots.get_bot = AsyncMock(return_value=bot_record)
+    admin.storage.bots.update_flags = AsyncMock(side_effect=update_flags)
 
     update = MagicMock()
     update.effective_user.id = 1
@@ -324,13 +328,14 @@ async def test_admin_togglefeature_uses_default_feature_values():
     await admin.togglefeature_command(update, context)
 
     assert bot_record.feature_flags[BotFeature.MEMORY.value] is False
-    session.commit.assert_awaited_once()
+    admin.storage.bots.update_flags.assert_awaited_once_with(str(bot_id), bot_record.feature_flags)
 
 
 @pytest.mark.asyncio
 async def test_admin_togglefeature_handles_missing_feature_flags():
     admin = AdminBot("token", [1], "postgresql://u:p@h:5432/db")
     admin.storage = MagicMock()
+    admin.storage.bots = MagicMock()
 
     bot_id = uuid.uuid4()
     bot_record = SimpleNamespace(
@@ -338,11 +343,13 @@ async def test_admin_togglefeature_handles_missing_feature_flags():
         name="TestBot",
         feature_flags=None,
     )
-    session = MagicMock()
-    session.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: bot_record))
-    session.commit = AsyncMock()
-    admin.storage.session_maker.return_value.__aenter__ = AsyncMock(return_value=session)
-    admin.storage.session_maker.return_value.__aexit__ = AsyncMock(return_value=None)
+
+    async def update_flags(bot_id_arg, flags):
+        bot_record.feature_flags = flags
+        return bot_record
+
+    admin.storage.bots.get_bot = AsyncMock(return_value=bot_record)
+    admin.storage.bots.update_flags = AsyncMock(side_effect=update_flags)
 
     update = MagicMock()
     update.effective_user.id = 1
@@ -354,7 +361,7 @@ async def test_admin_togglefeature_handles_missing_feature_flags():
     await admin.togglefeature_command(update, context)
 
     assert bot_record.feature_flags[BotFeature.MEMORY.value] is False
-    session.commit.assert_awaited_once()
+    admin.storage.bots.update_flags.assert_awaited_once_with(str(bot_id), bot_record.feature_flags)
 
 
 @pytest.mark.asyncio
@@ -392,6 +399,7 @@ async def test_bot_manager_removes_crashed_bot_from_running_state(mock_bot_confi
 async def test_admin_removebot_reloads_manager_config():
     admin = AdminBot("token", [1], "postgresql://u:p@h:5432/db")
     admin.storage = MagicMock()
+    admin.storage.bots = MagicMock()
     admin.bot_manager = MagicMock()
     admin.bot_manager.reload_bot_config = AsyncMock()
 
@@ -401,11 +409,12 @@ async def test_admin_removebot_reloads_manager_config():
         name="RetireMe",
         is_active=True,
     )
-    session = MagicMock()
-    session.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: bot_record))
-    session.commit = AsyncMock()
-    admin.storage.session_maker.return_value.__aenter__ = AsyncMock(return_value=session)
-    admin.storage.session_maker.return_value.__aexit__ = AsyncMock(return_value=None)
+
+    async def set_active(bot_id_arg, is_active):
+        bot_record.is_active = is_active
+        return bot_record
+
+    admin.storage.bots.set_active = AsyncMock(side_effect=set_active)
 
     update = MagicMock()
     update.effective_user.id = 1

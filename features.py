@@ -10,7 +10,7 @@ from typing import Dict, Any, TYPE_CHECKING, Optional
 from functools import wraps
 
 if TYPE_CHECKING:
-    from storage.models import Bot
+    from storage.interfaces import Bot
 
 
 class BotFeature(Enum):

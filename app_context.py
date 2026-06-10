@@ -244,14 +244,7 @@ class AppContext:
             return ai_handler, prompt_assembler
 
         try:
-            from storage.models import Bot as BotModel
-            from sqlalchemy import select
-
-            async with self.conversation_manager.storage.session_maker() as session:
-                result = await session.execute(
-                    select(BotModel).where(BotModel.id == bot_id)
-                )
-                bot_record = result.scalar_one_or_none()
+            bot_record = await self.conversation_manager.storage.bots.get_bot(str(bot_id))
 
             if bot_record:
                 ai_handler.update_personality(bot_record.personality)
