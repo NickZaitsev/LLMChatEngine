@@ -447,7 +447,14 @@ class PostgresMessageHistoryRepo:
         self.session_maker = session_maker
 
     @staticmethod
-    def _external_user_id_to_uuid(user_id: int | UUID) -> UUID:
+    def _telegram_user_id_to_message_log_uuid(user_id: int | UUID) -> UUID:
+        """Return the internal messages_log UUID for a Telegram user ID.
+
+        Runtime code uses raw Telegram integer IDs at boundaries. The
+        `messages_log.user_id` column remains UUID-shaped for compatibility,
+        so this repository is the only place that performs the deterministic
+        conversion.
+        """
         if isinstance(user_id, UUID):
             return user_id
         return uuid5(NAMESPACE_OID, f"telegram_user_{user_id}")
@@ -457,14 +464,14 @@ class PostgresMessageHistoryRepo:
         Save a message to messages_log.
 
         Args:
-            user_id: External Telegram user ID, or a pre-derived UUID for compatibility
+            user_id: Raw Telegram user ID, or a pre-derived UUID for compatibility
             role: Role of the message sender ("user" | "bot")
             content: The message content
 
         Returns:
             MessageLog object
         """
-        user_uuid = self._external_user_id_to_uuid(user_id)
+        user_uuid = self._telegram_user_id_to_message_log_uuid(user_id)
         async with self.session_maker() as session:
             try:
                 # Create message log entry (permanent)

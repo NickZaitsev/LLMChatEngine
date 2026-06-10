@@ -35,6 +35,8 @@ User Message
 
 The repository also includes an architecture diagram at [docs/architecture.png](docs/architecture.png) and a Mermaid source file at [docs/architecture.md](docs/architecture.md).
 
+User identity rules are documented in [docs/user-identity.md](docs/user-identity.md). Runtime code uses raw Telegram integer IDs at boundaries; internal UUIDs stay inside storage repositories and relational rows.
+
 ## Core Components
 
 - `bot.py`: Telegram-facing runtime and command handlers.
