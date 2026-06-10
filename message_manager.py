@@ -212,7 +212,7 @@ class MessageQueueManager:
         """
         return _split_ai_response(text)
 
-    async def enqueue_message(self, user_id: int, chat_id: int, text: str, message_type: str = "regular", bot=None, typing_manager=None, bot_token: str = None, bot_id: str = None):
+    async def enqueue_message(self, user_id: int, chat_id: int, text: str, message_type: str = "regular", bot_token: str = None, bot_id: str = None):
         """
         Enqueue a message for a user in their Redis list. If the message needs to be split,
         split it first and enqueue each part as a separate message to maintain order.
@@ -222,8 +222,6 @@ class MessageQueueManager:
             chat_id: Chat ID
             text: Message text
             message_type: Type of message ("regular" or "proactive")
-            bot: Telegram bot instance (for backward compatibility)
-            typing_manager: TypingIndicatorManager instance (for backward compatibility)
             bot_token: Optional bot token for multi-bot support
             bot_id: Optional bot ID for multi-bot proactive state routing
         """
@@ -281,13 +279,6 @@ class MessageQueueManager:
 
                 logger.info("Enqueued message part %d/%d for user %s (chat %s) of type %s. Queue position: %s",
                            i + 1, total_parts, user_id, chat_id, message_type, result)
-
-            # For backward compatibility, if bot and typing_manager are provided, we can still call send_ai_response directly
-            # This allows for a gradual migration
-            if bot is not None and typing_manager is not None:
-                # In a full implementation, we would remove this and only use the queue
-                # But for now, we'll keep it for compatibility during transition
-                pass
 
         except ValueError as e:
             logger.error("Validation error when enqueuing message for user %s: %s", user_id, e)

@@ -52,7 +52,6 @@ if MEMORY_ENABLED:
         from memory.manager import LlamaIndexMemoryManager
         from memory.llamaindex.vector_store import PgVectorStore
         from prompt.assembler import PromptAssembler
-        from llama_index.llms.lmstudio import LMStudio
         MEMORY_IMPORTS_AVAILABLE = True
     except ImportError as e:
         logger.warning("Memory/PromptAssembler imports failed: %s", e)
@@ -103,8 +102,6 @@ class TelegramChatBot:
         self.memory_manager = None
         self.prompt_assembler = None
         self._memory_initialized = False
-
-        self.user_states = {}  # Track user interaction states
 
         # Initialize proactive messaging service
         self.proactive_messaging_service = None
@@ -216,8 +213,6 @@ class TelegramChatBot:
                     chat_id=chat_id,
                     text=cleaned_ai_response,
                     message_type="regular",
-                    bot=bot,
-                    typing_manager=self.typing_manager,
                     bot_token=self.bot_token,
                     bot_id=str(self.bot_id) if self.bot_id else None
                 )
@@ -778,9 +773,6 @@ I'm designed to be flexible and adapt to your preferences."""
 
     async def _dispatch_buffered_message(self, route_key: str) -> None:
         """Dispatch buffered messages for a user"""
-        if route_key not in self.user_chat_context and isinstance(route_key, int):
-            route_key = self._buffer_route_key(route_key)
-
         logger.info("Dispatching buffered messages for route %s", route_key)
 
         # Get chat context

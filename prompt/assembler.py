@@ -9,7 +9,6 @@ and proper token budgeting.
 import logging
 import math
 from typing import Dict, List, Any, Optional, Mapping, Tuple, Protocol
-from uuid import UUID
 
 from storage.interfaces import (
     MessageRepo,
@@ -224,13 +223,6 @@ class PromptAssembler:
             raise ValueError("conversation_id cannot be empty")
 
         logger.info(f"Building prompt for conversation {conversation_id[:8]}...")
-
-        # Validate conversation_id format
-        # The conversation_id is now a string from the database, not a UUID.
-        # try:
-        #     UUID(conversation_id)
-        # except ValueError as e:
-        #     raise ValueError(f"Invalid conversation_id format: {conversation_id}") from e
 
         # Initialize tracking variables
         messages = []
