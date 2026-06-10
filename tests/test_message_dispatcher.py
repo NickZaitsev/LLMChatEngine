@@ -30,7 +30,7 @@ class TestMessageDispatcher:
     def test_init_success(self):
         """Test successful initialization of MessageDispatcher."""
         with patch('redis.Redis.ping') as mock_ping, \
-             patch('telegram.Bot') as mock_bot, \
+             patch('message_manager.Bot') as mock_bot, \
              patch('message_manager.TypingIndicatorManager') as mock_typing_manager:
             
             mock_ping.return_value = True
@@ -42,6 +42,24 @@ class TestMessageDispatcher:
             assert dispatcher.max_retries == 3
             assert dispatcher.lock_timeout == 30
             assert dispatcher.running is False
+            assert dispatcher.bot is None
+            mock_bot.assert_not_called()
+
+    def test_init_with_empty_default_token(self):
+        """Dispatcher can start without a process-wide Telegram token."""
+        with patch('redis.Redis.ping') as mock_ping, \
+             patch('message_manager.TELEGRAM_TOKEN', ''), \
+             patch('message_manager.Bot') as mock_bot, \
+             patch('message_manager.TypingIndicatorManager') as mock_typing_manager:
+
+            mock_ping.return_value = True
+            mock_typing_manager.return_value = Mock()
+
+            dispatcher = MessageDispatcher(self.redis_url)
+
+            assert dispatcher.bot is None
+            assert dispatcher._get_default_bot() is None
+            mock_bot.assert_not_called()
     
     def test_init_failure(self):
         """Test failed initialization of MessageDispatcher."""
@@ -99,6 +117,41 @@ class TestMessageDispatcher:
                 is_first_message=True,
                 route_key=f"{self.user_id}:default"
             )
+
+    @pytest.mark.asyncio
+    async def test_process_message_reuses_bot_for_same_token(self):
+        """Messages with the same bot token should reuse one Telegram Bot object."""
+        mock_send_ai_response = AsyncMock()
+        mock_bot_class = Mock()
+        mock_bot_instance = Mock()
+        mock_bot_class.return_value = mock_bot_instance
+        mock_typing_manager_class = Mock()
+        mock_typing_manager_instance = Mock()
+        mock_typing_manager_class.return_value = mock_typing_manager_instance
+
+        with patch('redis.Redis.ping') as mock_ping, \
+             patch('message_manager.Bot', new=mock_bot_class), \
+             patch('message_manager.TypingIndicatorManager', new=mock_typing_manager_class), \
+             patch('message_manager.send_ai_response', new=mock_send_ai_response):
+
+            mock_ping.return_value = True
+            dispatcher = MessageDispatcher(self.redis_url)
+            message_data = {
+                "user_id": self.user_id,
+                "chat_id": self.chat_id,
+                "text": self.test_message,
+                "message_type": "regular",
+                "retry_count": 0,
+                "bot_token": "token-a",
+            }
+
+            assert await dispatcher.process_message(dict(message_data)) is True
+            assert await dispatcher.process_message(dict(message_data)) is True
+
+            mock_bot_class.assert_called_once_with(token="token-a")
+            assert mock_send_ai_response.await_count == 2
+            assert mock_send_ai_response.await_args_list[0].kwargs["bot"] is mock_bot_instance
+            assert mock_send_ai_response.await_args_list[1].kwargs["bot"] is mock_bot_instance
     
     @pytest.mark.asyncio
     async def test_process_message_failure(self):

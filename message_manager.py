@@ -1,6 +1,7 @@
 """Redis-backed message queueing, dispatch, splitting, and typing indicators."""
 
 import asyncio
+from collections import OrderedDict
 import logging
 import random
 import time
@@ -338,6 +339,8 @@ class MessageQueueManager:
 class MessageDispatcher:
     """Dispatches messages from Redis queues to send_ai_response function."""
 
+    BOT_CACHE_MAX_SIZE = 50
+
     def __init__(self, redis_url: str, max_retries: int = 3, lock_timeout: int = 30):
         """
         Initialize the MessageDispatcher.
@@ -357,8 +360,10 @@ class MessageDispatcher:
             self.lock_timeout = lock_timeout
             self.running = False
 
-            # Initialize Telegram bot for sending messages
-            self.bot = Bot(token=TELEGRAM_TOKEN)
+            # Telegram bots are created lazily and cached by token. This avoids
+            # building an HTTP connection pool per message part.
+            self.bot = None
+            self._bot_cache = OrderedDict()
             self.typing_manager = TypingIndicatorManager()
 
             # Unique identifier for this dispatcher instance
@@ -417,6 +422,35 @@ class MessageDispatcher:
         except Exception as e:
             logger.error("Failed to initialize MessageDispatcher with Redis URL %s: %s", redis_url, e)
             raise
+
+    def _get_bot_for_token(self, bot_token: str):
+        """Return a cached Telegram Bot for a token, creating it if needed."""
+        if not bot_token:
+            return None
+
+        cached_bot = self._bot_cache.get(bot_token)
+        if cached_bot is not None:
+            self._bot_cache.move_to_end(bot_token)
+            return cached_bot
+
+        bot = Bot(token=bot_token)
+        self._bot_cache[bot_token] = bot
+        self._bot_cache.move_to_end(bot_token)
+
+        while len(self._bot_cache) > self.BOT_CACHE_MAX_SIZE:
+            self._bot_cache.popitem(last=False)
+
+        return bot
+
+    def _get_default_bot(self):
+        """Return the lazily-created default bot, if a default token exists."""
+        if not TELEGRAM_TOKEN:
+            return None
+
+        if self.bot is None:
+            self.bot = self._get_bot_for_token(TELEGRAM_TOKEN)
+
+        return self.bot
 
     @staticmethod
     def _normalize_bot_key(bot_id: str = None) -> str:
@@ -810,16 +844,18 @@ class MessageDispatcher:
 
             # Send the message part
             try:
-                # Use bot_token from message if available, otherwise fallback to dispatcher's bot
-                bot_to_use = self.bot
+                # Use bot_token from message if available, otherwise fallback to dispatcher's default bot.
+                bot_to_use = None
                 bot_token = message.get("bot_token")
 
                 if bot_token:
                     try:
-                        bot_to_use = Bot(token=bot_token)
+                        bot_to_use = self._get_bot_for_token(bot_token)
                     except Exception as e:
                         logger.error("Failed to create bot instance from token for user %s: %s", user_id, e)
                         return False
+                else:
+                    bot_to_use = self._get_default_bot()
 
                 if not bot_to_use:
                     logger.error("No bot instance available to send message for user %s", user_id)
