@@ -14,7 +14,7 @@ from uuid import UUID
 from config import MAX_CONVERSATION_HISTORY, PROMPT_REPLY_TOKEN_BUDGET, MAX_CONTEXT_TOKENS, RESERVED_TOKENS, AVAILABLE_HISTORY_TOKENS
 from core.utils import mask_db_url
 from storage import create_storage, Storage
-from storage.interfaces import Message, Conversation, User, MessageLog, MessageUser
+from storage.interfaces import Message, Conversation, User, MessageLog
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ class PostgresConversationManager:
         self._conversation_id_cache[cache_key] = conversation.id
         return conversation
 
-    async def save_message_to_history(self, user_id: int, role: str, content: str, bot_id: Optional[uuid.UUID] = None) -> tuple[MessageLog, MessageUser]:
+    async def save_message_to_history(self, user_id: int, role: str, content: str, bot_id: Optional[uuid.UUID] = None) -> MessageLog:
         """
         Save a message to both message history tables.
 
@@ -124,7 +124,7 @@ class PostgresConversationManager:
             content: The message content
 
         Returns:
-            Tuple of (MessageLog, MessageUser) objects
+            MessageLog object
         """
         if not self.storage:
             raise RuntimeError("Storage not initialized. Call initialize() first.")
@@ -134,25 +134,6 @@ class PostgresConversationManager:
         user_uuid = uuid.uuid5(uuid.NAMESPACE_OID, f"telegram_user_{user_id}")
 
         return await self.storage.message_history.save_message(user_uuid, role, content, bot_id=bot_id)
-
-    async def get_user_history(self, user_id: int, limit: int = 100, bot_id: Optional[uuid.UUID] = None) -> List[MessageUser]:
-        """
-        Get user message history from messages_user table.
-
-        Args:
-            user_id: Telegram user ID
-            limit: Maximum number of messages to return
-
-        Returns:
-            List of MessageUser objects ordered by creation time
-        """
-        if not self.storage:
-            raise RuntimeError("Storage not initialized. Call initialize() first.")
-
-        # Convert Telegram user ID (integer) to UUID for the database
-        user_uuid = uuid.uuid5(uuid.NAMESPACE_OID, f"telegram_user_{user_id}")
-
-        return await self.storage.message_history.get_user_history(user_uuid, limit, bot_id=bot_id)
 
     async def add_message_async(self, user_id: int, role: str, content: str, bot_id: Optional[uuid.UUID] = None) -> Message:
         """
@@ -229,17 +210,10 @@ class PostgresConversationManager:
             # Actually delete all messages from the database
             deleted_count = await self.storage.messages.delete_messages(str(conversation.id))
 
-            # Message history is bot-aware now, including the default single-bot path.
-            user_uuid = uuid.uuid5(uuid.NAMESPACE_OID, f"telegram_user_{user_id}")
-            user_history_deleted_count = await self.storage.message_history.clear_user_history(
-                user_uuid,
-                bot_id=bot_id,
-            )
             logger.info(
-                "Clear operation completed for user %d: %d messages deleted from conversation table, %d messages deleted from user history table",
+                "Clear operation completed for user %d: %d messages deleted from conversation table",
                 user_id,
                 deleted_count,
-                user_history_deleted_count,
             )
 
             # Remove from cache to clear any cached data

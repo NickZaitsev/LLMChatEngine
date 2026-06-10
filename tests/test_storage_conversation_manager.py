@@ -57,16 +57,11 @@ async def test_clear_conversation_deletes_default_bot_user_history():
 
     manager.storage = MagicMock()
     manager.storage.messages.delete_messages = AsyncMock(return_value=4)
-    manager.storage.message_history.clear_user_history = AsyncMock(return_value=3)
     manager._ensure_user_and_conversation = AsyncMock(return_value=conversation)
 
     await manager.clear_conversation_async(123)
 
     manager.storage.messages.delete_messages.assert_awaited_once_with("conv-1")
-    manager.storage.message_history.clear_user_history.assert_awaited_once_with(
-        uuid.uuid5(uuid.NAMESPACE_OID, "telegram_user_123"),
-        bot_id=None,
-    )
 
 
 @pytest.mark.asyncio
@@ -77,9 +72,8 @@ async def test_clear_conversation_deletes_bot_scoped_user_history():
 
     manager.storage = MagicMock()
     manager.storage.messages.delete_messages = AsyncMock(return_value=4)
-    manager.storage.message_history.clear_user_history = AsyncMock(return_value=2)
     manager._ensure_user_and_conversation = AsyncMock(return_value=conversation)
 
     await manager.clear_conversation_async(123, bot_id=bot_id)
 
-    manager.storage.message_history.clear_user_history.assert_awaited_once()
+    manager.storage.messages.delete_messages.assert_awaited_once_with("conv-1")

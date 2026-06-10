@@ -30,17 +30,6 @@ class MessageLog:
 
 
 @dataclass
-class MessageUser:
-    """Data class representing a user message"""
-    id: UUID
-    user_id: UUID
-    role: str
-    content: str
-    created_at: datetime
-    bot_id: Optional[UUID] = None
-
-
-@dataclass
 class Conversation:
     """Data class representing a conversation"""
     id: UUID
@@ -158,16 +147,8 @@ class MessageRepo(Protocol):
 class MessageHistoryRepo(Protocol):
     """Protocol for message history repository operations"""
     
-    async def save_message(self, user_id: UUID, role: str, content: str, bot_id: Optional[UUID] = None) -> tuple[MessageLog, MessageUser]:
-        """Persist a user-facing message history entry."""
-        ...
-    
-    async def get_user_history(self, user_id: UUID, limit: int = 100, bot_id: Optional[UUID] = None) -> List[MessageUser]:
-        """Fetch recent user-facing history."""
-        ...
-    
-    async def clear_user_history(self, user_id: UUID, bot_id: Optional[UUID] = None) -> int:
-        """Delete user-facing history and return the count."""
+    async def save_message(self, user_id: UUID, role: str, content: str, bot_id: Optional[UUID] = None) -> MessageLog:
+        """Persist a message log entry."""
         ...
 
 
