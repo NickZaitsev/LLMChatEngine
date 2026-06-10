@@ -159,6 +159,7 @@ async def test_bot_manager_reload_updates_runtime_fields_without_restart(mock_bo
     """Test that non-token config changes update the running bot in place."""
     manager = BotManager("postgresql://u:p@h:5432/db")
     running_bot = MagicMock()
+    running_bot.prompt_assembler = MagicMock()
     manager.bots[mock_bot_config.id] = running_bot
     manager.bot_configs[mock_bot_config.id] = mock_bot_config
 
@@ -181,6 +182,8 @@ async def test_bot_manager_reload_updates_runtime_fields_without_restart(mock_bo
     assert running_bot.bot_name == "RenamedBot"
     assert running_bot.bot_token == mock_bot_config.token
     assert running_bot.feature_flags == {"memory": True}
+    assert running_bot.prompt_assembler.personality == "Updated personality"
+    assert running_bot.prompt_assembler.feature_flags == {"memory": True}
     running_bot.ai_handler.update_personality.assert_called_once_with("Updated personality")
     running_bot.ai_handler.apply_llm_config.assert_called_once_with({"provider": "azure"})
     manager.stop_bot.assert_not_called()

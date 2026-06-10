@@ -8,6 +8,7 @@ The project is structured as a production-style Python service rather than a sin
 
 - Multi-provider LLM integration for Azure OpenAI, LM Studio, and Gemini.
 - LlamaIndex-based semantic memory backed by PostgreSQL and pgvector.
+- Bot-scoped book knowledge bases for author/persona RAG.
 - Multi-bot Telegram runtime managed by a central admin bot.
 - Ordered message delivery through Redis queues and a message dispatcher.
 - Message buffering to combine rapid user input into coherent turns.
@@ -39,6 +40,7 @@ The repository also includes an architecture diagram at [docs/architecture.png](
 - `bot.py`: Telegram-facing runtime and command handlers.
 - `ai_handler.py`: LLM provider orchestration, retries, and response generation.
 - `memory/manager.py`: LlamaIndex memory manager and semantic retrieval.
+- `knowledge/`: Book parsing, chunking, vector storage, ingestion tasks, and retrieval.
 - `prompt/assembler.py`: Prompt assembly with history, summaries, and memory budgeting.
 - `storage/`: SQLAlchemy models, repository interfaces, and persistence implementation.
 - `message_manager.py`: Redis queueing, ordered dispatch, typing indicators, and delivery retries.
@@ -131,7 +133,21 @@ Admin bot commands:
 - `/listbots`: Show managed bots and runtime status.
 - `/setprompt <bot_id>`: Update a bot personality prompt.
 - `/togglefeature <bot_id> <feature>`: Toggle features such as `VOICE_MESSAGES` or `MEMORY`.
+- `/addbook <bot_id>`: Upload a `.txt`, `.pdf`, `.epub`, or `.fb2` book for that bot.
+- `/listbooks <bot_id>`: Show ingestion status and chunk counts for a bot's books.
+- `/removebook <book_id>`: Remove a book and its vector chunks.
 - `/removebot <bot_id>`: Stop and remove a managed bot.
+
+## Author Persona Books
+
+To ground a persona bot in an author's books:
+
+1. Create the persona bot with `/addbot` and a strong author-style system prompt.
+2. Enable book retrieval with `/togglefeature <bot_id> book_knowledge`.
+3. Upload each book with `/addbook <bot_id>`.
+4. Check readiness with `/listbooks <bot_id>`.
+
+Book files are stored under `BOOKS_STORAGE_DIR` until ingestion finishes. In Docker, that path is backed by the shared `book_files` volume so the admin bot and Celery memory worker can both access uploads.
 
 ## Development
 

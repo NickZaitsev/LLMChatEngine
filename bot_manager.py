@@ -264,6 +264,10 @@ class BotManager:
                 bot_instance.ai_handler.update_personality(config.personality)
                 bot_instance.ai_handler.apply_llm_config(config.llm_config)
 
+            if hasattr(bot_instance, 'prompt_assembler') and bot_instance.prompt_assembler:
+                bot_instance.prompt_assembler.personality = config.personality
+                bot_instance.prompt_assembler.feature_flags = config.feature_flags or {}
+
             if requires_restart:
                 logger.info(f"Bot token changed for {config.name}; restarting bot")
                 await self.stop_bot(bot_id)
