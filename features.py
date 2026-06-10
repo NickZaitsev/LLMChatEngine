@@ -31,6 +31,7 @@ class BotFeature(Enum):
     # Advanced features
     BUFFER_MANAGER = "buffer_manager"
     MESSAGE_QUEUE = "message_queue"
+    BOOK_KNOWLEDGE = "book_knowledge"
 
 
 # Default feature flags for new bots
@@ -43,6 +44,7 @@ DEFAULT_FEATURE_FLAGS: Dict[str, bool] = {
     BotFeature.USER_SETTINGS.value: True,
     BotFeature.BUFFER_MANAGER.value: True,
     BotFeature.MESSAGE_QUEUE.value: True,
+    BotFeature.BOOK_KNOWLEDGE.value: False,
 }
 
 

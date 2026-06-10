@@ -10,6 +10,8 @@ import logging
 from typing import Dict, List, Any, Optional, Mapping, Tuple
 
 from core.tokens import TokenCounter, Tokenizer
+from features import BotFeature, has_feature
+from knowledge.manager import BookKnowledgeManager
 from storage.interfaces import (
     MessageRepo,
     ConversationRepo,
@@ -39,6 +41,7 @@ class PromptAssembler:
         conversation_repo: ConversationRepo,
         user_repo: UserRepo,
         user_settings_repo: Optional[UserBotSettingsRepo] = None,
+        book_knowledge_manager: Optional[BookKnowledgeManager] = None,
         tokenizer: Optional[Tokenizer] = None,
         config: Mapping[str, Any] = None
     ):
@@ -62,6 +65,7 @@ class PromptAssembler:
         self.conversation_repo = conversation_repo
         self.user_repo = user_repo
         self.user_settings_repo = user_settings_repo
+        self.book_knowledge_manager = book_knowledge_manager
         self.token_counter = TokenCounter(tokenizer)
 
         # Set default config values
@@ -71,6 +75,7 @@ class PromptAssembler:
         self.truncation_length = self.config.get("truncation_length", 200)
         self.include_system_template = self.config.get("include_system_template", True)
         self.personality = None  # Dynamic personality for multi-bot support
+        self.feature_flags = {}
 
         logger.info(f"PromptAssembler initialized with max_memory_items={self.max_memory_items}")
 
@@ -244,6 +249,64 @@ class PromptAssembler:
 
         return None, 0
 
+    async def _build_book_section(
+        self,
+        conversation_id: str,
+        conversation,
+        user_query: Optional[str],
+        book_budget: int,
+    ) -> tuple[Optional[Dict[str, str]], int]:
+        """Build the book knowledge section, isolated from history assembly."""
+        try:
+            if not config.BOOK_RAG_ENABLED:
+                return None, 0
+            if not self.book_knowledge_manager:
+                return None, 0
+            if not conversation or not conversation.bot_id:
+                return None, 0
+            if not has_feature(self.feature_flags, BotFeature.BOOK_KNOWLEDGE):
+                return None, 0
+
+            query = await self._resolve_memory_query(conversation_id, conversation, user_query)
+            if not query:
+                return None, 0
+
+            context = await self.book_knowledge_manager.get_context(
+                bot_id=str(conversation.bot_id),
+                query=query,
+                top_k=config.BOOK_RAG_TOP_K,
+                min_score=config.BOOK_RAG_MIN_SCORE,
+            )
+            if not context:
+                return None, 0
+
+            book_content = f"### Book Context\n{context}"
+            book_tokens = self.token_counter.count_tokens(book_content)
+            if book_tokens > book_budget:
+                lines = context.split("\n")
+                truncated_context = ""
+                current_tokens = self.token_counter.count_tokens("### Book Context\n")
+                for line in lines:
+                    line_tokens = self.token_counter.count_tokens(line + "\n")
+                    if current_tokens + line_tokens <= book_budget:
+                        truncated_context += line + "\n"
+                        current_tokens += line_tokens
+                    else:
+                        break
+                context = truncated_context.strip()
+                book_content = f"### Book Context\n{context}"
+                book_tokens = current_tokens
+
+            if not context:
+                return None, 0
+
+            logger.info("Added book context to prompt: %s tokens", book_tokens)
+            return {"role": "system", "content": book_content}, book_tokens
+        except Exception as e:
+            logger.warning("Failed to retrieve book context: %s", e, exc_info=True)
+
+        return None, 0
+
     async def _build_history_section(
         self,
         conversation_id: str,
@@ -322,12 +385,14 @@ class PromptAssembler:
         token_counts = {
             "system_tokens": system_tokens,
             "memory_tokens": 0,
+            "book_tokens": 0,
             "history_tokens": 0,
             "reply_reserved": reply_token_budget
         }
 
         memory_budget = int(history_budget * self.memory_token_budget_ratio)
-        remaining_history_budget = history_budget - memory_budget
+        book_budget = int(history_budget * config.BOOK_RAG_TOKEN_BUDGET_RATIO)
+        remaining_history_budget = history_budget
 
         memory_message, memory_tokens = await self._build_memory_section(
             conversation_id,
@@ -340,6 +405,17 @@ class PromptAssembler:
             token_counts["memory_tokens"] = memory_tokens
             remaining_history_budget -= memory_tokens
 
+        book_message, book_tokens = await self._build_book_section(
+            conversation_id,
+            conversation,
+            user_query,
+            book_budget,
+        )
+        if book_message:
+            messages.append(book_message)
+            token_counts["book_tokens"] = book_tokens
+            remaining_history_budget -= book_tokens
+
         history_messages, history_tokens, truncated_message_ids = await self._build_history_section(
             conversation_id,
             conversation,
@@ -350,11 +426,13 @@ class PromptAssembler:
 
         metadata = {
             "included_memory_ids": [],
+            "included_book_chunk_ids": [],
             "token_counts": token_counts,
             "truncated_message_ids": truncated_message_ids,
             "total_tokens": (
                 token_counts["system_tokens"]
                 + token_counts["memory_tokens"]
+                + token_counts["book_tokens"]
                 + token_counts["history_tokens"]
             ),
             "conversation_id": conversation_id
@@ -363,6 +441,7 @@ class PromptAssembler:
         # Log audit information
         logger.info(f"Built prompt with {len(messages)} messages, "
                    f"{1 if memory_message else 0} memory sections, "
+                   f"{1 if book_message else 0} book sections, "
                    f"total tokens: {metadata['total_tokens']}")
 
         return messages, metadata

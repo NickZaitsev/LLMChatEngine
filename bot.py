@@ -26,7 +26,8 @@ from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                     MEMORY_EMBEDDING_PROVIDER, GEMINI_EMBEDDING_MODEL,
                     MEMORY_TRIGGER_EVERY_N_MESSAGES,
                     MEMORY_CHUNK_MAX_MESSAGES, MEMORY_CHUNK_TARGET_TOKENS,
-                    MEMORY_RETRIEVAL_EXPAND_NEIGHBORS)
+                    MEMORY_RETRIEVAL_EXPAND_NEIGHBORS,
+                    BOOK_RAG_ENABLED, BOOK_RAG_EXPAND_NEIGHBORS)
 from memory.embedding_factory import build_embedding_model
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
@@ -54,6 +55,8 @@ if MEMORY_ENABLED:
     try:
         from memory.manager import LlamaIndexMemoryManager
         from memory.llamaindex.vector_store import PgVectorStore
+        from knowledge.manager import BookKnowledgeManager
+        from knowledge.store import BookVectorStore
         from prompt.assembler import PromptAssembler
         MEMORY_IMPORTS_AVAILABLE = True
     except ImportError as e:
@@ -94,6 +97,7 @@ class TelegramChatBot:
 
         # Initialize memory and prompt components
         self.memory_manager = None
+        self.book_knowledge_manager = None
         self.prompt_assembler = None
         self._memory_initialized = False
 
@@ -903,6 +907,19 @@ I'm designed to be flexible and adapt to your preferences."""
             )
             logger.info("LlamaIndexMemoryManager initialized successfully")
 
+            if BOOK_RAG_ENABLED:
+                book_store = BookVectorStore(
+                    db_url=DATABASE_URL,
+                    table_name="book_chunks",
+                    embed_dim=MEMORY_EMBED_DIM,
+                )
+                self.book_knowledge_manager = BookKnowledgeManager(
+                    store=book_store,
+                    embedding_model=embedding_model,
+                    expand_neighbors=BOOK_RAG_EXPAND_NEIGHBORS,
+                )
+                logger.info("BookKnowledgeManager initialized successfully")
+
             # 5. Initialize PromptAssembler
             prompt_config = {
                 "max_memory_items": PROMPT_MAX_MEMORY_ITEMS,
@@ -917,8 +934,10 @@ I'm designed to be flexible and adapt to your preferences."""
                 conversation_repo=storage.conversations,
                 user_repo=storage.users,
                 user_settings_repo=storage.user_settings,
+                book_knowledge_manager=self.book_knowledge_manager,
                 config=prompt_config
             )
+            self.prompt_assembler.feature_flags = self.feature_flags
             logger.info("PromptAssembler initialized successfully with config: %s", prompt_config)
 
             # 6. Set PromptAssembler in AIHandler

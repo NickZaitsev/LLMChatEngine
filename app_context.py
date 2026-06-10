@@ -192,6 +192,7 @@ class AppContext:
                 conversation_repo=self.conversation_manager.storage.conversations,
                 user_repo=self.conversation_manager.storage.users,
                 user_settings_repo=self.conversation_manager.storage.user_settings,
+                book_knowledge_manager=self.book_knowledge_manager,
                 config=prompt_config
             )
             self.prompt_assembler.personality = self.ai_handler.personality
@@ -252,6 +253,7 @@ class AppContext:
                 conversation_repo=self.conversation_manager.storage.conversations,
                 user_repo=self.conversation_manager.storage.users,
                 user_settings_repo=self.conversation_manager.storage.user_settings,
+                book_knowledge_manager=self.book_knowledge_manager,
                 config=prompt_config
             )
             prompt_assembler.personality = self.ai_handler.personality
@@ -267,6 +269,9 @@ class AppContext:
             if bot_record:
                 ai_handler.update_personality(bot_record.personality)
                 ai_handler.apply_llm_config(bot_record.llm_config or {})
+                if prompt_assembler:
+                    prompt_assembler.personality = bot_record.personality
+                    prompt_assembler.feature_flags = bot_record.feature_flags or {}
             else:
                 logger.warning("Bot config not found for task runtime: %s", bot_id)
         except Exception as e:
