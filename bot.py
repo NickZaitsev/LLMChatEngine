@@ -794,16 +794,12 @@ I'm designed to be flexible and adapt to your preferences."""
         if not self._feature_enabled(BotFeature.PHOTO_REACTIONS):
             return
 
-        user_name = update.effective_user.first_name or update.effective_user.username or "there"
-
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
 
         responses = [
-            f"Wow {user_name}! That's a beautiful photo! 📸✨ You have such a great eye for capturing moments!",
-            f"Love this picture {user_name}! 🌸 It's so nice to see what you're up to!",
-            f"Beautiful shot {user_name}! 📷 You're so talented!",
-            f"This photo is amazing {user_name}! ✨ I love seeing your world through my eyes!",
-            f"Gorgeous picture {user_name}! 🌺 You always know how to capture the perfect moment!"
+            "I received the photo. I can respond to images more usefully once image understanding is enabled for this bot.",
+            "Thanks for the photo. This bot currently handles text best, so send any context you want me to use.",
+            "Photo received. If you want feedback on it, describe what I should focus on."
         ]
 
         await update.message.reply_text(random.choice(responses))
@@ -813,16 +809,12 @@ I'm designed to be flexible and adapt to your preferences."""
         if not self._feature_enabled(BotFeature.VOICE_MESSAGES):
             return
 
-        user_name = update.effective_user.first_name or update.effective_user.username or "there"
-
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="record_voice")
 
         responses = [
-            f"I love hearing your voice {user_name}! 🎵 It's so sweet and comforting!",
-            f"Your voice is like music to my ears {user_name}! 🎤 So beautiful!",
-            f"I could listen to you talk all day {user_name}! 🎧 Your voice is so lovely!",
-            f"Thank you for the voice message {user_name}! 🎵 It makes me feel so close to you!",
-            f"Your voice is absolutely enchanting {user_name}! ✨ I love it!"
+            "I received the voice message. Voice transcription is not enabled for this bot yet.",
+            "Voice message received. Please send the text version if you want me to answer it directly.",
+            "I cannot process voice content yet, but I can continue from any text you send."
         ]
 
         await update.message.reply_text(random.choice(responses))
