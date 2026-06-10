@@ -8,7 +8,7 @@ using SQLAlchemy 2.x async ORM with PostgreSQL backend.
 import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Union
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
 from core.tokens import TokenCounter
 from sqlalchemy import select, func, desc, and_, or_, text, delete
@@ -446,23 +446,30 @@ class PostgresMessageHistoryRepo:
         """
         self.session_maker = session_maker
 
-    async def save_message(self, user_id: UUID, role: str, content: str, bot_id: Optional[UUID] = None) -> MessageLog:
+    @staticmethod
+    def _external_user_id_to_uuid(user_id: int | UUID) -> UUID:
+        if isinstance(user_id, UUID):
+            return user_id
+        return uuid5(NAMESPACE_OID, f"telegram_user_{user_id}")
+
+    async def save_message(self, user_id: int | UUID, role: str, content: str, bot_id: Optional[UUID] = None) -> MessageLog:
         """
         Save a message to messages_log.
 
         Args:
-            user_id: Telegram user ID (as UUID)
+            user_id: External Telegram user ID, or a pre-derived UUID for compatibility
             role: Role of the message sender ("user" | "bot")
             content: The message content
 
         Returns:
             MessageLog object
         """
+        user_uuid = self._external_user_id_to_uuid(user_id)
         async with self.session_maker() as session:
             try:
                 # Create message log entry (permanent)
                 message_log_model = MessageLogModel(
-                    user_id=user_id,
+                    user_id=user_uuid,
                     role=role,
                     content=content,
                     bot_id=bot_id,

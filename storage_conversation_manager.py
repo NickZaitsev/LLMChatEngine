@@ -129,11 +129,7 @@ class PostgresConversationManager:
         if not self.storage:
             raise RuntimeError("Storage not initialized. Call initialize() first.")
 
-        # Convert Telegram user ID (integer) to UUID for the database
-        # We'll use a consistent UUID namespace for Telegram user IDs
-        user_uuid = uuid.uuid5(uuid.NAMESPACE_OID, f"telegram_user_{user_id}")
-
-        return await self.storage.message_history.save_message(user_uuid, role, content, bot_id=bot_id)
+        return await self.storage.message_history.save_message(user_id, role, content, bot_id=bot_id)
 
     async def add_message_async(self, user_id: int, role: str, content: str, bot_id: Optional[uuid.UUID] = None) -> Message:
         """

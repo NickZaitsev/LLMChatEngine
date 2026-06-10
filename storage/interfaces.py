@@ -5,6 +5,8 @@ from datetime import datetime
 from dataclasses import dataclass
 from uuid import UUID
 
+ExternalUserId = int | UUID
+
 
 @dataclass
 class Message:
@@ -147,7 +149,7 @@ class MessageRepo(Protocol):
 class MessageHistoryRepo(Protocol):
     """Protocol for message history repository operations"""
     
-    async def save_message(self, user_id: UUID, role: str, content: str, bot_id: Optional[UUID] = None) -> MessageLog:
+    async def save_message(self, user_id: ExternalUserId, role: str, content: str, bot_id: Optional[UUID] = None) -> MessageLog:
         """Persist a message log entry."""
         ...
 
