@@ -2,6 +2,7 @@
 
 import logging
 
+from config import GEMINI_EMBEDDING_MODEL, MEMORY_EMBED_MODEL, MEMORY_EMBEDDING_PROVIDER
 from core.abstractions import EmbeddingModel
 
 logger = logging.getLogger(__name__)
@@ -9,12 +10,6 @@ logger = logging.getLogger(__name__)
 
 def build_embedding_model() -> EmbeddingModel:
     """Build the configured embedding model."""
-    from config import (
-        MEMORY_EMBEDDING_PROVIDER,
-        MEMORY_EMBED_MODEL,
-        GEMINI_EMBEDDING_MODEL,
-    )
-
     if MEMORY_EMBEDDING_PROVIDER == "gemini":
         from memory.llamaindex.gemini import GeminiEmbeddingModel
 

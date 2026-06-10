@@ -12,7 +12,7 @@ from celery import Celery
 
 import redis
 from app_context import get_app_context
-from config import SUMMARIZATION_PROMPT
+from config import MEMORY_CHUNK_MAX_MESSAGES, MEMORY_CHUNK_TARGET_TOKENS, SUMMARIZATION_PROMPT
 import celeryconfig
 from core.celery_loop import run_coroutine
 
@@ -211,7 +211,6 @@ async def extract_memories_async(user_id: str, conversation_id: str):
     3. Batch-embed and store via the memory manager.
     4. Update last_memorized_message_id.
     """
-    from config import MEMORY_CHUNK_MAX_MESSAGES, MEMORY_CHUNK_TARGET_TOKENS
     from memory.adaptive_chunker import AdaptiveChunker
 
     lock_key = memory_lock_key(conversation_id)
