@@ -54,14 +54,6 @@ def mock_memory_manager():
 
 
 @pytest.fixture
-def mock_persona_repo():
-    """Create a mock PersonaRepo for testing"""
-    repo = AsyncMock()
-    repo.get_persona = AsyncMock()
-    return repo
-
-
-@pytest.fixture
 def sample_conversation_id():
     """Generate a sample conversation ID"""
     return str(uuid4())
@@ -123,7 +115,7 @@ def sample_memories():
 
 
 @pytest.fixture
-def prompt_assembler(mock_message_repo, mock_memory_manager, mock_persona_repo, mock_tokenizer):
+def prompt_assembler(mock_message_repo, mock_memory_manager, mock_tokenizer):
     """Create a PromptAssembler instance for testing"""
     config = {
         "max_memory_items": 3,
@@ -148,7 +140,6 @@ def prompt_assembler(mock_message_repo, mock_memory_manager, mock_persona_repo, 
         memory_manager=mock_memory_manager,
         conversation_repo=conversation_repo,
         user_repo=user_repo,
-        persona_repo=mock_persona_repo,
         tokenizer=mock_tokenizer,
         config=config
     )
@@ -239,10 +230,15 @@ class TestPromptAssembler:
         # Verify token accounting
         assert token_counts["reply_reserved"] == 500  # Updated to match config default
         assert metadata["total_tokens"] > 0
+        assert metadata["total_tokens"] == (
+            token_counts["system_tokens"]
+            + token_counts["memory_tokens"]
+            + token_counts["history_tokens"]
+        )
+        assert metadata["total_tokens"] < sum(token_counts.values())
         
-        # Verify memory inclusion
-        assert len(metadata["included_memory_ids"]) <= 3  # max_memory_items
-        assert len(metadata["included_memory_ids"]) <= len(sample_memories)
+        # Memory text is injected, but the assembler does not fabricate IDs from content lines.
+        assert metadata["included_memory_ids"] == []
     
     @pytest.mark.asyncio
     async def test_memory_token_budgeting(self, prompt_assembler, sample_conversation_id, sample_memories):
@@ -286,8 +282,7 @@ class TestPromptAssembler:
             history_budget=10000  # Large budget
         )
         
-        # Should be capped by max_memory_items (3)
-        assert len(metadata["included_memory_ids"]) <= 3
+        assert metadata["included_memory_ids"] == []
     
     @pytest.mark.asyncio
     async def test_message_truncation(self, prompt_assembler, sample_conversation_id):
@@ -385,8 +380,8 @@ class TestPromptAssembler:
         assert metadata["token_counts"]["history_tokens"] >= 0
     
     @pytest.mark.asyncio
-    async def test_system_template_disabled(self, mock_message_repo, mock_memory_manager, 
-                                           mock_persona_repo, mock_tokenizer, sample_conversation_id):
+    async def test_system_template_disabled(self, mock_message_repo, mock_memory_manager,
+                                           mock_tokenizer, sample_conversation_id):
         """Test prompt building with system template disabled"""
         config = {"include_system_template": False}
         conversation_repo = AsyncMock()
@@ -402,7 +397,6 @@ class TestPromptAssembler:
             memory_manager=mock_memory_manager,
             conversation_repo=conversation_repo,
             user_repo=user_repo,
-            persona_repo=mock_persona_repo,
             tokenizer=mock_tokenizer,
             config=config
         )
@@ -425,7 +419,6 @@ class TestPromptAssembler:
         self,
         mock_message_repo,
         mock_memory_manager,
-        mock_persona_repo,
         mock_tokenizer,
         sample_conversation_id,
     ):
@@ -455,7 +448,6 @@ class TestPromptAssembler:
             memory_manager=mock_memory_manager,
             conversation_repo=conversation_repo,
             user_repo=user_repo,
-            persona_repo=mock_persona_repo,
             user_settings_repo=user_settings_repo,
             tokenizer=mock_tokenizer,
             config={"include_system_template": True},

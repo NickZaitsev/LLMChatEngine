@@ -916,7 +916,6 @@ I'm designed to be flexible and adapt to your preferences."""
                 memory_manager=self.memory_manager,
                 conversation_repo=storage.conversations,
                 user_repo=storage.users,
-                persona_repo=storage.personas,
                 user_settings_repo=storage.user_settings,
                 config=prompt_config
             )

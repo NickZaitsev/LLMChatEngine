@@ -171,7 +171,6 @@ class AppContext:
                 memory_manager=self.memory_manager,
                 conversation_repo=self.conversation_manager.storage.conversations,
                 user_repo=self.conversation_manager.storage.users,
-                persona_repo=self.conversation_manager.storage.personas,
                 user_settings_repo=self.conversation_manager.storage.user_settings,
                 config=prompt_config
             )
@@ -232,7 +231,6 @@ class AppContext:
                 memory_manager=self.memory_manager,
                 conversation_repo=self.conversation_manager.storage.conversations,
                 user_repo=self.conversation_manager.storage.users,
-                persona_repo=self.conversation_manager.storage.personas,
                 user_settings_repo=self.conversation_manager.storage.user_settings,
                 config=prompt_config
             )
