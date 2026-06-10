@@ -969,6 +969,29 @@ I'm designed to be flexible and adapt to your preferences."""
                 logger.error("Error during LM Studio model initialization: %s", e)
                 logger.warning("Bot will continue startup, but LM Studio model may not be loaded")
 
+    async def _on_startup(self, application: Application) -> None:
+        """PTB startup hook for storage and background services."""
+        await self._initialize_storage()
+        await self._initialize_memory_components()
+        await self._initialize_lmstudio_model()
+
+        if self.proactive_messaging_service:
+            try:
+                logger.info("Proactive messaging service initialized")
+            except Exception as e:
+                logger.error("Failed to initialize proactive messaging service: %s", e)
+
+        if self.message_dispatcher:
+            try:
+                self.dispatcher_task = asyncio.create_task(self.message_dispatcher.start_dispatching())
+                logger.info("Message dispatcher started successfully")
+            except Exception as e:
+                logger.error("Failed to start message dispatcher: %s", e)
+
+    async def _on_shutdown(self, application: Application) -> None:
+        """PTB shutdown hook for cleanup."""
+        await self.cleanup()
+
     async def cleanup(self):
         """Cleanup resources when shutting down"""
         logger.info("Cleaning up bot resources...")
@@ -1008,7 +1031,14 @@ I'm designed to be flexible and adapt to your preferences."""
     def build_application(self, token_override: Optional[str] = None) -> Application:
         """Build and register the Telegram application handlers."""
         token = token_override or self.bot_token
-        app = Application.builder().token(token).concurrent_updates(True).build()
+        app = (
+            Application.builder()
+            .token(token)
+            .concurrent_updates(True)
+            .post_init(self._on_startup)
+            .post_shutdown(self._on_shutdown)
+            .build()
+        )
 
         app.add_handler(MessageHandler(filters.ALL, self._monitor_pending_clear), group=-1)
 
@@ -1032,6 +1062,7 @@ I'm designed to be flexible and adapt to your preferences."""
         app.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
 
         app.add_error_handler(self.error_handler)
+        self.application = app
         return app
 
     def run(self):
@@ -1040,44 +1071,6 @@ I'm designed to be flexible and adapt to your preferences."""
 
         self.application = self.build_application()
         logger.info("Application created successfully")
-
-        # Initialize storage and LM Studio model in the event loop
-        async def initialize_bot():
-            """Initialize storage, memory, provider, and optional background services."""
-            await self._initialize_storage()
-            await self._initialize_memory_components()
-            await self._initialize_lmstudio_model()
-
-            # Initialize proactive messaging if available
-            if self.proactive_messaging_service:
-                try:
-                    # Schedule initial proactive messages for existing users
-                    # This is a simplified approach - in a real implementation,
-                    # you would query the database for all users and schedule messages for them
-                    logger.info("Proactive messaging service initialized")
-                except Exception as e:
-                    logger.error("Failed to initialize proactive messaging service: %s", e)
-
-        # Run initialization
-        import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-            loop.run_until_complete(initialize_bot())
-
-            # Start message dispatcher in background task after initialization
-            if self.message_dispatcher:
-                try:
-                    # Create the task within the existing event loop
-                    loop = asyncio.get_event_loop()
-                    self.dispatcher_task = loop.create_task(self.message_dispatcher.start_dispatching())
-                    logger.info("Message dispatcher started successfully")
-                except Exception as e:
-                    logger.error("Failed to start message dispatcher: %s", e)
-        except Exception as e:
-            logger.error("CRITICAL: Failed to initialize bot: %s", e)
-            logger.error("Bot startup failed due to PostgreSQL configuration issues")
-            logger.error("Please check README.md for setup and troubleshooting steps")
-            raise SystemExit(1) from e
 
         logger.info("All handlers registered successfully")
 
@@ -1100,26 +1093,8 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Bot shutdown requested by user (Ctrl+C)")
         logger.info("%s is shutting down", bot._get_bot_name())
-
-        # Run cleanup in async context
-        import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If loop is running, schedule cleanup
-                asyncio.create_task(shutdown_handler(bot))
-            else:
-                # If loop is not running, run cleanup
-                asyncio.run(shutdown_handler(bot))
-        except Exception as cleanup_error:
-            logger.error("Error during shutdown cleanup: %s", cleanup_error)
+        asyncio.run(shutdown_handler(bot))
 
     except Exception as e:
         logger.error("Error running bot: %s", e)
-
-        # Try cleanup even on error
-        import asyncio
-        try:
-            asyncio.run(shutdown_handler(bot))
-        except Exception as cleanup_error:
-            logger.error("Error during error cleanup: %s", cleanup_error)
+        asyncio.run(shutdown_handler(bot))
