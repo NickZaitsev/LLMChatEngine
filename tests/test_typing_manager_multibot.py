@@ -30,8 +30,12 @@ async def test_typing_indicator_manager_isolates_routes_in_same_chat():
     await typing_manager.stop_typing(chat_id, route_key="12345:bot-a")
     assert not typing_manager.is_typing_active(chat_id, route_key="12345:bot-a")
     assert typing_manager.is_typing_active(chat_id, route_key="12345:bot-b")
+    assert "12345:bot-a" not in typing_manager._typing_locks
+    assert "12345:bot-b" in typing_manager._typing_locks
 
     await typing_manager.cleanup()
+    assert typing_manager._typing_locks == {}
+    assert typing_manager._typing_lock_refs == {}
 
 
 @pytest.mark.asyncio
@@ -54,3 +58,43 @@ async def test_typing_indicator_manager_reports_and_cleans_up_real_chat_ids():
 
     assert not typing_manager.is_typing_active(12345, route_key="12345:bot-a")
     assert not typing_manager.is_typing_active(67890, route_key="67890:bot-b")
+    assert typing_manager._typing_locks == {}
+    assert typing_manager._typing_lock_refs == {}
+
+
+@pytest.mark.asyncio
+async def test_typing_indicator_manager_cleans_lock_for_unstarted_route():
+    typing_manager = TypingIndicatorManager()
+
+    await typing_manager.stop_typing(12345, route_key="12345:bot-a")
+
+    assert typing_manager._typing_locks == {}
+    assert typing_manager._typing_lock_refs == {}
+
+
+@pytest.mark.asyncio
+async def test_typing_indicator_manager_handles_concurrent_route_start_stop():
+    typing_manager = TypingIndicatorManager()
+    typing_manager.typing_interval = 0.01
+
+    bot_a = AsyncMock()
+    bot_a.send_chat_action = AsyncMock()
+    bot_b = AsyncMock()
+    bot_b.send_chat_action = AsyncMock()
+
+    await asyncio.gather(
+        typing_manager.start_typing(bot_a, 12345, route_key="12345:bot-a"),
+        typing_manager.start_typing(bot_b, 12345, route_key="12345:bot-b"),
+    )
+
+    assert typing_manager.is_typing_active(12345, route_key="12345:bot-a")
+    assert typing_manager.is_typing_active(12345, route_key="12345:bot-b")
+
+    await asyncio.gather(
+        typing_manager.stop_typing(12345, route_key="12345:bot-a"),
+        typing_manager.stop_typing(12345, route_key="12345:bot-b"),
+    )
+
+    assert not typing_manager.is_typing_active(12345)
+    assert typing_manager._typing_locks == {}
+    assert typing_manager._typing_lock_refs == {}

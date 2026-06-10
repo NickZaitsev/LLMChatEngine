@@ -86,6 +86,7 @@ class TestBufferIntegration:
         # Verify buffer was cleared
         buffer_size = await buffer_manager.get_buffer_size(user_id)
         assert buffer_size == 0
+        assert not typing_manager.is_typing_active(chat_id)
 
     @pytest.mark.asyncio
     async def test_typing_indicator_integration(self, buffer_manager, typing_manager, mock_bot):

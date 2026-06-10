@@ -247,6 +247,7 @@ class BufferManager:
                 # Automatically clear the buffer after dispatch
                 buffer = self.get_user_buffer(user_id)
                 await buffer.clear()
+                await self._stop_typing_indicator(user_id)
             except Exception as e:
                 logger.error(f"Error in dispatch task for user {user_id}: {e}")
         
