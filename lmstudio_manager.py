@@ -31,7 +31,7 @@ class LMStudioManager:
     async def is_server_running(self) -> bool:
         """Check if LM Studio server is running"""
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             response = await loop.run_in_executor(
                 None, 
                 lambda: requests.get(f"{self.api_base}/models", timeout=5)
@@ -44,7 +44,7 @@ class LMStudioManager:
     async def get_available_models(self) -> List[Dict]:
         """Get list of available models from LM Studio"""
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             response = await loop.run_in_executor(
                 None,
                 lambda: requests.get(f"{self.api_base}/models", timeout=self.timeout)
@@ -84,7 +84,7 @@ class LMStudioManager:
         """Check if a specific model is loaded"""
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             test_payload = {
                 "model": model_name,
                 "messages": [{"role": "user", "content": "test"}],
@@ -142,7 +142,7 @@ class LMStudioManager:
     async def unload_model(self) -> bool:
         """Unload the currently loaded model"""
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             
             # Try unload endpoint
             response = await loop.run_in_executor(
