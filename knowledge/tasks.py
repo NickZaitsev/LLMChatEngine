@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
 
 from app_context import get_app_context
 from config import BOOKS_KEEP_SOURCE_FILES, BOOKS_STORAGE_DIR
 from knowledge.parser import extract_text
-from memory.tasks import celery_app
+from memory.tasks import celery_app, run_coroutine
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +18,7 @@ def ingest_book(book_id: str):
     """Celery entry point for book ingestion."""
     logger.info("Starting book ingestion task for book_id: %s", book_id)
     try:
-        asyncio.run(ingest_book_async(book_id))
+        run_coroutine(ingest_book_async(book_id))
     except Exception as exc:
         logger.error("Error in book ingestion task for %s: %s", book_id, exc, exc_info=True)
         raise
