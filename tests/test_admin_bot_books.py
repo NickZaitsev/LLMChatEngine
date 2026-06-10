@@ -31,7 +31,20 @@ def make_update(file_name="book.txt", file_size=12):
 
 
 def make_admin(tmp_path):
-    admin = AdminBot("token", [1], "postgresql://u:p@h:5432/db")
+    service_container = SimpleNamespace(
+        settings=SimpleNamespace(
+            books=SimpleNamespace(storage_dir=str(tmp_path)),
+        ),
+        initialize=AsyncMock(),
+        storage=None,
+        book_knowledge_manager=None,
+    )
+    admin = AdminBot(
+        "token",
+        [1],
+        "postgresql://u:p@h:5432/db",
+        service_container=service_container,
+    )
     admin.storage = MagicMock()
     admin.storage.bots = MagicMock()
     admin.storage.books = MagicMock()
@@ -211,8 +224,9 @@ async def test_removebook_deletes_vectors_file_and_row(tmp_path, monkeypatch):
 
     manager = MagicMock()
     manager.delete_book = AsyncMock()
-    with patch("admin_bot.BookKnowledgeManager", return_value=manager):
-        await admin.removebook_command(update, context)
+    admin.service_container.book_knowledge_manager = manager
+
+    await admin.removebook_command(update, context)
 
     manager.delete_book.assert_awaited_once_with(str(book_id))
     admin.storage.books.delete_book.assert_awaited_once_with(str(book_id))

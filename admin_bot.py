@@ -20,10 +20,9 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 
 from token_encryption import encrypt_token, decrypt_token
 from features import BotFeature, DEFAULT_FEATURE_FLAGS, has_feature
-from config import BOOKS_STORAGE_DIR, MEMORY_EMBED_DIM
-from knowledge.manager import BookKnowledgeManager
-from knowledge.store import BookVectorStore
-from memory.embedding_factory import build_embedding_model
+from config import BOOKS_STORAGE_DIR
+from service_container import ServiceContainer
+from settings import build_settings
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +51,13 @@ class AdminBot:
     administrative commands for managing the multi-bot system.
     """
 
-    def __init__(self, admin_token: str, admin_user_ids: list, db_url: str):
+    def __init__(
+        self,
+        admin_token: str,
+        admin_user_ids: list,
+        db_url: str,
+        service_container: Optional[ServiceContainer] = None,
+    ):
         """
         Initialize the admin bot.
 
@@ -64,6 +69,9 @@ class AdminBot:
         self.admin_token = admin_token
         self.admin_user_ids = set(admin_user_ids)
         self.db_url = db_url
+        self.service_container = service_container or ServiceContainer(
+            build_settings().model_copy(update={"DATABASE_URL": db_url})
+        )
         self.application: Optional[Application] = None
         self.storage = None
         self._pending_bot_data: Dict[int, Dict[str, Any]] = {}  # user_id -> pending data
@@ -86,9 +94,15 @@ class AdminBot:
     async def _init_storage(self):
         """Initialize database storage."""
         if self.storage is None:
-            from storage import create_storage
-            self.storage = await create_storage(self.db_url)
+            await self.service_container.initialize()
+            self.storage = self.service_container.storage
             logger.info("Admin bot storage initialized")
+
+    def _books_storage_dir(self) -> Path:
+        """Return the configured directory for uploaded book source files."""
+        if self.service_container:
+            return Path(self.service_container.settings.books.storage_dir)
+        return Path(BOOKS_STORAGE_DIR)
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command."""
@@ -328,7 +342,7 @@ Use these commands to manage your bot fleet."""
             await update.message.reply_text("❌ File is too large. Telegram book uploads are limited to 20 MB.")
             return WAITING_BOOK_FILE
 
-        storage_dir = Path(BOOKS_STORAGE_DIR)
+        storage_dir = self._books_storage_dir()
         storage_dir.mkdir(parents=True, exist_ok=True)
         temp_path = storage_dir / f"upload-{self._session_key(update)[0]}-{self._session_key(update)[1]}.{file_format}"
 
@@ -699,16 +713,14 @@ Use these commands to manage your bot fleet."""
             return
 
         try:
-            book_knowledge_manager = BookKnowledgeManager(
-                store=BookVectorStore(
-                    db_url=self.db_url,
-                    table_name="book_chunks",
-                    embed_dim=MEMORY_EMBED_DIM,
-                ),
-                embedding_model=build_embedding_model(),
-            )
+            if not self.service_container.book_knowledge_manager:
+                await self.service_container.initialize()
+            book_knowledge_manager = self.service_container.book_knowledge_manager
+            if not book_knowledge_manager:
+                raise RuntimeError("Book knowledge manager is not initialized")
+
             await book_knowledge_manager.delete_book(str(book.id))
-            source_path = Path(BOOKS_STORAGE_DIR) / f"{book.id}.{book.file_format}"
+            source_path = self._books_storage_dir() / f"{book.id}.{book.file_format}"
             source_path.unlink(missing_ok=True)
             await self.storage.books.delete_book(str(book.id))
             await update.message.reply_text(f"✅ Removed **{book.title}**.", parse_mode='Markdown')
