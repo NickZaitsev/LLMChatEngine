@@ -143,15 +143,15 @@ async def _test_conversation_manager(db_url: str) -> bool:
         await asyncio.sleep(0.1)
         
         # Get conversation
-        conversation = manager.get_conversation(test_user_id)
+        conversation = await manager.get_conversation_async(test_user_id)
         logger.info("✓ Retrieved conversation with %d messages", len(conversation))
         
         # Get formatted conversation
-        formatted = manager.get_formatted_conversation(test_user_id)
+        formatted = await manager.get_formatted_conversation_async(test_user_id)
         logger.info("✓ Retrieved formatted conversation with %d messages", len(formatted))
         
         # Get user stats
-        stats = manager.get_user_stats(test_user_id)
+        stats = await manager.get_user_stats_async(test_user_id)
         logger.info("✓ Retrieved user stats: %d total messages", stats['total_messages'])
         
         # Clean up
