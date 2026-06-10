@@ -452,7 +452,7 @@ class AIHandler:
         try:
             logger.info("Making LLM API call via ModelClient")
             
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             ask = partial(
                 self.model_client.ask,
                 messages,
