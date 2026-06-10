@@ -53,6 +53,10 @@ async def test_book_repo_crud_and_status_transitions(storage, sample_bot):
     assert failed.status == "failed"
     assert failed.error == "Parse failed"
 
+    renamed = await storage.books.update_metadata(str(book.id), "Human Title", "Human Author")
+    assert renamed.title == "Human Title"
+    assert renamed.author == "Human Author"
+
     books = await storage.books.list_books(str(sample_bot.id))
     assert [listed.id for listed in books] == [book.id]
 

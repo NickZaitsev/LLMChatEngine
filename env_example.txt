@@ -55,6 +55,19 @@ MEMORY_EMBED_DIM=1024 # Embedding dimension for the model
 VECTOR_STORE_TABLE_NAME="llama_pg_vector_store"
 MEMORY_CHUNK_OVERLAP=20
 
+# Book Knowledge / RAG
+BOOK_RAG_ENABLED=true
+BOOKS_STORAGE_DIR=./book_files # Must be shared by the bot and celery-memory worker containers
+BOOKS_KEEP_SOURCE_FILES=false
+BOOK_CHUNK_TARGET_TOKENS=400
+BOOK_CHUNK_OVERLAP_TOKENS=50
+BOOK_RAG_TOP_K=4
+BOOK_RAG_MIN_SCORE=0.35
+BOOK_RAG_TOKEN_BUDGET_RATIO=0.25
+BOOK_RAG_EXPAND_NEIGHBORS=1
+BOOK_EMBED_BATCH_SIZE=64
+# Book chunks use MEMORY_EMBED_DIM; changing embedding models invalidates both memory and book vector tables.
+
 # Typing Simulation
 MIN_TYPING_SPEED=10
 MAX_TYPING_SPEED=30

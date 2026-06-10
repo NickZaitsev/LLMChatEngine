@@ -1224,6 +1224,25 @@ class PostgresBookRepo:
             await session.refresh(book)
             return self._to_dto(book)
 
+    async def update_metadata(
+        self,
+        book_id: str,
+        title: str,
+        author: Optional[str],
+    ) -> Optional[Book]:
+        book_uuid = UUID(str(book_id))
+        async with self.session_maker() as session:
+            result = await session.execute(select(BookModel).where(BookModel.id == book_uuid))
+            book = result.scalar_one_or_none()
+            if not book:
+                return None
+
+            book.title = title
+            book.author = author
+            await session.commit()
+            await session.refresh(book)
+            return self._to_dto(book)
+
     async def delete_book(self, book_id: str) -> bool:
         book_uuid = UUID(str(book_id))
         async with self.session_maker() as session:

@@ -9,7 +9,9 @@ This bot allows administrators to:
 """
 
 import asyncio
+import hashlib
 import logging
+from pathlib import Path
 import uuid
 from typing import Optional, Dict, Any
 
@@ -18,8 +20,13 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 
 from token_encryption import encrypt_token, decrypt_token
 from features import BotFeature, DEFAULT_FEATURE_FLAGS, has_feature
+from config import BOOKS_STORAGE_DIR, MEMORY_EMBED_DIM
+from knowledge.store import BookVectorStore
 
 logger = logging.getLogger(__name__)
+
+MAX_BOOK_FILE_SIZE = 20 * 1024 * 1024
+SUPPORTED_BOOK_FORMATS = {"txt", "pdf", "epub", "fb2"}
 
 
 # Conversation states for multi-step commands
@@ -30,7 +37,9 @@ logger = logging.getLogger(__name__)
     WAITING_EDIT_FIELD,
     WAITING_EDIT_VALUE,
     WAITING_NEW_PERSONALITY,
-) = range(6)
+    WAITING_BOOK_FILE,
+    WAITING_BOOK_META,
+) = range(8)
 
 
 class AdminBot:
@@ -97,6 +106,9 @@ Welcome to the multi-bot administration system.
 /editbot - Edit bot settings
 /setprompt - Change bot personality
 /togglefeature - Enable/disable features
+/addbook - Attach a book to a bot
+/listbooks - List a bot's books
+/removebook - Remove a book
 /removebot - Deactivate a bot
 /botstatus - Show running status
 /reloadbot - Hot-reload bot config
@@ -214,7 +226,8 @@ Use these commands to manage your bot fleet."""
 
             # Build feature list for display
             features_text = "\n".join([
-                f"  • `{f.value}`: ✅" for f in BotFeature
+                f"  • `{f.value}`: {'✅' if has_feature(DEFAULT_FEATURE_FLAGS, f) else '❌'}"
+                for f in BotFeature
             ])
 
             await update.message.reply_text(
@@ -244,12 +257,160 @@ Use these commands to manage your bot fleet."""
 
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel current operation."""
-        user_id = update.effective_user.id
         session_key = self._session_key(update)
+        pending = self._pending_bot_data.get(session_key, {})
+        temp_path = pending.get("temp_path")
+        if temp_path:
+            Path(temp_path).unlink(missing_ok=True)
         if session_key in self._pending_bot_data:
             del self._pending_bot_data[session_key]
 
         await update.message.reply_text("❌ Operation cancelled.")
+        return ConversationHandler.END
+
+    async def addbook_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Start the add book flow."""
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id):
+            await update.message.reply_text("⛔ You are not authorized to use this bot.")
+            return ConversationHandler.END
+
+        await self._init_storage()
+
+        if not context.args:
+            await update.message.reply_text("Usage: /addbook <bot_id>")
+            return ConversationHandler.END
+
+        bot_id = context.args[0]
+        try:
+            bot = await self.storage.bots.get_bot(bot_id)
+        except Exception as e:
+            logger.error("Failed to load bot for addbook: %s", e)
+            await update.message.reply_text(f"❌ Error loading bot: {e}")
+            return ConversationHandler.END
+
+        if not bot:
+            await update.message.reply_text(f"❌ Bot not found: {bot_id}")
+            return ConversationHandler.END
+
+        self._pending_bot_data[self._session_key(update)] = {
+            "flow": "addbook",
+            "bot_id": str(bot.id),
+            "bot_name": bot.name,
+        }
+        await update.message.reply_text(
+            "Send me the book file (.txt, .pdf, .epub, .fb2, max 20 MB). /cancel to abort."
+        )
+        return WAITING_BOOK_FILE
+
+    async def addbook_file(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Receive and persist a book upload."""
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id):
+            await update.message.reply_text("⛔ You are not authorized to use this bot.")
+            return ConversationHandler.END
+
+        pending = self._pending_bot_data.get(self._session_key(update), {})
+        bot_id = pending.get("bot_id")
+        if not bot_id:
+            await update.message.reply_text("❌ Session expired. Please start again with /addbook <bot_id>")
+            return ConversationHandler.END
+
+        document = update.message.document
+        filename = document.file_name or "book"
+        file_format = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if file_format not in SUPPORTED_BOOK_FORMATS:
+            await update.message.reply_text("❌ Unsupported file type. Send .txt, .pdf, .epub, or .fb2.")
+            return WAITING_BOOK_FILE
+        if document.file_size and document.file_size > MAX_BOOK_FILE_SIZE:
+            await update.message.reply_text("❌ File is too large. Telegram book uploads are limited to 20 MB.")
+            return WAITING_BOOK_FILE
+
+        storage_dir = Path(BOOKS_STORAGE_DIR)
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        temp_path = storage_dir / f"upload-{self._session_key(update)[0]}-{self._session_key(update)[1]}.{file_format}"
+
+        telegram_file = await context.bot.get_file(document.file_id)
+        await telegram_file.download_to_drive(custom_path=str(temp_path))
+        file_hash = _sha256_file(temp_path)
+
+        duplicate = await self.storage.books.find_by_hash(bot_id, file_hash)
+        if duplicate:
+            temp_path.unlink(missing_ok=True)
+            await update.message.reply_text(
+                f"❌ This book is already attached to that bot as **{duplicate.title}**.",
+                parse_mode='Markdown',
+            )
+            return ConversationHandler.END
+
+        title = Path(filename).stem
+        book = await self.storage.books.create_book(
+            bot_id=bot_id,
+            title=title,
+            author=None,
+            source_filename=filename,
+            file_format=file_format,
+            file_hash=file_hash,
+        )
+        final_path = storage_dir / f"{book.id}.{file_format}"
+        temp_path.replace(final_path)
+
+        pending.update(
+            {
+                "book_id": str(book.id),
+                "source_filename": filename,
+                "file_format": file_format,
+                "final_path": str(final_path),
+                "default_title": title,
+            }
+        )
+        await update.message.reply_text(
+            "Send the book title and author as `Title — Author`, or /skip to use the filename.",
+            parse_mode='Markdown',
+        )
+        return WAITING_BOOK_META
+
+    async def addbook_meta(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Receive book metadata and enqueue ingestion."""
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id):
+            await update.message.reply_text("⛔ You are not authorized to use this bot.")
+            return ConversationHandler.END
+
+        pending = self._pending_bot_data.get(self._session_key(update), {})
+        book_id = pending.get("book_id")
+        if not book_id:
+            await update.message.reply_text("❌ Session expired. Please start again with /addbook <bot_id>")
+            return ConversationHandler.END
+
+        title, author = _parse_book_meta(update.message.text, pending.get("default_title", "Book"))
+        await self.storage.books.update_metadata(book_id, title, author)
+
+        from knowledge.tasks import ingest_book
+
+        ingest_book.delay(book_id)
+        del self._pending_bot_data[self._session_key(update)]
+        await update.message.reply_text("📚 Book queued for processing. Check /listbooks for status.")
+        return ConversationHandler.END
+
+    async def addbook_skip_meta(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Use default file-derived metadata for a book upload."""
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id):
+            await update.message.reply_text("⛔ You are not authorized to use this bot.")
+            return ConversationHandler.END
+
+        pending = self._pending_bot_data.get(self._session_key(update), {})
+        book_id = pending.get("book_id")
+        if not book_id:
+            await update.message.reply_text("❌ Session expired. Please start again with /addbook <bot_id>")
+            return ConversationHandler.END
+
+        from knowledge.tasks import ingest_book
+
+        ingest_book.delay(book_id)
+        del self._pending_bot_data[self._session_key(update)]
+        await update.message.reply_text("📚 Book queued for processing. Check /listbooks for status.")
         return ConversationHandler.END
 
     async def listbots_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -466,6 +627,8 @@ Use these commands to manage your bot fleet."""
                 f"**Edit Commands:**\n"
                 f"`/setprompt {bot.id}` to change personality\n"
                 f"`/togglefeature {bot.id} <feature>` to toggle a feature\n"
+                f"`/addbook {bot.id}` to attach a book\n"
+                f"`/listbooks {bot.id}` to list books\n"
                 f"`/reloadbot {bot.id}` to apply or restart\n"
                 f"`/removebot {bot.id}` to deactivate",
                 parse_mode='Markdown'
@@ -473,6 +636,80 @@ Use these commands to manage your bot fleet."""
         except Exception as e:
             logger.error(f"Failed to edit bot: {e}")
             await update.message.reply_text(f"❌ Error: {e}")
+
+    async def listbooks_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """List books attached to a bot."""
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id):
+            await update.message.reply_text("⛔ You are not authorized to use this bot.")
+            return
+
+        await self._init_storage()
+        if not context.args:
+            await update.message.reply_text("Usage: /listbooks <bot_id>")
+            return
+
+        bot_id = context.args[0]
+        bot = await self.storage.bots.get_bot(bot_id)
+        if not bot:
+            await update.message.reply_text(f"❌ Bot not found: {bot_id}")
+            return
+
+        books = await self.storage.books.list_books(bot_id)
+        if not books:
+            await update.message.reply_text(f"📭 No books attached to **{bot.name}**.", parse_mode='Markdown')
+            return
+
+        lines = [f"📚 **Books for {bot.name}:**", ""]
+        for book in books:
+            status_icon = {
+                "pending": "⏳",
+                "processing": "🔄",
+                "ready": "✅",
+                "failed": "❌",
+            }.get(book.status, "•")
+            author = book.author or "Unknown author"
+            lines.append(
+                f"{status_icon} **{book.title}** — {author} | "
+                f"{book.chunk_count} chunks | ID: `{book.id}`"
+            )
+            if book.error:
+                lines.append(f"   Error: `{book.error[:120]}`")
+
+        await update.message.reply_text("\n".join(lines), parse_mode='Markdown')
+
+    async def removebook_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Remove a book and its vector chunks."""
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id):
+            await update.message.reply_text("⛔ You are not authorized to use this bot.")
+            return
+
+        await self._init_storage()
+        if not context.args:
+            await update.message.reply_text("Usage: /removebook <book_id>")
+            return
+
+        book_id = context.args[0]
+        book = await self.storage.books.get_book(book_id)
+        if not book:
+            await update.message.reply_text(f"❌ Book not found: {book_id}")
+            return
+
+        try:
+            vector_store = BookVectorStore(
+                db_url=self.db_url,
+                table_name="book_chunks",
+                embed_dim=MEMORY_EMBED_DIM,
+            )
+            await vector_store.delete_book(str(book.id))
+            source_path = Path(BOOKS_STORAGE_DIR) / f"{book.id}.{book.file_format}"
+            source_path.unlink(missing_ok=True)
+            await self.storage.books.delete_book(str(book.id))
+            await update.message.reply_text(f"✅ Removed **{book.title}**.", parse_mode='Markdown')
+        except Exception as e:
+            logger.error("Failed to remove book %s: %s", book_id, e, exc_info=True)
+            await update.message.reply_text(f"❌ Error removing book: {e}")
 
     async def botstatus_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show status of all bots."""
@@ -619,9 +856,24 @@ Use these commands to manage your bot fleet."""
         )
         self.application.add_handler(setprompt_handler)
 
+        addbook_handler = ConversationHandler(
+            entry_points=[CommandHandler('addbook', self.addbook_start)],
+            states={
+                WAITING_BOOK_FILE: [MessageHandler(filters.Document.ALL, self.addbook_file)],
+                WAITING_BOOK_META: [
+                    CommandHandler('skip', self.addbook_skip_meta),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.addbook_meta),
+                ],
+            },
+            fallbacks=[CommandHandler('cancel', self.cancel)],
+        )
+        self.application.add_handler(addbook_handler)
+
         self.application.add_handler(CommandHandler('start', self.start_command))
         self.application.add_handler(CommandHandler('help', self.help_command))
         self.application.add_handler(CommandHandler('listbots', self.listbots_command))
+        self.application.add_handler(CommandHandler('listbooks', self.listbooks_command))
+        self.application.add_handler(CommandHandler('removebook', self.removebook_command))
         self.application.add_handler(CommandHandler('editbot', self.editbot_command))
         self.application.add_handler(CommandHandler('togglefeature', self.togglefeature_command))
         self.application.add_handler(CommandHandler('botstatus', self.botstatus_command))
@@ -649,3 +901,22 @@ Use these commands to manage your bot fleet."""
             await self.application.updater.stop()
             await self.application.stop()
             await self.application.shutdown()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _parse_book_meta(text: str, default_title: str) -> tuple[str, Optional[str]]:
+    value = (text or "").strip()
+    if not value:
+        return default_title, None
+    for separator in (" — ", " - "):
+        if separator in value:
+            title, author = value.split(separator, 1)
+            return title.strip() or default_title, author.strip() or None
+    return value, None

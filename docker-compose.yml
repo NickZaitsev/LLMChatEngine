@@ -20,6 +20,8 @@ services:
       - 8.8.4.4
     extra_hosts:
       - "host-machine:host-gateway"
+    volumes:
+      - book_files:/app/book_files
   postgres:
     image: pgvector/pgvector:pg15
     container_name: llm-chat-engine-postgres
@@ -131,6 +133,7 @@ services:
       - postgres
     volumes:
       - .:/app
+      - book_files:/app/book_files
     networks:
       - backup_network
     dns:
@@ -145,6 +148,7 @@ volumes:
   redis_data:
   celery_beat_schedule:
   celery_worker_state:
+  book_files:
 
 
 networks:

@@ -282,6 +282,10 @@ class BookRepo(Protocol):
         """Update ingestion status and optional counters."""
         ...
 
+    async def update_metadata(self, book_id: str, title: str, author: Optional[str]) -> Optional[Book]:
+        """Update human-facing book metadata."""
+        ...
+
     async def delete_book(self, book_id: str) -> bool:
         """Delete a book metadata row."""
         ...
