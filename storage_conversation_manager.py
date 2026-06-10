@@ -42,7 +42,7 @@ class PostgresConversationManager:
         self.use_pgvector = use_pgvector
         self.storage: Optional[Storage] = None
         self._user_cache: Dict[int, User] = {}  # Cache for user objects
-        self._conversation_cache: Dict[tuple[int, Optional[uuid.UUID]], Conversation] = {}  # Cache for conversation objects
+        self._conversation_id_cache: Dict[tuple[int, Optional[uuid.UUID]], uuid.UUID] = {}
 
         logger.info("PostgresConversationManager initialized. DB: %s, pgvector: %s",
                    mask_db_url(db_url), use_pgvector)
@@ -75,13 +75,12 @@ class PostgresConversationManager:
 
         # Check cache first
         cache_key = (user_id, bot_id)
-        if cache_key in self._conversation_cache:
-            cached_conversation = self._conversation_cache[cache_key]
-            refreshed_conversation = await self.storage.conversations.get_conversation(str(cached_conversation.id))
+        if cache_key in self._conversation_id_cache:
+            conversation_id = self._conversation_id_cache[cache_key]
+            refreshed_conversation = await self.storage.conversations.get_conversation(str(conversation_id))
             if refreshed_conversation:
-                self._conversation_cache[cache_key] = refreshed_conversation
                 return refreshed_conversation
-            del self._conversation_cache[cache_key]
+            del self._conversation_id_cache[cache_key]
 
         # Check if user exists
         user = await self.storage.users.get_user_by_username(str(user_id))
@@ -112,7 +111,7 @@ class PostgresConversationManager:
             logger.info("Created new conversation for user %d", user_id)
 
         # Cache conversation
-        self._conversation_cache[cache_key] = conversation
+        self._conversation_id_cache[cache_key] = conversation.id
         return conversation
 
     async def save_message_to_history(self, user_id: int, role: str, content: str, bot_id: Optional[uuid.UUID] = None) -> tuple[MessageLog, MessageUser]:
