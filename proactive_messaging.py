@@ -10,7 +10,7 @@ import logging
 import random
 import re
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from celery import Celery
 from celery.schedules import crontab
@@ -89,6 +89,16 @@ class ProactiveMessagingService:
         return app_context
 
     @staticmethod
+    def _utc_now() -> datetime:
+        return datetime.now(timezone.utc)
+
+    @staticmethod
+    def _ensure_aware_utc(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.astimezone(timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @staticmethod
     def _state_key(user_id: int, bot_id: Optional[Any] = None) -> str:
         """Build a Redis key for a proactive messaging state entry."""
         bot_key = ProactiveMessagingService._normalize_bot_id(bot_id) or "default"
@@ -105,12 +115,16 @@ class ProactiveMessagingService:
         state = json.loads(state_json)
         if 'last_proactive_message' in state and state['last_proactive_message']:
             try:
-                state['last_proactive_message'] = datetime.fromisoformat(state['last_proactive_message'])
+                state['last_proactive_message'] = ProactiveMessagingService._ensure_aware_utc(
+                    datetime.fromisoformat(state['last_proactive_message'])
+                )
             except (ValueError, TypeError):
                 state['last_proactive_message'] = None
         if 'scheduled_time' in state and state['scheduled_time']:
             try:
-                state['scheduled_time'] = datetime.fromisoformat(state['scheduled_time'])
+                state['scheduled_time'] = ProactiveMessagingService._ensure_aware_utc(
+                    datetime.fromisoformat(state['scheduled_time'])
+                )
             except (ValueError, TypeError):
                 state['scheduled_time'] = None
         return state
@@ -233,7 +247,7 @@ class ProactiveMessagingService:
         """
         if not scheduled_time:
             return False
-        return scheduled_time < datetime.now()
+        return self._ensure_aware_utc(scheduled_time) < self._utc_now()
 
     def is_stale_scheduled_task(self, state: dict, now: Optional[datetime] = None) -> bool:
         """
@@ -243,7 +257,9 @@ class ProactiveMessagingService:
             return False
 
         if now is None:
-            now = datetime.now()
+            now = self._utc_now()
+        else:
+            now = self._ensure_aware_utc(now)
 
         scheduled_time = state.get("scheduled_time")
         if not scheduled_time:
@@ -285,7 +301,9 @@ class ProactiveMessagingService:
             return False
 
         if not check_time:
-            check_time = datetime.now()
+            check_time = self._utc_now()
+        elif check_time.tzinfo is not None:
+            check_time = self._ensure_aware_utc(check_time)
 
         start_hours, start_minutes = self.parse_time(self.quiet_hours_start)
         end_hours, end_minutes = self.parse_time(self.quiet_hours_end)
@@ -395,7 +413,7 @@ class ProactiveMessagingService:
         user_state.update({
             'cadence': CADENCE_LEVELS[0],
             'consecutive_outreaches': 0,
-            'last_proactive_message': datetime.now(),
+            'last_proactive_message': self._utc_now(),
             'scheduled_task_id': None,
             'scheduled_time': None,
             'user_replied': False,
@@ -595,7 +613,7 @@ async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str]
             current_cadence = user_state.get('cadence', CADENCE_LEVELS[0])
             next_cadence = proactive_messaging_service.get_next_interval(current_cadence)
 
-            user_state['last_proactive_message'] = datetime.now()
+            user_state['last_proactive_message'] = proactive_messaging_service._utc_now()
             user_state['consecutive_outreaches'] = user_state.get('consecutive_outreaches', 0) + 1
             user_state['user_replied'] = False
             user_state['cadence'] = next_cadence
@@ -640,7 +658,7 @@ async def manage_proactive_messages_async(task):
     logger.info(f"Running proactive message management task [{task_id}]")
 
     user_states = proactive_messaging_service._get_all_user_states()
-    now = datetime.now()
+    now = proactive_messaging_service._utc_now()
 
     for (user_id, bot_id), state in user_states.items():
         lock_key = proactive_messaging_service._state_key(user_id, bot_id).replace("user:", "lock:")

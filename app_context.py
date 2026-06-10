@@ -12,8 +12,6 @@ import logging
 import uuid
 from typing import Optional, Tuple
 from memory.llamaindex.embedding import LMStudioEmbeddingModel
-from memory.llamaindex.gemini import GeminiEmbeddingModel
-from llama_index.llms.lmstudio import LMStudio
 from ai_handler import AIHandler
 from config import (
     DATABASE_URL, USE_PGVECTOR, PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
@@ -26,7 +24,6 @@ from config import (
 from memory.manager import LlamaIndexMemoryManager
 from memory.llamaindex.vector_store import PgVectorStore
 from message_manager import MessageQueueManager, TypingIndicatorManager
-from llama_index.llms.lmstudio import LMStudio
 from prompt.assembler import PromptAssembler
 from storage_conversation_manager import PostgresConversationManager
 from telegram import Bot
@@ -138,6 +135,8 @@ class AppContext:
         try:
             if MEMORY_ENABLED:
                 if MEMORY_EMBEDDING_PROVIDER == 'gemini':
+                    from memory.llamaindex.gemini import GeminiEmbeddingModel
+
                     embedding_model = GeminiEmbeddingModel(
                         model_name=GEMINI_EMBEDDING_MODEL
                     )
@@ -186,6 +185,7 @@ class AppContext:
                 conversation_repo=self.conversation_manager.storage.conversations,
                 user_repo=self.conversation_manager.storage.users,
                 persona_repo=self.conversation_manager.storage.personas,
+                user_settings_repo=self.conversation_manager.storage.user_settings,
                 config=prompt_config
             )
             logger.info("PromptAssembler initialized.")
@@ -245,6 +245,7 @@ class AppContext:
                 conversation_repo=self.conversation_manager.storage.conversations,
                 user_repo=self.conversation_manager.storage.users,
                 persona_repo=self.conversation_manager.storage.personas,
+                user_settings_repo=self.conversation_manager.storage.user_settings,
                 config=prompt_config
             )
 
