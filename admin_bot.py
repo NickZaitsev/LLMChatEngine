@@ -727,41 +727,32 @@ Use these commands to manage your bot fleet."""
         await self._init_storage()
 
         try:
-            from storage.models import Conversation
-            from sqlalchemy import select, func
-
             bots = await self.storage.bots.list_bots()
             if not bots:
                 await update.message.reply_text("📭 No bots configured.")
                 return
 
-            async with self.storage.session_maker() as session:
-                text = "📊 **Bot Status Report**\n\n"
+            text = "📊 **Bot Status Report**\n\n"
 
-                for bot in bots:
-                    db_status = "🟢" if bot.is_active else "🔴"
+            for bot in bots:
+                db_status = "🟢" if bot.is_active else "🔴"
 
-                    # Check if running in bot manager
-                    running_status = "⚪ Unknown"
-                    if self.bot_manager:
-                        if bot.id in self.bot_manager.bots:
-                            running_status = "🟢 Running"
-                        else:
-                            running_status = "🔴 Stopped"
+                # Check if running in bot manager
+                running_status = "⚪ Unknown"
+                if self.bot_manager:
+                    if bot.id in self.bot_manager.bots:
+                        running_status = "🟢 Running"
+                    else:
+                        running_status = "🔴 Stopped"
 
-                    # Count unique users for this bot
-                    user_count_result = await session.execute(
-                        select(func.count(func.distinct(Conversation.user_id)))
-                        .where(Conversation.bot_id == bot.id)
-                    )
-                    user_count = user_count_result.scalar() or 0
+                user_count = await self.storage.conversations.count_users_for_bot(str(bot.id))
 
-                    text += (
-                        f"**{bot.name}**\n"
-                        f"  DB Status: {db_status} {'Active' if bot.is_active else 'Inactive'}\n"
-                        f"  Runtime: {running_status}\n"
-                        f"  👥 Users: {user_count}\n\n"
-                    )
+                text += (
+                    f"**{bot.name}**\n"
+                    f"  DB Status: {db_status} {'Active' if bot.is_active else 'Inactive'}\n"
+                    f"  Runtime: {running_status}\n"
+                    f"  👥 Users: {user_count}\n\n"
+                )
 
             await update.message.reply_text(text, parse_mode='Markdown')
 

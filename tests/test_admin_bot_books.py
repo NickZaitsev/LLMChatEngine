@@ -159,6 +159,36 @@ async def test_listbooks_outputs_book_status(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_botstatus_uses_conversation_repo_for_user_count(tmp_path):
+    bot_id = uuid4()
+    admin = make_admin(tmp_path)
+    admin.storage.conversations = MagicMock()
+    admin.storage.bots.list_bots = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                id=bot_id,
+                name="Nietzsche",
+                is_active=True,
+            )
+        ]
+    )
+    admin.storage.conversations.count_users_for_bot = AsyncMock(return_value=3)
+    admin.bot_manager = SimpleNamespace(bots={bot_id: object()})
+    update = MagicMock()
+    update.effective_user.id = 1
+    update.message.reply_text = AsyncMock()
+    context = MagicMock()
+
+    await admin.botstatus_command(update, context)
+
+    admin.storage.conversations.count_users_for_bot.assert_awaited_once_with(str(bot_id))
+    text = update.message.reply_text.await_args.args[0]
+    assert "Nietzsche" in text
+    assert "Users: 3" in text
+    assert "Running" in text
+
+
+@pytest.mark.asyncio
 async def test_removebook_deletes_vectors_file_and_row(tmp_path, monkeypatch):
     book_id = uuid4()
     admin = make_admin(tmp_path)

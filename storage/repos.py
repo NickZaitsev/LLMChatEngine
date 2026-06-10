@@ -654,6 +654,20 @@ class PostgresConversationRepo:
                 for conv in conversations
             ]
 
+    async def count_users_for_bot(self, bot_id: str) -> int:
+        """Count distinct users with conversations for a bot."""
+        try:
+            bot_uuid = UUID(str(bot_id))
+        except ValueError as e:
+            raise ValueError(f"Invalid bot_id format: {bot_id}") from e
+
+        async with self.session_maker() as session:
+            stmt = select(func.count(func.distinct(ConversationModel.user_id))).where(
+                ConversationModel.bot_id == bot_uuid
+            )
+            result = await session.execute(stmt)
+            return int(result.scalar() or 0)
+
     async def update_conversation(
         self,
         conversation_id: str,

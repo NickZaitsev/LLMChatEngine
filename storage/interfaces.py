@@ -168,6 +168,10 @@ class ConversationRepo(Protocol):
     async def list_conversations(self, user_id: str, bot_id: Optional[str] = None) -> List[Conversation]:
         """List conversations for a user and optional bot."""
         ...
+
+    async def count_users_for_bot(self, bot_id: str) -> int:
+        """Count distinct users with conversations for a bot."""
+        ...
     
     async def update_conversation(self, conversation_id: str, title: Optional[str] = None, extra_data: Optional[Dict[str, Any]] = None, summary: Optional[str] = None, last_summarized_message_id: Optional[UUID] = None, last_memorized_message_id: Optional[UUID] = None) -> Optional[Conversation]:
         """Update conversation metadata and summary fields."""
