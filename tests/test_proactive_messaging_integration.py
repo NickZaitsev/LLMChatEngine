@@ -104,7 +104,7 @@ async def test_handle_message_triggers_proactive_messaging(bot_instance):
         await bot_instance.handle_message(mock_update, mock_context)
         
         # Manually trigger the dispatch since handle_message only adds to buffer
-        await bot_instance._dispatch_buffered_message(12345)
+        await bot_instance._dispatch_buffered_message(bot_instance._buffer_route_key(12345))
         
         # Check that proactive messaging service was called
         if bot_instance.proactive_messaging_service:
@@ -167,7 +167,7 @@ async def test_handle_message_proactive_messaging_failure(bot_instance):
         try:
             await bot_instance.handle_message(mock_update, mock_context)
             # Manually trigger the dispatch since handle_message only adds to buffer
-            await bot_instance._dispatch_buffered_message(12345)
+            await bot_instance._dispatch_buffered_message(bot_instance._buffer_route_key(12345))
             success = True
         except Exception:
             success = False
