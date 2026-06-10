@@ -18,8 +18,6 @@ def bot_instance():
         with patch("bot.PostgresConversationManager") as mock_cm, \
              patch("bot.AIHandler") as mock_ai_handler, \
              patch("bot.TypingIndicatorManager") as mock_typing_manager, \
-             patch("bot.MessageQueueManager"), \
-             patch("bot.MessageDispatcher"), \
              patch("bot.BufferManager") as mock_buffer_manager:
             conversation_manager = MagicMock()
             conversation_manager.get_conversation_async = AsyncMock()

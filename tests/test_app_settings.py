@@ -8,6 +8,7 @@ def test_app_settings_groups_flat_environment_values():
         ADMIN_USER_IDS="1, 2",
         MAX_CONTEXT_TOKENS=1200,
         RESERVED_TOKENS=200,
+        PROMPT_HISTORY_BUDGET=1000,
         PROACTIVE_MESSAGING_INTERVAL_1H=111,
         PROACTIVE_MESSAGING_JITTER_1H=7,
     )

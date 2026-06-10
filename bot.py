@@ -12,26 +12,16 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 
 from core.utils import mask_db_url
 from core.bot_config import BotConfig
-from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
+from service_container import ServiceContainer
+from config import (TELEGRAM_TOKEN, BOT_NAME,
                     PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED, PROACTIVE_MESSAGING_ENABLED,
-                    PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
-                    PROMPT_TRUNCATION_LENGTH, PROMPT_INCLUDE_SYSTEM_TEMPLATE,
-                    MEMORY_EMBED_MODEL, VECTOR_STORE_TABLE_NAME,
                     MESSAGE_PREVIEW_LENGTH,
                     POLLING_INTERVAL,
-                    MESSAGE_QUEUE_REDIS_URL,
-                    MESSAGE_QUEUE_MAX_RETRIES,
-                    MESSAGE_QUEUE_LOCK_TIMEOUT,
-                    LMSTUDIO_BASE_URL, MEMORY_EMBED_DIM,
-                    MEMORY_EMBEDDING_PROVIDER, GEMINI_EMBEDDING_MODEL,
                     MEMORY_TRIGGER_EVERY_N_MESSAGES,
-                    MEMORY_CHUNK_MAX_MESSAGES, MEMORY_CHUNK_TARGET_TOKENS,
-                    MEMORY_RETRIEVAL_EXPAND_NEIGHBORS,
-                    BOOK_RAG_ENABLED, BOOK_RAG_EXPAND_NEIGHBORS)
-from memory.embedding_factory import build_embedding_model
+                    MEMORY_CHUNK_MAX_MESSAGES, MEMORY_CHUNK_TARGET_TOKENS)
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
-from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response, MessageQueueManager, MessageDispatcher
+from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response
 from buffer_manager import BufferManager
 from features import BotFeature, has_feature
 
@@ -50,38 +40,33 @@ except ImportError as e:
     logger.warning("Proactive messaging imports failed: %s", e)
     PROACTIVE_MESSAGING_AVAILABLE = False
 
-# PromptAssembler and Memory Manager imports (conditional)
-if MEMORY_ENABLED:
-    try:
-        from memory.manager import LlamaIndexMemoryManager
-        from memory.llamaindex.vector_store import PgVectorStore
-        from knowledge.manager import BookKnowledgeManager
-        from knowledge.store import BookVectorStore
-        from prompt.assembler import PromptAssembler
-        MEMORY_IMPORTS_AVAILABLE = True
-    except ImportError as e:
-        logger.warning("Memory/PromptAssembler imports failed: %s", e)
-        MEMORY_IMPORTS_AVAILABLE = False
-else:
-    MEMORY_IMPORTS_AVAILABLE = False
-
-
 class TelegramChatBot:
     """Telegram-facing chat bot built on the shared LLMChatEngine services."""
 
-    def __init__(self, bot_config: Optional[BotConfig] = None):
+    def __init__(
+        self,
+        bot_config: Optional[BotConfig] = None,
+        service_container: Optional[ServiceContainer] = None,
+    ):
+        self.service_container = service_container or ServiceContainer()
+        self._owns_service_container = service_container is None
+        self.settings = self.service_container.settings
+
         # Initialize PostgreSQL conversation manager (required)
-        if not DATABASE_URL:
+        if not self.settings.db.url:
             raise RuntimeError(
                 "PostgreSQL configuration is required. Please set:\n"
                 "DATABASE_URL=postgresql://user:password@host:port/database\n"
             )
 
-        self.conversation_manager = PostgresConversationManager(DATABASE_URL, USE_PGVECTOR)
-        logger.info("Using PostgreSQL conversation manager with database: %s", mask_db_url(DATABASE_URL))
+        self.conversation_manager = (
+            self.service_container.conversation_manager
+            or PostgresConversationManager(self.settings.db.url, self.settings.db.use_pgvector)
+        )
+        logger.info("Using PostgreSQL conversation manager with database: %s", mask_db_url(self.settings.db.url))
 
         self.ai_handler = AIHandler()
-        self.typing_manager = TypingIndicatorManager()
+        self.typing_manager = self.service_container.typing_manager or TypingIndicatorManager()
         self.application = None
         self.pending_clear_confirmation = set()
         self._storage_initialized = False
@@ -113,28 +98,14 @@ class TelegramChatBot:
             logger.info("Proactive messaging is available but disabled by configuration.")
 
         # Initialize message queue manager
-        try:
-            self.message_queue_manager = MessageQueueManager(MESSAGE_QUEUE_REDIS_URL)
-            logger.info("Message queue manager initialized successfully")
-        except Exception as e:
-            logger.error("Failed to initialize message queue manager: %s", e)
-            self.message_queue_manager = None
+        self.message_queue_manager = self.service_container.message_queue_manager
 
         # Initialize buffer manager
         self.buffer_manager = BufferManager()
         self.buffer_manager.set_typing_manager(self.typing_manager)
 
         # Initialize message dispatcher
-        try:
-            self.message_dispatcher = MessageDispatcher(
-                MESSAGE_QUEUE_REDIS_URL,
-                MESSAGE_QUEUE_MAX_RETRIES,
-                MESSAGE_QUEUE_LOCK_TIMEOUT
-            )
-            logger.info("Message dispatcher initialized successfully")
-        except Exception as e:
-            logger.error("Failed to initialize message dispatcher: %s", e)
-            self.message_dispatcher = None
+        self.message_dispatcher = self.service_container.message_dispatcher
 
         # Store chat context for buffered messages
         self.user_chat_context = {}  # Maps user_id to (chat_id, bot)
@@ -855,9 +826,14 @@ I'm designed to be flexible and adapt to your preferences."""
 
     async def _initialize_storage(self):
         """Initialize PostgreSQL storage if needed"""
-        if hasattr(self.conversation_manager, 'initialize') and not self._storage_initialized:
+        if not self._storage_initialized:
             try:
-                await self.conversation_manager.initialize()
+                await self.service_container.initialize()
+                self.conversation_manager = self.service_container.conversation_manager
+                self.typing_manager = self.service_container.typing_manager
+                self.message_queue_manager = self.service_container.message_queue_manager
+                self.message_dispatcher = self.service_container.message_dispatcher
+                self.buffer_manager.set_typing_manager(self.typing_manager)
                 self._storage_initialized = True
                 logger.info("PostgreSQL storage initialized successfully")
             except Exception as e:
@@ -868,76 +844,14 @@ I'm designed to be flexible and adapt to your preferences."""
 
     async def _initialize_memory_components(self):
         """Initialize MemoryManager and PromptAssembler if enabled"""
-        if not MEMORY_IMPORTS_AVAILABLE:
-            logger.error("Memory imports are not available. MEMORY_IMPORTS_AVAILABLE: %s, MEMORY_ENABLED: %s",
-                         MEMORY_IMPORTS_AVAILABLE, MEMORY_ENABLED)
-            if MEMORY_ENABLED:
-                raise RuntimeError("Memory components are required but imports failed. Please check your installation.")
-            return
-
-        if not hasattr(self.conversation_manager, 'storage') or not self.conversation_manager.storage:
-            raise RuntimeError("PostgreSQL storage not available for memory components. Ensure PostgreSQL is properly initialized.")
-
         try:
-            storage = self.conversation_manager.storage
-
-            # 1. Initialize VectorStore
-            vector_store = PgVectorStore(
-                db_url=DATABASE_URL,
-                table_name=VECTOR_STORE_TABLE_NAME,
-                embed_dim=MEMORY_EMBED_DIM
-            )
-
-            # 2. Initialize EmbeddingModel based on configured provider
-            embedding_model = build_embedding_model()
-
-            # 3. Initialize LlamaIndexMemoryManager (no LLM extraction needed)
-            self.memory_manager = LlamaIndexMemoryManager(
-                vector_store=vector_store,
-                embedding_model=embedding_model,
-                expand_neighbors=MEMORY_RETRIEVAL_EXPAND_NEIGHBORS,
-            )
-            logger.info("LlamaIndexMemoryManager initialized successfully")
-
-            if BOOK_RAG_ENABLED:
-                book_store = BookVectorStore(
-                    db_url=DATABASE_URL,
-                    table_name="book_chunks",
-                    embed_dim=MEMORY_EMBED_DIM,
-                )
-                self.book_knowledge_manager = BookKnowledgeManager(
-                    store=book_store,
-                    embedding_model=embedding_model,
-                    expand_neighbors=BOOK_RAG_EXPAND_NEIGHBORS,
-                )
-                logger.info("BookKnowledgeManager initialized successfully")
-
-            # 5. Initialize PromptAssembler
-            prompt_config = {
-                "max_memory_items": PROMPT_MAX_MEMORY_ITEMS,
-                "memory_token_budget_ratio": PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
-                "truncation_length": PROMPT_TRUNCATION_LENGTH,
-                "include_system_template": PROMPT_INCLUDE_SYSTEM_TEMPLATE
-            }
-
-            self.prompt_assembler = PromptAssembler(
-                message_repo=storage.messages,
-                memory_manager=self.memory_manager,
-                conversation_repo=storage.conversations,
-                user_repo=storage.users,
-                user_settings_repo=storage.user_settings,
-                book_knowledge_manager=self.book_knowledge_manager,
-                config=prompt_config
-            )
+            await self.service_container.initialize()
+            self.memory_manager = self.service_container.memory_manager
+            self.book_knowledge_manager = self.service_container.book_knowledge_manager
+            self.ai_handler = self.service_container.build_ai_handler(self.bot_config)
+            self.prompt_assembler = self.ai_handler.prompt_assembler
             self.prompt_assembler.feature_flags = self.feature_flags
-            logger.info("PromptAssembler initialized successfully with config: %s", prompt_config)
-
-            # 6. Set PromptAssembler in AIHandler
-            self.ai_handler.set_prompt_assembler(self.prompt_assembler)
-
-            # 7. Set personality in PromptAssembler for multi-bot support
-            if hasattr(self.ai_handler, 'personality'):
-                self.prompt_assembler.personality = self.ai_handler.personality
+            logger.info("PromptAssembler initialized successfully from service container")
 
             logger.info("PromptAssembler integrated with AIHandler.")
 
@@ -997,7 +911,7 @@ I'm designed to be flexible and adapt to your preferences."""
         logger.info("Cleaning up bot resources...")
 
         # Stop message dispatcher
-        if hasattr(self, 'message_dispatcher') and self.message_dispatcher:
+        if self._owns_service_container and hasattr(self, 'message_dispatcher') and self.message_dispatcher:
             try:
                 await self.message_dispatcher.stop_dispatching()
                 logger.info("Message dispatcher stopped successfully")
@@ -1014,19 +928,12 @@ I'm designed to be flexible and adapt to your preferences."""
             except Exception as e:
                 logger.error("Error during dispatcher task cleanup: %s", e)
 
-        try:
-            await self.typing_manager.cleanup()
-            logger.info("Typing manager cleaned up successfully")
-        except Exception as e:
-            logger.error("Error during typing manager cleanup: %s", e)
-
-        # Clean up storage connection
-        if hasattr(self.conversation_manager, 'close'):
+        if self._owns_service_container:
             try:
-                await self.conversation_manager.close()
-                logger.info("Storage connection cleaned up successfully")
+                await self.service_container.close()
+                logger.info("Service container cleaned up successfully")
             except Exception as e:
-                logger.error("Error during storage cleanup: %s", e)
+                logger.error("Error during service container cleanup: %s", e)
 
     def build_application(self, token_override: Optional[str] = None) -> Application:
         """Build and register the Telegram application handlers."""

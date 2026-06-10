@@ -30,7 +30,7 @@ class PostgresConversationManager:
     - Optional semantic memory search
     """
 
-    def __init__(self, db_url: str, use_pgvector: bool = True):
+    def __init__(self, db_url: str, use_pgvector: bool = True, storage: Optional[Storage] = None):
         """
         Initialize the PostgreSQL conversation manager.
 
@@ -40,7 +40,8 @@ class PostgresConversationManager:
         """
         self.db_url = db_url
         self.use_pgvector = use_pgvector
-        self.storage: Optional[Storage] = None
+        self.storage: Optional[Storage] = storage
+        self._owns_storage = storage is None
         self._user_cache: Dict[int, User] = {}  # Cache for user objects
         self._conversation_id_cache: Dict[tuple[int, Optional[uuid.UUID]], uuid.UUID] = {}
 
@@ -51,11 +52,12 @@ class PostgresConversationManager:
         """Initialize the storage connection. Must be called before using the manager."""
         if self.storage is None:
             self.storage = await create_storage(self.db_url, self.use_pgvector)
+            self._owns_storage = True
             logger.info("Storage connection initialized successfully")
 
     async def close(self):
         """Close the storage connection."""
-        if self.storage:
+        if self.storage and self._owns_storage:
             await self.storage.close()
             self.storage = None
             logger.info("Storage connection closed")

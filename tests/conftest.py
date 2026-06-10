@@ -5,11 +5,10 @@ This module provides fixtures for testing the storage system using
 an in-memory SQLite database for speed and isolation.
 """
 
-import asyncio
 import pytest
 import pytest_asyncio
 import uuid
-from typing import AsyncGenerator, Generator
+from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from storage.models import Base
@@ -20,14 +19,6 @@ from storage.repos import (
 from storage import create_storage, Storage
 from storage_conversation_manager import PostgresConversationManager
 from app_context import AppContext
-
-
-@pytest.fixture(scope="session")
-def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
-    """Create an event loop for the test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
 
 
 @pytest_asyncio.fixture

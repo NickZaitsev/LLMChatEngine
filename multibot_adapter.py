@@ -9,13 +9,17 @@ from typing import Optional
 from telegram.ext import Application
 
 from core.bot_config import BotConfig
+from service_container import ServiceContainer
 
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-def create_bot_with_config(bot_config: Optional[BotConfig] = None):
+def create_bot_with_config(
+    bot_config: Optional[BotConfig] = None,
+    service_container: Optional[ServiceContainer] = None,
+):
     """
     Create a TelegramChatBot instance with custom configuration.
 
@@ -28,7 +32,7 @@ def create_bot_with_config(bot_config: Optional[BotConfig] = None):
     """
     from bot import TelegramChatBot
 
-    bot = TelegramChatBot(bot_config=bot_config)
+    bot = TelegramChatBot(bot_config=bot_config, service_container=service_container)
     if bot_config is not None:
         logger.info("Created multi-bot instance: %s (%s)", bot_config.name, bot_config.id)
     return bot

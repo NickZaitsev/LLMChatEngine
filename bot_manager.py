@@ -15,8 +15,8 @@ from telegram.ext import Application
 from core.bot_config import BotConfig
 from token_encryption import decrypt_token
 from features import BotFeature, has_feature
-from message_manager import MessageDispatcher
-from config import MESSAGE_QUEUE_REDIS_URL, MESSAGE_QUEUE_MAX_RETRIES, MESSAGE_QUEUE_LOCK_TIMEOUT
+from service_container import ServiceContainer
+from settings import build_settings
 
 logger = logging.getLogger(__name__)
 
@@ -44,16 +44,19 @@ class BotManager:
         self.applications: Dict[uuid.UUID, Application] = {}  # bot_id -> Application
         self.bot_configs: Dict[uuid.UUID, BotConfig] = {}  # bot_id -> BotConfig
         self.storage = None
+        self.service_container = ServiceContainer(
+            build_settings().model_copy(update={"DATABASE_URL": db_url})
+        )
         self._running = False
         self._tasks: Dict[uuid.UUID, asyncio.Task] = {}
-        self.shared_dispatcher: Optional[MessageDispatcher] = None
+        self.shared_dispatcher = None
         self._shared_dispatcher_task: Optional[asyncio.Task] = None
 
     async def _init_storage(self):
         """Initialize database storage."""
         if self.storage is None:
-            from storage import create_storage
-            self.storage = await create_storage(self.db_url)
+            await self.service_container.initialize()
+            self.storage = self.service_container.storage
             logger.info("Bot manager storage initialized")
 
     async def load_bots_from_db(self) -> None:
@@ -96,11 +99,8 @@ class BotManager:
             self._shared_dispatcher_task = None
             self.shared_dispatcher = None
 
-        self.shared_dispatcher = MessageDispatcher(
-            MESSAGE_QUEUE_REDIS_URL,
-            MESSAGE_QUEUE_MAX_RETRIES,
-            MESSAGE_QUEUE_LOCK_TIMEOUT
-        )
+        await self.service_container.initialize()
+        self.shared_dispatcher = self.service_container.message_dispatcher
         self._shared_dispatcher_task = asyncio.create_task(self.shared_dispatcher.start_dispatching())
         logger.info("Shared message dispatcher started")
 
@@ -141,9 +141,9 @@ class BotManager:
             raise ValueError(f"Bot {bot_id} is not active")
 
         # Create bot instance using adapter
-        from multibot_adapter import create_bot_with_config, build_application_for_bot, BotConfig
+        from multibot_adapter import create_bot_with_config, build_application_for_bot
 
-        bot_instance = create_bot_with_config(config)
+        bot_instance = create_bot_with_config(config, service_container=self.service_container)
         self.bots[bot_id] = bot_instance
 
         # Build and start application

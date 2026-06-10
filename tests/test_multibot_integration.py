@@ -70,7 +70,7 @@ def test_multibot_adapter(mock_bot_cls, mock_bot_config):
     bot = create_bot_with_config(mock_bot_config)
     
     # Verify bot was initialized
-    mock_bot_cls.assert_called_once_with(bot_config=mock_bot_config)
+    mock_bot_cls.assert_called_once_with(bot_config=mock_bot_config, service_container=None)
     assert bot is mock_instance
 
 
@@ -87,6 +87,37 @@ def test_multibot_adapter_does_not_mutate_config(mock_bot_config):
     assert config.TELEGRAM_TOKEN == original_token
     assert config.BOT_NAME == original_name
     assert config.BOT_PERSONALITY == original_personality
+
+
+@pytest.mark.asyncio
+async def test_bot_manager_passes_shared_service_container(mock_bot_config):
+    manager = BotManager("postgresql://u:p@h:5432/db")
+    manager.bot_configs[mock_bot_config.id] = mock_bot_config
+
+    mock_app = MagicMock()
+    mock_app.initialize = AsyncMock(side_effect=RuntimeError("stop after construction"))
+    mock_app.start = AsyncMock()
+    mock_app.updater.start_polling = AsyncMock()
+    mock_app.updater.stop = AsyncMock()
+    mock_app.stop = AsyncMock()
+    mock_app.shutdown = AsyncMock()
+
+    bot_instance = MagicMock()
+    bot_instance._initialize_storage = AsyncMock()
+    bot_instance._initialize_memory_components = AsyncMock()
+    bot_instance._initialize_lmstudio_model = AsyncMock()
+
+    with patch.object(manager, "_ensure_shared_dispatcher", new=AsyncMock()), \
+         patch("multibot_adapter.create_bot_with_config", return_value=bot_instance) as create_bot, \
+         patch("multibot_adapter.build_application_for_bot", return_value=mock_app):
+        await manager.start_bot(mock_bot_config.id)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    create_bot.assert_called_once_with(
+        mock_bot_config,
+        service_container=manager.service_container,
+    )
 
 def test_build_application_for_bot_delegates_to_bot_registration():
     """Multi-bot application wiring uses the same registration path as single-bot."""
@@ -346,7 +377,7 @@ async def test_bot_manager_removes_crashed_bot_from_running_state(mock_bot_confi
     bot_instance._initialize_memory_components = AsyncMock()
     bot_instance._initialize_lmstudio_model = AsyncMock()
 
-    with patch("bot_manager.MessageDispatcher"), \
+    with patch.object(manager, "_ensure_shared_dispatcher", new=AsyncMock()), \
          patch("bot_manager.asyncio.create_task", side_effect=lambda coro: original_create_task(coro)), \
          patch("multibot_adapter.create_bot_with_config", return_value=bot_instance), \
          patch("multibot_adapter.build_application_for_bot", return_value=mock_app):

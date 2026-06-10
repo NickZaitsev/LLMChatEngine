@@ -7,20 +7,22 @@ and proper token budgeting.
 """
 
 import logging
-from typing import Dict, List, Any, Optional, Mapping, Tuple
+from typing import TYPE_CHECKING, Dict, List, Any, Optional, Mapping, Tuple
 
 from core.tokens import TokenCounter, Tokenizer
 from features import BotFeature, has_feature
-from knowledge.manager import BookKnowledgeManager
 from storage.interfaces import (
     MessageRepo,
     ConversationRepo,
     UserRepo,
     UserBotSettingsRepo,
 )
-from memory.manager import LlamaIndexMemoryManager
 import config
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from knowledge.manager import BookKnowledgeManager
+    from memory.manager import LlamaIndexMemoryManager
 
 
 class PromptAssembler:
@@ -37,11 +39,11 @@ class PromptAssembler:
     def __init__(
         self,
         message_repo: MessageRepo,
-        memory_manager: LlamaIndexMemoryManager,
+        memory_manager: "LlamaIndexMemoryManager",
         conversation_repo: ConversationRepo,
         user_repo: UserRepo,
         user_settings_repo: Optional[UserBotSettingsRepo] = None,
-        book_knowledge_manager: Optional[BookKnowledgeManager] = None,
+        book_knowledge_manager: Optional["BookKnowledgeManager"] = None,
         tokenizer: Optional[Tokenizer] = None,
         config: Mapping[str, Any] = None
     ):

@@ -2,24 +2,28 @@
 
 import logging
 
-from config import GEMINI_EMBEDDING_MODEL, MEMORY_EMBED_MODEL, MEMORY_EMBEDDING_PROVIDER
 from core.abstractions import EmbeddingModel
+from settings import AppSettings, build_settings
 
 logger = logging.getLogger(__name__)
 
 
-def build_embedding_model() -> EmbeddingModel:
+def build_embedding_model(settings: AppSettings | None = None) -> EmbeddingModel:
     """Build the configured embedding model."""
-    if MEMORY_EMBEDDING_PROVIDER == "gemini":
+    app_settings = settings or build_settings()
+    memory_settings = app_settings.memory
+    llm_settings = app_settings.llm
+
+    if memory_settings.embedding_provider == "gemini":
         from memory.llamaindex.gemini import GeminiEmbeddingModel
 
-        logger.info("Using Gemini embedding model: %s", GEMINI_EMBEDDING_MODEL)
-        return GeminiEmbeddingModel(model_name=GEMINI_EMBEDDING_MODEL)
+        logger.info("Using Gemini embedding model: %s", llm_settings.gemini_embedding_model)
+        return GeminiEmbeddingModel(model_name=llm_settings.gemini_embedding_model)
 
-    if MEMORY_EMBEDDING_PROVIDER == "lmstudio":
+    if memory_settings.embedding_provider == "lmstudio":
         from memory.llamaindex.embedding import LMStudioEmbeddingModel
 
-        logger.info("Using LMStudio embedding model: %s", MEMORY_EMBED_MODEL)
-        return LMStudioEmbeddingModel(MEMORY_EMBED_MODEL)
+        logger.info("Using LMStudio embedding model: %s", memory_settings.embed_model)
+        return LMStudioEmbeddingModel(memory_settings.embed_model)
 
-    raise ValueError(f"Unsupported embedding provider: {MEMORY_EMBEDDING_PROVIDER}")
+    raise ValueError(f"Unsupported embedding provider: {memory_settings.embedding_provider}")

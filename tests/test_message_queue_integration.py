@@ -1,7 +1,7 @@
 import pytest
-import asyncio
 import json
-from unittest.mock import Mock, patch, AsyncMock
+from types import SimpleNamespace
+from unittest.mock import patch, AsyncMock
 import redis
 
 from message_manager import MessageQueueManager
@@ -127,16 +127,13 @@ class TestMessageQueueIntegration:
                  patch('bot.TelegramChatBot._initialize_lmstudio_model'):
                 
                 bot = TelegramChatBot()
-                
-                # Mock the message dispatcher's _scan_existing_queues method directly
-                with patch.object(bot.message_dispatcher, '_scan_existing_queues') as mock_scan:
-                    # Instead of calling start_dispatching (which starts an infinite loop),
-                    # just call _scan_existing_queues directly to test it
-                    if bot.message_dispatcher:
-                        await bot.message_dispatcher._scan_existing_queues()
-                        
-                        # Verify that _scan_existing_queues is called
-                        mock_scan.assert_called_once()
+                bot.message_dispatcher = SimpleNamespace(_scan_existing_queues=AsyncMock())
+
+                # Instead of calling start_dispatching (which starts an infinite loop),
+                # just call _scan_existing_queues directly to test it
+                if bot.message_dispatcher:
+                    await bot.message_dispatcher._scan_existing_queues()
+                    bot.message_dispatcher._scan_existing_queues.assert_awaited_once()
 
 if __name__ == "__main__":
     pytest.main([__file__])
