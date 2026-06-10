@@ -353,5 +353,42 @@ class TestMessageDispatcher:
                 assert mock_blpop.call_count <= 1
                 mock_process_message.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_active_users_are_processed_concurrently(self):
+        mock_bot_class = Mock()
+        mock_bot_class.return_value = Mock()
+        mock_typing_manager_class = Mock()
+        mock_typing_manager_class.return_value = Mock()
+
+        with patch('redis.Redis.ping') as mock_ping, \
+             patch('message_manager.Bot', new=mock_bot_class), \
+             patch('message_manager.TypingIndicatorManager', new=mock_typing_manager_class):
+            mock_ping.return_value = True
+            dispatcher = MessageDispatcher(self.redis_url)
+            dispatcher.acquire_lock = Mock(return_value=True)
+            dispatcher.release_lock = Mock(return_value=True)
+
+            slow_started = asyncio.Event()
+            fast_finished = asyncio.Event()
+            release_slow = asyncio.Event()
+            processed = []
+
+            async def fake_process_user_queue(user_id, bot_id=None):
+                processed.append(user_id)
+                if user_id == 1:
+                    slow_started.set()
+                    await release_slow.wait()
+                else:
+                    await slow_started.wait()
+                    fast_finished.set()
+                    release_slow.set()
+
+            dispatcher.process_user_queue = fake_process_user_queue
+
+            await dispatcher._process_active_users({b"1:default", b"2:default"})
+
+            assert fast_finished.is_set()
+            assert set(processed) == {1, 2}
+
 if __name__ == "__main__":
     pytest.main([__file__])

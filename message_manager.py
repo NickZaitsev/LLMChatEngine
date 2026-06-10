@@ -340,6 +340,7 @@ class MessageDispatcher:
     """Dispatches messages from Redis queues to send_ai_response function."""
 
     BOT_CACHE_MAX_SIZE = 50
+    MAX_CONCURRENT_USERS = 20
 
     def __init__(self, redis_url: str, max_retries: int = 3, lock_timeout: int = 30):
         """
@@ -359,6 +360,7 @@ class MessageDispatcher:
             self.max_retries = max_retries
             self.lock_timeout = lock_timeout
             self.running = False
+            self.max_concurrent_users = self.MAX_CONCURRENT_USERS
 
             # Telegram bots are created lazily and cached by token. This avoids
             # building an HTTP connection pool per message part.
@@ -471,6 +473,43 @@ class MessageDispatcher:
     @classmethod
     def _lock_key(cls, user_id: int, bot_id: str = None) -> str:
         return f"dispatcher:processing:{cls._routing_key(user_id, bot_id)}"
+
+    @staticmethod
+    def _parse_routing_key(raw_routing_key) -> tuple[int, Optional[str]]:
+        routing_key = raw_routing_key.decode('utf-8') if isinstance(raw_routing_key, bytes) else raw_routing_key
+        routing_parts = routing_key.split(":", 1)
+        user_id = int(routing_parts[0])
+        bot_id = routing_parts[1] if len(routing_parts) > 1 and routing_parts[1] != "default" else None
+        return user_id, bot_id
+
+    async def _process_active_routing_key(self, raw_routing_key, semaphore: asyncio.Semaphore):
+        async with semaphore:
+            try:
+                user_id, bot_id = self._parse_routing_key(raw_routing_key)
+            except (ValueError, AttributeError) as e:
+                logger.warning("Invalid user ID in active users set: %s", raw_routing_key)
+                return
+
+            lock_acquired = self.acquire_lock(user_id, bot_id)
+
+            if not lock_acquired:
+                return
+
+            try:
+                await self.process_user_queue(user_id, bot_id)
+            except Exception as e:
+                logger.error("Error processing queue for user %s bot %s: %s", user_id, bot_id, e)
+            finally:
+                self.release_lock(user_id, bot_id)
+
+    async def _process_active_users(self, active_users):
+        semaphore = asyncio.Semaphore(self.max_concurrent_users)
+        tasks = [
+            asyncio.create_task(self._process_active_routing_key(active_user, semaphore))
+            for active_user in active_users
+        ]
+        if tasks:
+            await asyncio.gather(*tasks)
 
 
     def acquire_lock(self, user_id: int, bot_id: str = None) -> bool:
@@ -630,35 +669,7 @@ class MessageDispatcher:
                         await asyncio.sleep(MESSAGE_QUEUE_DISPATCHER_INTERVAL)
                         continue
 
-                    # Process each active user
-                    for user_id_bytes in active_users:
-                        if not self.running:
-                            break
-
-                        try:
-                            routing_key = user_id_bytes.decode('utf-8')
-                            routing_parts = routing_key.split(":", 1)
-                            user_id = int(routing_parts[0])
-                            bot_id = routing_parts[1] if len(routing_parts) > 1 and routing_parts[1] != "default" else None
-                        except (ValueError, AttributeError) as e:
-                            logger.warning("Invalid user ID in active users set: %s", user_id_bytes)
-                            continue
-
-                        # Try to acquire processing lock for this user
-                        lock_acquired = self.acquire_lock(user_id, bot_id)
-
-                        if not lock_acquired:
-                            # Another dispatcher is already processing this user's queue
-                            continue
-
-                        try:
-                            # Process messages for this user
-                            await self.process_user_queue(user_id, bot_id)
-                        except Exception as e:
-                            logger.error("Error processing queue for user %s bot %s: %s", user_id, bot_id, e)
-                        finally:
-                            # Release the lock
-                            self.release_lock(user_id, bot_id)
+                    await self._process_active_users(active_users)
 
                     # Sleep for a bit before checking again
                     await asyncio.sleep(MESSAGE_QUEUE_DISPATCHER_INTERVAL)
