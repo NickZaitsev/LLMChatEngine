@@ -18,8 +18,10 @@ from config import (
     TELEGRAM_TOKEN, MEMORY_ENABLED,
     VECTOR_STORE_TABLE_NAME, MEMORY_EMBED_MODEL, MEMORY_EMBED_DIM,
     MEMORY_EMBEDDING_PROVIDER, LMSTUDIO_BASE_URL, GEMINI_EMBEDDING_MODEL,
-    MEMORY_RETRIEVAL_EXPAND_NEIGHBORS
+    MEMORY_RETRIEVAL_EXPAND_NEIGHBORS, BOOK_RAG_ENABLED, BOOK_RAG_EXPAND_NEIGHBORS
 )
+from knowledge.manager import BookKnowledgeManager
+from knowledge.store import BookVectorStore
 from memory.manager import LlamaIndexMemoryManager
 from memory.llamaindex.vector_store import PgVectorStore
 from memory.embedding_factory import build_embedding_model
@@ -46,6 +48,7 @@ class AppContext:
 
         self.conversation_manager: Optional[PostgresConversationManager] = None
         self.memory_manager: Optional[LlamaIndexMemoryManager] = None
+        self.book_knowledge_manager: Optional[BookKnowledgeManager] = None
         self.prompt_assembler: Optional[PromptAssembler] = None
         self.ai_handler: Optional[AIHandler] = None
         self.message_queue_manager: Optional[MessageQueueManager] = None
@@ -101,6 +104,7 @@ class AppContext:
             # Reset all loop-bound components
             self.conversation_manager = None
             self.memory_manager = None
+            self.book_knowledge_manager = None
             self.prompt_assembler = None
             self.ai_handler = None
             self.message_queue_manager = None
@@ -133,9 +137,9 @@ class AppContext:
 
         # 3. Initialize Memory Manager (LlamaIndex stack)
         try:
-            if MEMORY_ENABLED:
-                embedding_model = build_embedding_model()
+            embedding_model = build_embedding_model() if (MEMORY_ENABLED or BOOK_RAG_ENABLED) else None
 
+            if MEMORY_ENABLED:
                 logger.info(f"Using embedding dimension: {MEMORY_EMBED_DIM}")
 
                 vector_store = PgVectorStore(
@@ -154,8 +158,24 @@ class AppContext:
                 self.memory_manager = None
                 logger.info("Memory is disabled. Skipping MemoryManager initialization.")
 
+            if BOOK_RAG_ENABLED and embedding_model:
+                book_store = BookVectorStore(
+                    db_url=DATABASE_URL,
+                    table_name="book_chunks",
+                    embed_dim=MEMORY_EMBED_DIM,
+                )
+                self.book_knowledge_manager = BookKnowledgeManager(
+                    store=book_store,
+                    embedding_model=embedding_model,
+                    expand_neighbors=BOOK_RAG_EXPAND_NEIGHBORS,
+                )
+                logger.info("BookKnowledgeManager initialized.")
+            else:
+                self.book_knowledge_manager = None
+                logger.info("Book RAG is disabled. Skipping BookKnowledgeManager initialization.")
+
         except Exception as e:
-            logger.error(f"Failed to initialize LlamaIndexMemoryManager: {e}")
+            logger.error(f"Failed to initialize vector managers: {e}")
             raise
 
         # 4. Initialize Prompt Assembler
