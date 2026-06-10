@@ -7,7 +7,25 @@ import random
 import sys
 from typing import List, Dict, Any, Optional
 
-from config import BOT_PERSONALITY, PROMPT_REPLY_TOKEN_BUDGET, TEMPERATURE, MEMORY_ENABLED
+from config import (
+    AZURE_API_KEY,
+    AZURE_ENDPOINT,
+    AZURE_MODEL,
+    BOT_PERSONALITY,
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
+    LMSTUDIO_AUTO_LOAD,
+    LMSTUDIO_BASE_URL,
+    LMSTUDIO_MAX_LOAD_WAIT,
+    LMSTUDIO_MODEL,
+    LMSTUDIO_SERVER_TIMEOUT,
+    MAX_ACTIVE_MESSAGES,
+    MEMORY_ENABLED,
+    PROMPT_HISTORY_BUDGET,
+    PROMPT_REPLY_TOKEN_BUDGET,
+    PROVIDER,
+    TEMPERATURE,
+)
 
 # Import OpenAI clients (v1+)
 try:
@@ -60,8 +78,6 @@ class ModelClient:
         self.provider = provider
         
         if provider == "azure":
-            from config import AZURE_ENDPOINT, AZURE_API_KEY, AZURE_MODEL
-
             azure_endpoint = self.llm_config.get("azure_endpoint", AZURE_ENDPOINT)
             azure_api_key = self.llm_config.get("azure_api_key", AZURE_API_KEY)
             azure_model = self.llm_config.get("model", self.llm_config.get("azure_model", AZURE_MODEL))
@@ -78,9 +94,6 @@ class ModelClient:
             logger.info("ModelClient initialized with Azure provider - Model: %s", azure_model)
             
         elif provider == "lmstudio":
-            from config import (LMSTUDIO_MODEL, LMSTUDIO_BASE_URL, LMSTUDIO_AUTO_LOAD,
-                               LMSTUDIO_MAX_LOAD_WAIT, LMSTUDIO_SERVER_TIMEOUT)
-
             lmstudio_base_url = self.llm_config.get("base_url", self.llm_config.get("lmstudio_base_url", LMSTUDIO_BASE_URL))
             lmstudio_model = self.llm_config.get("model", self.llm_config.get("lmstudio_model", LMSTUDIO_MODEL))
             lmstudio_auto_load = self.llm_config.get("auto_load_model", LMSTUDIO_AUTO_LOAD)
@@ -115,7 +128,6 @@ class ModelClient:
             if not GEMINI_AVAILABLE:
                 raise ImportError("Google Generative AI package not available. Install with: pip install google-generativeai")
             
-            from config import GEMINI_API_KEY, GEMINI_MODEL
             gemini_api_key = self.llm_config.get("gemini_api_key", GEMINI_API_KEY)
             gemini_model = self.llm_config.get("model", self.llm_config.get("gemini_model", GEMINI_MODEL))
             if not all([gemini_api_key, gemini_model]):
@@ -259,7 +271,6 @@ class AIHandler:
         
         # Initialize ModelClient
         try:
-            from config import PROVIDER
             self.model_client = ModelClient(provider=PROVIDER, llm_config=self.llm_config)
             logger.info("AIHandler initialized with %s provider via ModelClient", PROVIDER)
         except Exception as e:
@@ -299,8 +310,6 @@ class AIHandler:
             if self.prompt_assembler and conversation_id:
                 logger.info("Using PromptAssembler for advanced prompt building")
                 try:
-                    from config import PROMPT_HISTORY_BUDGET, PROMPT_REPLY_TOKEN_BUDGET
-                    
                     messages = await self.prompt_assembler.build_prompt(
                         conversation_id=conversation_id,
                         reply_token_budget=PROMPT_REPLY_TOKEN_BUDGET,
@@ -375,7 +384,6 @@ class AIHandler:
                     # Trigger summarization if needed
                     try:
                         if MEMORY_ENABLED and self.prompt_assembler:
-                            from config import MAX_ACTIVE_MESSAGES
                             from memory.tasks import (
                                 create_conversation_summary,
                                 acquire_task_lock,
@@ -503,7 +511,6 @@ class AIHandler:
             return self.update_provider(provider)
 
         try:
-            from config import PROVIDER
             self.model_client = ModelClient(provider=PROVIDER, llm_config=self.llm_config)
             return True
         except Exception as e:
