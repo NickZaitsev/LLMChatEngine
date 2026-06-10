@@ -18,3 +18,7 @@ llama-index-llms-lmstudio==0.4.1
 llama-index-embeddings-gemini==0.4.1
 cryptography==42.0.5
 pydantic==2.12.4
+pypdf==5.1.0
+ebooklib==0.18
+beautifulsoup4==4.12.3
+charset-normalizer==3.4.0

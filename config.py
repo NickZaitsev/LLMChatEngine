@@ -104,6 +104,18 @@ MEMORY_TRIGGER_EVERY_N_MESSAGES = int(os.getenv('MEMORY_TRIGGER_EVERY_N_MESSAGES
 # Retrieval settings
 MEMORY_RETRIEVAL_EXPAND_NEIGHBORS = int(os.getenv('MEMORY_RETRIEVAL_EXPAND_NEIGHBORS', '1'))  # Neighbor expansion radius (0=off)
 
+# Book knowledge / RAG settings
+BOOK_RAG_ENABLED = os.getenv('BOOK_RAG_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
+BOOKS_STORAGE_DIR = os.getenv('BOOKS_STORAGE_DIR', './book_files')
+BOOKS_KEEP_SOURCE_FILES = os.getenv('BOOKS_KEEP_SOURCE_FILES', 'false').lower() in ('true', '1', 'yes', 'on')
+BOOK_CHUNK_TARGET_TOKENS = int(os.getenv('BOOK_CHUNK_TARGET_TOKENS', '400'))
+BOOK_CHUNK_OVERLAP_TOKENS = int(os.getenv('BOOK_CHUNK_OVERLAP_TOKENS', '50'))
+BOOK_RAG_TOP_K = int(os.getenv('BOOK_RAG_TOP_K', '4'))
+BOOK_RAG_MIN_SCORE = float(os.getenv('BOOK_RAG_MIN_SCORE', '0.35'))
+BOOK_RAG_TOKEN_BUDGET_RATIO = float(os.getenv('BOOK_RAG_TOKEN_BUDGET_RATIO', '0.25'))
+BOOK_RAG_EXPAND_NEIGHBORS = int(os.getenv('BOOK_RAG_EXPAND_NEIGHBORS', '1'))
+BOOK_EMBED_BATCH_SIZE = int(os.getenv('BOOK_EMBED_BATCH_SIZE', '64'))
+
 # Typing Simulation Configuration
 MIN_TYPING_SPEED = int(os.getenv('MIN_TYPING_SPEED', '10'))  # characters per second
 MAX_TYPING_SPEED = int(os.getenv('MAX_TYPING_SPEED', '30'))  # characters per second
@@ -217,6 +229,22 @@ def _validate_config():
         warnings.warn("MEMORY_CHUNK_TARGET_TOKENS seems too low, consider at least 50")
     if MEMORY_TRIGGER_EVERY_N_MESSAGES < 2:
         warnings.warn("MEMORY_TRIGGER_EVERY_N_MESSAGES should be at least 2")
+    if BOOK_CHUNK_TARGET_TOKENS < 50:
+        warnings.warn("BOOK_CHUNK_TARGET_TOKENS should be at least 50")
+    if BOOK_CHUNK_OVERLAP_TOKENS < 0:
+        warnings.warn("BOOK_CHUNK_OVERLAP_TOKENS should not be negative")
+    if BOOK_CHUNK_OVERLAP_TOKENS >= BOOK_CHUNK_TARGET_TOKENS:
+        warnings.warn("BOOK_CHUNK_OVERLAP_TOKENS should be less than BOOK_CHUNK_TARGET_TOKENS")
+    if BOOK_RAG_TOP_K < 1:
+        warnings.warn("BOOK_RAG_TOP_K should be at least 1")
+    if BOOK_RAG_MIN_SCORE < 0 or BOOK_RAG_MIN_SCORE > 1:
+        warnings.warn("BOOK_RAG_MIN_SCORE should be between 0 and 1")
+    if BOOK_RAG_TOKEN_BUDGET_RATIO < 0 or BOOK_RAG_TOKEN_BUDGET_RATIO > 1:
+        warnings.warn("BOOK_RAG_TOKEN_BUDGET_RATIO should be between 0 and 1")
+    if BOOK_RAG_EXPAND_NEIGHBORS < 0:
+        warnings.warn("BOOK_RAG_EXPAND_NEIGHBORS should not be negative")
+    if BOOK_EMBED_BATCH_SIZE < 1:
+        warnings.warn("BOOK_EMBED_BATCH_SIZE should be at least 1")
 
 # Proactive Messaging validation
     if PROACTIVE_MESSAGING_ENABLED:
