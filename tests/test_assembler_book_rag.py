@@ -6,6 +6,7 @@ import pytest
 
 from features import BotFeature
 from prompt.assembler import PromptAssembler
+from settings import AppSettings
 
 
 class MockTokenizer:
@@ -16,7 +17,7 @@ class MockTokenizer:
         return list(range(self.count_tokens(text)))
 
 
-def build_assembler(book_knowledge_manager, feature_flags):
+def build_assembler(book_knowledge_manager, feature_flags, app_settings=None):
     conversation_id = uuid4()
     conversation_repo = AsyncMock()
     conversation_repo.get_conversation.return_value = SimpleNamespace(
@@ -42,11 +43,11 @@ def build_assembler(book_knowledge_manager, feature_flags):
         book_knowledge_manager=book_knowledge_manager,
         tokenizer=MockTokenizer(),
         config={"include_system_template": True},
+        app_settings=app_settings,
     )
     assembler.personality = "System prompt"
     assembler.feature_flags = feature_flags
     return assembler, str(conversation_id), conversation_repo
-
 
 @pytest.mark.asyncio
 async def test_book_context_is_injected_when_feature_enabled():
@@ -80,6 +81,38 @@ async def test_book_context_is_injected_when_feature_enabled():
         + metadata["token_counts"]["memory_tokens"]
         + metadata["token_counts"]["book_tokens"]
         + metadata["token_counts"]["history_tokens"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_book_context_uses_injected_settings():
+    book_manager = AsyncMock()
+    book_manager.get_context.return_value = "Injected settings passage."
+    settings = AppSettings(
+        TELEGRAM_TOKEN="token",
+        DATABASE_URL="postgresql+asyncpg://u:p@localhost/db",
+        PROVIDER="lmstudio",
+        BOOK_RAG_TOP_K=7,
+        BOOK_RAG_MIN_SCORE=0.77,
+        BOOK_RAG_TOKEN_BUDGET_RATIO=0.5,
+    )
+    assembler, conversation_id, conversation_repo = build_assembler(
+        book_manager,
+        {BotFeature.BOOK_KNOWLEDGE.value: True},
+        settings,
+    )
+
+    await assembler.build_prompt_and_metadata(
+        conversation_id,
+        user_query="query",
+        history_budget=1000,
+    )
+
+    book_manager.get_context.assert_awaited_once_with(
+        bot_id=str(conversation_repo.get_conversation.return_value.bot_id),
+        query="query",
+        top_k=7,
+        min_score=0.77,
     )
 
 

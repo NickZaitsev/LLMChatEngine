@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING, Dict, List, Any, Optional, Mapping, Tuple
 
 from core.tokens import TokenCounter, Tokenizer
 from features import BotFeature, has_feature
+from settings import AppSettings, build_settings
 from storage.interfaces import (
     MessageRepo,
     ConversationRepo,
     UserRepo,
     UserBotSettingsRepo,
 )
-import config
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -45,7 +45,8 @@ class PromptAssembler:
         user_settings_repo: Optional[UserBotSettingsRepo] = None,
         book_knowledge_manager: Optional["BookKnowledgeManager"] = None,
         tokenizer: Optional[Tokenizer] = None,
-        config: Mapping[str, Any] = None
+        config: Mapping[str, Any] = None,
+        app_settings: Optional[AppSettings] = None,
     ):
         """
         Initialize PromptAssembler.
@@ -69,13 +70,36 @@ class PromptAssembler:
         self.user_settings_repo = user_settings_repo
         self.book_knowledge_manager = book_knowledge_manager
         self.token_counter = TokenCounter(tokenizer)
+        self.settings = app_settings or build_settings()
+        prompt_settings = self.settings.prompts
+        book_settings = self.settings.books
+        bot_settings = self.settings.bot
 
         # Set default config values
         self.config = dict(config or {})
-        self.max_memory_items = self.config.get("max_memory_items", 3)
-        self.memory_token_budget_ratio = self.config.get("memory_token_budget_ratio", 0.4)
-        self.truncation_length = self.config.get("truncation_length", 200)
-        self.include_system_template = self.config.get("include_system_template", True)
+        self.max_memory_items = self.config.get("max_memory_items", prompt_settings.max_memory_items)
+        self.memory_token_budget_ratio = self.config.get(
+            "memory_token_budget_ratio",
+            prompt_settings.memory_token_budget_ratio,
+        )
+        self.truncation_length = self.config.get("truncation_length", prompt_settings.truncation_length)
+        self.include_system_template = self.config.get(
+            "include_system_template",
+            prompt_settings.include_system_template,
+        )
+        self.default_reply_token_budget = self.config.get(
+            "reply_token_budget",
+            prompt_settings.reply_token_budget,
+        )
+        self.default_history_budget = self.config.get("history_budget", prompt_settings.history_budget)
+        self.default_personality = self.config.get("bot_personality", bot_settings.personality)
+        self.book_rag_enabled = self.config.get("book_rag_enabled", book_settings.rag_enabled)
+        self.book_rag_top_k = self.config.get("book_rag_top_k", book_settings.rag_top_k)
+        self.book_rag_min_score = self.config.get("book_rag_min_score", book_settings.rag_min_score)
+        self.book_rag_token_budget_ratio = self.config.get(
+            "book_rag_token_budget_ratio",
+            book_settings.rag_token_budget_ratio,
+        )
         self.personality = None  # Dynamic personality for multi-bot support
         self.feature_flags = {}
 
@@ -105,9 +129,9 @@ class PromptAssembler:
         """
         # Use config defaults if not provided
         if reply_token_budget is None:
-            reply_token_budget = config.PROMPT_REPLY_TOKEN_BUDGET
+            reply_token_budget = self.default_reply_token_budget
         if history_budget is None:
-            history_budget = config.PROMPT_HISTORY_BUDGET
+            history_budget = self.default_history_budget
 
         messages, _ = await self.build_prompt_and_metadata(
             conversation_id, reply_token_budget, history_budget, user_query
@@ -116,7 +140,7 @@ class PromptAssembler:
 
     async def _resolve_personality(self, conversation) -> str:
         """Resolve bot personality, preferring per-user overrides when present."""
-        personality_to_use = self.personality or config.BOT_PERSONALITY
+        personality_to_use = self.personality or self.default_personality
 
         if self.user_settings_repo and conversation and conversation.bot_id:
             try:
@@ -260,7 +284,7 @@ class PromptAssembler:
     ) -> tuple[Optional[Dict[str, str]], int]:
         """Build the book knowledge section, isolated from history assembly."""
         try:
-            if not config.BOOK_RAG_ENABLED:
+            if not self.book_rag_enabled:
                 return None, 0
             if not self.book_knowledge_manager:
                 return None, 0
@@ -276,8 +300,8 @@ class PromptAssembler:
             context = await self.book_knowledge_manager.get_context(
                 bot_id=str(conversation.bot_id),
                 query=query,
-                top_k=config.BOOK_RAG_TOP_K,
-                min_score=config.BOOK_RAG_MIN_SCORE,
+                top_k=self.book_rag_top_k,
+                min_score=self.book_rag_min_score,
             )
             if not context:
                 return None, 0
@@ -371,9 +395,9 @@ class PromptAssembler:
         """
         # Use config defaults if not provided
         if reply_token_budget is None:
-            reply_token_budget = config.PROMPT_REPLY_TOKEN_BUDGET
+            reply_token_budget = self.default_reply_token_budget
         if history_budget is None:
-            history_budget = config.PROMPT_HISTORY_BUDGET
+            history_budget = self.default_history_budget
 
         if not conversation_id:
             raise ValueError("conversation_id cannot be empty")
@@ -393,7 +417,7 @@ class PromptAssembler:
         }
 
         memory_budget = int(history_budget * self.memory_token_budget_ratio)
-        book_budget = int(history_budget * config.BOOK_RAG_TOKEN_BUDGET_RATIO)
+        book_budget = int(history_budget * self.book_rag_token_budget_ratio)
         remaining_history_budget = history_budget
 
         memory_message, memory_tokens = await self._build_memory_section(

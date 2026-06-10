@@ -133,6 +133,7 @@ class ServiceContainer:
                 "truncation_length": prompt_settings.truncation_length,
                 "include_system_template": prompt_settings.include_system_template,
             },
+            app_settings=self.settings,
         )
         if personality is not None:
             assembler.personality = personality
