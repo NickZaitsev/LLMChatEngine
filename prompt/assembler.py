@@ -161,12 +161,11 @@ class PromptAssembler:
         included_memory_ids = []
         truncated_message_ids = []
 
-        # 1. Get conversation first (needed for bot personality lookup)
+        # 1. Get conversation first (needed for per-user overrides and memory scope)
         conversation = await self.conversation_repo.get_conversation(conversation_id)
 
         # 2. Resolve the correct personality to use
-        # Priority: self.personality (set by multibot_adapter in bot process)
-        #   -> bot personality from DB (critical for Celery worker context)
+        # Priority: self.personality (set by the composition root)
         #   -> config.BOT_PERSONALITY (env var fallback)
         personality_to_use = self.personality or config.BOT_PERSONALITY
 
@@ -186,22 +185,6 @@ class PromptAssembler:
                     )
             except Exception as e:
                 logger.warning("Failed to load per-user personality override: %s", e)
-
-        if personality_to_use == config.BOT_PERSONALITY and not self.personality and conversation and conversation.bot_id:
-            try:
-                from storage.models import Bot as BotModel
-                from sqlalchemy import select
-
-                async with self.conversation_repo.session_maker() as session:
-                    result = await session.execute(
-                        select(BotModel.personality).where(BotModel.id == conversation.bot_id)
-                    )
-                    bot_personality = result.scalar_one_or_none()
-                    if bot_personality:
-                        personality_to_use = bot_personality
-                        logger.info(f"Loaded bot personality from DB for bot_id={conversation.bot_id}")
-            except Exception as e:
-                logger.warning(f"Failed to load bot personality from DB: {e}")
 
         # 3. Add system template if enabled
         if self.include_system_template:

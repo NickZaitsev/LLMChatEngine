@@ -175,6 +175,7 @@ class AppContext:
                 user_settings_repo=self.conversation_manager.storage.user_settings,
                 config=prompt_config
             )
+            self.prompt_assembler.personality = self.ai_handler.personality
             logger.info("PromptAssembler initialized.")
         except Exception as e:
             logger.error(f"Failed to initialize PromptAssembler: {e}")
@@ -235,6 +236,7 @@ class AppContext:
                 user_settings_repo=self.conversation_manager.storage.user_settings,
                 config=prompt_config
             )
+            prompt_assembler.personality = self.ai_handler.personality
 
         ai_handler = AIHandler(prompt_assembler=prompt_assembler)
 
