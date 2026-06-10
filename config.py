@@ -1,335 +1,126 @@
-"""Centralized environment-backed configuration for LLMChatEngine."""
+"""Compatibility shim for typed application settings.
 
-import os
-import re
-import warnings
-from dotenv import load_dotenv
-
-# Load environment variables before reading config values.
-load_dotenv()
-
-# Constants
-DEFAULT_BOT_NAME = 'Bot'
-DEFAULT_PROVIDER = 'azure'
-DEFAULT_LMSTUDIO_MODEL = 'deepseek/DeepSeek-V3-0324'
-DEFAULT_MAX_CONVERSATION_HISTORY = 100
-DEFAULT_MAX_TOKENS = 8000
-DEFAULT_TEMPERATURE = 0.8
-DEFAULT_MAX_CONTEXT_TOKENS = 8000
-DEFAULT_RESERVED_TOKENS = 500
-# Bot Constants
-REQUEST_TIMEOUT = 80.0
-MESSAGE_PREVIEW_LENGTH = 50
-SHORT_MESSAGE_THRESHOLD = 10
-
-# Polling Configuration
-POLLING_INTERVAL = float(os.getenv('POLLING_INTERVAL', '0.5'))  # seconds between getUpdates requests
-
-DEFAULT_BOT_PERSONALITY = (
-    f"You are {DEFAULT_BOT_NAME}. Respond naturally, helpfully, and in-character according to the explicit bot configuration provided by the app. "
-    "Do not assume a romantic role unless the bot configuration explicitly says so."
-)
-
-
-# Telegram Bot Configuration
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-
-# Admin Bot Configuration (for multi-bot management)
-ADMIN_BOT_TOKEN = os.getenv('ADMIN_BOT_TOKEN')
-ADMIN_USER_IDS = [int(x.strip()) for x in os.getenv('ADMIN_USER_IDS', '').split(',') if x.strip()]
-TOKEN_ENCRYPTION_KEY = os.getenv('TOKEN_ENCRYPTION_KEY', '')
-
-
-# Database Configuration
-DATABASE_URL = os.getenv('DATABASE_URL')
-USE_PGVECTOR = os.getenv('USE_PGVECTOR', 'true').lower() in ('true', '1', 'yes', 'on')
-DB_PASSWORD = os.getenv('DB_PASSWORD')
-
-# LLM Provider Configuration
-PROVIDER = os.getenv('PROVIDER', DEFAULT_PROVIDER)
-AZURE_ENDPOINT = os.getenv('AZURE_ENDPOINT')
-AZURE_API_KEY = os.getenv('AZURE_API_KEY')
-AZURE_MODEL = os.getenv('AZURE_MODEL')
-LMSTUDIO_MODEL = os.getenv('LMSTUDIO_MODEL', DEFAULT_LMSTUDIO_MODEL)
-LMSTUDIO_BASE_URL = os.getenv('LMSTUDIO_BASE_URL', 'http://host.docker.internal:1234/v1')
-
-# Gemini Configuration
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-GEMINI_MODEL = os.getenv('GEMINI_MODEL')
-GEMINI_EMBEDDING_MODEL = os.getenv('GEMINI_EMBEDDING_MODEL')
-
-# LM Studio Model Loading Configuration
-LMSTUDIO_AUTO_LOAD = os.getenv('LMSTUDIO_AUTO_LOAD', 'true').lower() in ('true', '1', 'yes', 'on')
-LMSTUDIO_MAX_LOAD_WAIT = int(os.getenv('LMSTUDIO_MAX_LOAD_WAIT', '300'))
-LMSTUDIO_SERVER_TIMEOUT = int(os.getenv('LMSTUDIO_SERVER_TIMEOUT', '80'))
-LMSTUDIO_STARTUP_CHECK = os.getenv('LMSTUDIO_STARTUP_CHECK', 'true').lower() in ('true', '1', 'yes', 'on')
-
-# Bot Personality Configuration
-BOT_NAME = os.getenv('BOT_NAME', DEFAULT_BOT_NAME)
-BOT_PERSONALITY = os.getenv('BOT_PERSONALITY', DEFAULT_BOT_PERSONALITY)
-
-# Conversation Settings - Optimized for 8000/4000 token limits
-MAX_CONVERSATION_HISTORY = int(os.getenv('MAX_CONVERSATION_HISTORY', str(DEFAULT_MAX_CONVERSATION_HISTORY)))
-TEMPERATURE = float(os.getenv('TEMPERATURE', str(DEFAULT_TEMPERATURE)))
-
-# Maximum number of active (unsummarized) messages before triggering a new summary
-MAX_ACTIVE_MESSAGES = int(os.getenv('MAX_ACTIVE_MESSAGES', '50'))
-
-# Context Management - Using full 8000 input token capacity
-MAX_CONTEXT_TOKENS = int(os.getenv('MAX_CONTEXT_TOKENS', str(DEFAULT_MAX_CONTEXT_TOKENS)))
-RESERVED_TOKENS = int(os.getenv('RESERVED_TOKENS', str(DEFAULT_RESERVED_TOKENS)))
-AVAILABLE_HISTORY_TOKENS = MAX_CONTEXT_TOKENS - RESERVED_TOKENS
-
-# PromptAssembler Configuration
-PROMPT_MAX_MEMORY_ITEMS = int(os.getenv('PROMPT_MAX_MEMORY_ITEMS', '3'))
-PROMPT_MEMORY_TOKEN_BUDGET_RATIO = float(os.getenv('PROMPT_MEMORY_TOKEN_BUDGET_RATIO', '0.4'))
-PROMPT_TRUNCATION_LENGTH = int(os.getenv('PROMPT_TRUNCATION_LENGTH', '200'))
-PROMPT_INCLUDE_SYSTEM_TEMPLATE = os.getenv('PROMPT_INCLUDE_SYSTEM_TEMPLATE', 'true').lower() in ('true', '1', 'yes', 'on')
-PROMPT_HISTORY_BUDGET = int(os.getenv('PROMPT_HISTORY_BUDGET', str(AVAILABLE_HISTORY_TOKENS)))
-PROMPT_REPLY_TOKEN_BUDGET = int(os.getenv('PROMPT_REPLY_TOKEN_BUDGET', str(RESERVED_TOKENS)))
-
-# LlamaIndex Configuration
-MEMORY_ENABLED = os.getenv('MEMORY_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
-MEMORY_EMBEDDING_PROVIDER = os.getenv('MEMORY_EMBEDDING_PROVIDER', 'lmstudio')
-MEMORY_SUMMARIZER_MODE = os.getenv('MEMORY_SUMMARIZER_MODE', 'local')
-MEMORY_EMBED_MODEL = os.getenv('MEMORY_EMBED_MODEL', 'text-embedding-qwen3-embedding-0.6b')
-MEMORY_EMBED_DIM = int(os.getenv('MEMORY_EMBED_DIM', '1024'))
-VECTOR_STORE_TABLE_NAME = os.getenv('VECTOR_STORE_TABLE_NAME', 'llama_pg_vector_store')
-
-# Adaptive chunking (direct embedding, no LLM extraction)
-MEMORY_CHUNK_MAX_MESSAGES = int(os.getenv('MEMORY_CHUNK_MAX_MESSAGES', '4'))         # Max messages per chunk (always in user+assistant pairs)
-MEMORY_CHUNK_TARGET_TOKENS = int(os.getenv('MEMORY_CHUNK_TARGET_TOKENS', '300'))     # Soft token target per chunk
-MEMORY_TRIGGER_EVERY_N_MESSAGES = int(os.getenv('MEMORY_TRIGGER_EVERY_N_MESSAGES', '4'))  # Trigger chunking after this many new messages
-
-# Retrieval settings
-MEMORY_RETRIEVAL_EXPAND_NEIGHBORS = int(os.getenv('MEMORY_RETRIEVAL_EXPAND_NEIGHBORS', '1'))  # Neighbor expansion radius (0=off)
-
-# Book knowledge / RAG settings
-BOOK_RAG_ENABLED = os.getenv('BOOK_RAG_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
-BOOKS_STORAGE_DIR = os.getenv('BOOKS_STORAGE_DIR', './book_files')
-BOOKS_KEEP_SOURCE_FILES = os.getenv('BOOKS_KEEP_SOURCE_FILES', 'false').lower() in ('true', '1', 'yes', 'on')
-BOOK_CHUNK_TARGET_TOKENS = int(os.getenv('BOOK_CHUNK_TARGET_TOKENS', '400'))
-BOOK_CHUNK_OVERLAP_TOKENS = int(os.getenv('BOOK_CHUNK_OVERLAP_TOKENS', '50'))
-BOOK_RAG_TOP_K = int(os.getenv('BOOK_RAG_TOP_K', '4'))
-BOOK_RAG_MIN_SCORE = float(os.getenv('BOOK_RAG_MIN_SCORE', '0.35'))
-BOOK_RAG_TOKEN_BUDGET_RATIO = float(os.getenv('BOOK_RAG_TOKEN_BUDGET_RATIO', '0.25'))
-BOOK_RAG_EXPAND_NEIGHBORS = int(os.getenv('BOOK_RAG_EXPAND_NEIGHBORS', '1'))
-BOOK_EMBED_BATCH_SIZE = int(os.getenv('BOOK_EMBED_BATCH_SIZE', '64'))
-
-# Typing Simulation Configuration
-MIN_TYPING_SPEED = int(os.getenv('MIN_TYPING_SPEED', '10'))  # characters per second
-MAX_TYPING_SPEED = int(os.getenv('MAX_TYPING_SPEED', '30'))  # characters per second
-MAX_DELAY = int(os.getenv('MAX_DELAY', '5'))  # maximum delay in seconds
-RANDOM_OFFSET_MIN = float(os.getenv('RANDOM_OFFSET_MIN', '0.1'))  # minimum random offset in seconds
-RANDOM_OFFSET_MAX = float(os.getenv('RANDOM_OFFSET_MAX', '0.5'))  # maximum random offset in seconds
-INDICATE_TYPING_DURING_DELAY = os.getenv('INDICATE_TYPING_DURING_DELAY', 'false').lower() in ('true', '1', 'yes', 'on')
-REDIS_URL = os.getenv('REDIS_URL', 'redis://redis:6379/0')
-
-# Proactive Messaging Configuration
-PROACTIVE_MESSAGING_ENABLED = os.getenv('PROACTIVE_MESSAGING_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
-PROACTIVE_MESSAGING_REDIS_URL = os.getenv('PROACTIVE_MESSAGING_REDIS_URL', REDIS_URL)
-
-# Message Queue Configuration
-MESSAGE_QUEUE_REDIS_URL = os.getenv('MESSAGE_QUEUE_REDIS_URL', REDIS_URL)
-MESSAGE_QUEUE_MAX_RETRIES = int(os.getenv('MESSAGE_QUEUE_MAX_RETRIES', '3'))
-MESSAGE_QUEUE_LOCK_TIMEOUT = int(os.getenv('MESSAGE_QUEUE_LOCK_TIMEOUT', '30'))
-MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL = int(os.getenv('MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL', '10'))
-MESSAGE_QUEUE_DISPATCHER_INTERVAL = float(os.getenv('MESSAGE_QUEUE_DISPATCHER_INTERVAL', '0.1'))
-
-# Proactive messaging cadences
-PROACTIVE_MESSAGING_CADENCES = [
-    {"name": "1h", "interval": int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1H', '3600')), "jitter": int(os.getenv('PROACTIVE_MESSAGING_JITTER_1H', '20'))},
-    {"name": "9h", "interval": int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_9H', '32400')), "jitter": int(os.getenv('PROACTIVE_MESSAGING_JITTER_9H', '180'))},
-    {"name": "1d", "interval": int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1D', '86400')), "jitter": int(os.getenv('PROACTIVE_MESSAGING_JITTER_1D', '720'))},
-    {"name": "1w", "interval": int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1W', '604800')), "jitter": int(os.getenv('PROACTIVE_MESSAGING_JITTER_1W', '4320'))},
-    {"name": "1mo", "interval": int(os.getenv('PROACTIVE_MESSAGING_INTERVAL_1MO', '2592000')), "jitter": int(os.getenv('PROACTIVE_MESSAGING_JITTER_1MO', '8640'))},
-]
-
-# Quiet hours (in 24-hour format)
-PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED = os.getenv('PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
-PROACTIVE_MESSAGING_QUIET_HOURS_START = os.getenv('PROACTIVE_MESSAGING_QUIET_HOURS_START', '02:30')
-PROACTIVE_MESSAGING_QUIET_HOURS_END = os.getenv('PROACTIVE_MESSAGING_QUIET_HOURS_END', '08:00')
-
-# Consecutive outreach settings
-PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES = int(os.getenv('PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES', '5'))
-
-# Retry policies
-PROACTIVE_MESSAGING_RETRY_DELAY = int(os.getenv('PROACTIVE_MESSAGING_RETRY_DELAY', '300'))  # 5 minutes
-PROACTIVE_MESSAGING_MAX_RETRIES = int(os.getenv('PROACTIVE_MESSAGING_MAX_RETRIES', '3'))
-
-# Rescheduling delay for proactive messaging restart (in seconds)
-PROACTIVE_MESSAGING_RESTART_DELAY_MAX = int(os.getenv('PROACTIVE_MESSAGING_RESTART_DELAY_MAX', '900'))  # 5 minutes
-
-# Proactive message prompt
-PROACTIVE_MESSAGING_PROMPT = os.getenv('PROACTIVE_MESSAGING_PROMPT', (
-    "Сгенерируй дружеское, заботливое сообщение, чтобы проверить, как у пользователя дела, на том языке, на котором ты обычно с ним разговариваешь. "
-    "Сообщение должно быть кратким, естественным и прозрачным: не утверждай, что ты человек. Не повторяйся"
-))
-PROACTIVE_MESSAGING_RECENT_HISTORY_LIMIT = int(os.getenv('PROACTIVE_MESSAGING_RECENT_HISTORY_LIMIT', '8'))
-PROACTIVE_MESSAGING_RECENT_PROACTIVE_LIMIT = int(os.getenv('PROACTIVE_MESSAGING_RECENT_PROACTIVE_LIMIT', '6'))
-PROACTIVE_MESSAGING_MEMORY_HINT_LIMIT = int(os.getenv('PROACTIVE_MESSAGING_MEMORY_HINT_LIMIT', '5'))
-PROACTIVE_MESSAGING_RANDOM_SEED = os.getenv('PROACTIVE_MESSAGING_RANDOM_SEED', '')
-
-# Validation
-def _validate_config():
-    """Validate configuration and warn about issues"""
-    if not TELEGRAM_TOKEN:
-        warnings.warn("TELEGRAM_TOKEN is not set. The bot cannot run without it.")
-
-    
-    if not DATABASE_URL:
-        warnings.warn("DATABASE_URL is required for PostgreSQL storage.")
-
-    if PROVIDER not in ['azure', 'lmstudio', 'gemini']:
-        warnings.warn(f"PROVIDER '{PROVIDER}' is not supported. Supported values: 'azure', 'lmstudio', 'gemini'")
-
-    if PROVIDER == 'azure':
-        if not AZURE_ENDPOINT:
-            warnings.warn("AZURE_ENDPOINT is not set for Azure provider")
-        if not AZURE_API_KEY:
-            warnings.warn("AZURE_API_KEY is not set for Azure provider")
-        if not AZURE_MODEL:
-            warnings.warn("AZURE_MODEL is not set for Azure provider")
-
-    if PROVIDER == 'lmstudio':
-        if not LMSTUDIO_MODEL:
-            warnings.warn("LMSTUDIO_MODEL is not set for LM Studio provider")
-        if not LMSTUDIO_BASE_URL:
-            warnings.warn("LMSTUDIO_BASE_URL is not set for LM Studio provider")
-        if LMSTUDIO_MAX_LOAD_WAIT < 30:
-            warnings.warn("LMSTUDIO_MAX_LOAD_WAIT is very low, model loading might timeout")
-    
-    if PROVIDER == 'gemini':
-        if not GEMINI_API_KEY:
-            warnings.warn("GEMINI_API_KEY is not set for Gemini provider")
-        if not GEMINI_MODEL:
-            warnings.warn("GEMINI_MODEL is not set for Gemini provider")
-    
-    # PromptAssembler validation
-    if PROMPT_MEMORY_TOKEN_BUDGET_RATIO < 0 or PROMPT_MEMORY_TOKEN_BUDGET_RATIO > 1:
-        warnings.warn("PROMPT_MEMORY_TOKEN_BUDGET_RATIO should be between 0 and 1")
-    if PROMPT_MAX_MEMORY_ITEMS < 1:
-        warnings.warn("PROMPT_MAX_MEMORY_ITEMS should be at least 1")
-    if PROMPT_HISTORY_BUDGET > MAX_CONTEXT_TOKENS:
-        warnings.warn("PROMPT_HISTORY_BUDGET should not exceed MAX_CONTEXT_TOKENS")
-    if PROMPT_REPLY_TOKEN_BUDGET > MAX_CONTEXT_TOKENS:
-        warnings.warn("PROMPT_REPLY_TOKEN_BUDGET should not exceed MAX_CONTEXT_TOKENS")
-    
-    # Memory Manager validation
-    if MEMORY_ENABLED and not MEMORY_EMBED_MODEL:
-        warnings.warn("MEMORY_ENABLED is true, but MEMORY_EMBED_MODEL is not set.")
-    if MEMORY_ENABLED and MEMORY_EMBEDDING_PROVIDER not in ['lmstudio', 'gemini']:
-        warnings.warn(f"MEMORY_EMBEDDING_PROVIDER '{MEMORY_EMBEDDING_PROVIDER}' is not supported. Supported values: 'lmstudio', 'gemini'")
-    if MEMORY_ENABLED and MEMORY_EMBEDDING_PROVIDER == 'gemini':
-        if not GEMINI_EMBEDDING_MODEL:
-            warnings.warn("GEMINI_EMBEDDING_MODEL is required when MEMORY_EMBEDDING_PROVIDER is 'gemini'")
-    if MEMORY_CHUNK_MAX_MESSAGES < 2:
-        warnings.warn("MEMORY_CHUNK_MAX_MESSAGES should be at least 2 (one user+assistant pair)")
-    if MEMORY_CHUNK_TARGET_TOKENS < 50:
-        warnings.warn("MEMORY_CHUNK_TARGET_TOKENS seems too low, consider at least 50")
-    if MEMORY_TRIGGER_EVERY_N_MESSAGES < 2:
-        warnings.warn("MEMORY_TRIGGER_EVERY_N_MESSAGES should be at least 2")
-    if BOOK_CHUNK_TARGET_TOKENS < 50:
-        warnings.warn("BOOK_CHUNK_TARGET_TOKENS should be at least 50")
-    if BOOK_CHUNK_OVERLAP_TOKENS < 0:
-        warnings.warn("BOOK_CHUNK_OVERLAP_TOKENS should not be negative")
-    if BOOK_CHUNK_OVERLAP_TOKENS >= BOOK_CHUNK_TARGET_TOKENS:
-        warnings.warn("BOOK_CHUNK_OVERLAP_TOKENS should be less than BOOK_CHUNK_TARGET_TOKENS")
-    if BOOK_RAG_TOP_K < 1:
-        warnings.warn("BOOK_RAG_TOP_K should be at least 1")
-    if BOOK_RAG_MIN_SCORE < 0 or BOOK_RAG_MIN_SCORE > 1:
-        warnings.warn("BOOK_RAG_MIN_SCORE should be between 0 and 1")
-    if BOOK_RAG_TOKEN_BUDGET_RATIO < 0 or BOOK_RAG_TOKEN_BUDGET_RATIO > 1:
-        warnings.warn("BOOK_RAG_TOKEN_BUDGET_RATIO should be between 0 and 1")
-    if BOOK_RAG_EXPAND_NEIGHBORS < 0:
-        warnings.warn("BOOK_RAG_EXPAND_NEIGHBORS should not be negative")
-    if BOOK_EMBED_BATCH_SIZE < 1:
-        warnings.warn("BOOK_EMBED_BATCH_SIZE should be at least 1")
-
-# Proactive Messaging validation
-    if PROACTIVE_MESSAGING_ENABLED:
-        if not PROACTIVE_MESSAGING_REDIS_URL:
-            warnings.warn("PROACTIVE_MESSAGING_REDIS_URL is required when proactive messaging is enabled")
-        
-        # Validate proactive messaging cadences
-        if not PROACTIVE_MESSAGING_CADENCES:
-            warnings.warn("PROACTIVE_MESSAGING_CADENCES should not be empty")
-        
-        for cadence in PROACTIVE_MESSAGING_CADENCES:
-            if not isinstance(cadence, dict) or not all(k in cadence for k in ["name", "interval", "jitter"]):
-                warnings.warn(f"Invalid cadence format: {cadence}. Each cadence should be a dict with 'name', 'interval', and 'jitter'.")
-                continue
-            
-            if not isinstance(cadence["name"], str) or not cadence["name"]:
-                warnings.warn(f"Cadence 'name' should be a non-empty string in {cadence}")
-            
-            if not isinstance(cadence["interval"], int) or cadence["interval"] <= 0:
-                warnings.warn(f"Cadence 'interval' should be a positive integer in {cadence}")
-            
-            if not isinstance(cadence["jitter"], int) or cadence["jitter"] < 0:
-                warnings.warn(f"Cadence 'jitter' should be a non-negative integer in {cadence}")
-        
-        # Validate quiet hours format (only if enabled)
-        if PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED:
-            time_pattern = re.compile(r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$')
-            if not time_pattern.match(PROACTIVE_MESSAGING_QUIET_HOURS_START):
-                warnings.warn("PROACTIVE_MESSAGING_QUIET_HOURS_START should be in HH:MM format (24-hour)")
-            if not time_pattern.match(PROACTIVE_MESSAGING_QUIET_HOURS_END):
-                warnings.warn("PROACTIVE_MESSAGING_QUIET_HOURS_END should be in HH:MM format (24-hour)")
-        
-        # Validate consecutive outreach limit
-        if PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES <= 0:
-            warnings.warn("PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES should be positive")
-        
-        # Validate retry settings
-        if PROACTIVE_MESSAGING_RETRY_DELAY < 0:
-            warnings.warn("PROACTIVE_MESSAGING_RETRY_DELAY should be non-negative")
-        if PROACTIVE_MESSAGING_MAX_RETRIES < 0:
-            warnings.warn("PROACTIVE_MESSAGING_MAX_RETRIES should be non-negative")
-        
-        # Validate rescheduling delay
-        if PROACTIVE_MESSAGING_RESTART_DELAY_MAX <= 31:
-            warnings.warn("PROACTIVE_MESSAGING_RESTART_DELAY_MAX should be positive and >31s" )
-        
-        # Validate proactive messaging prompt
-        if not PROACTIVE_MESSAGING_PROMPT:
-            warnings.warn("PROACTIVE_MESSAGING_PROMPT should not be empty")
-
-    # Buffer Manager validation
-    if BUFFER_SHORT_MESSAGE_TIMEOUT <= 0:
-        warnings.warn("BUFFER_SHORT_MESSAGE_TIMEOUT should be positive")
-    if BUFFER_LONG_MESSAGE_TIMEOUT <= 0:
-        warnings.warn("BUFFER_LONG_MESSAGE_TIMEOUT should be positive")
-    if BUFFER_MAX_MESSAGES <= 0:
-        warnings.warn("BUFFER_MAX_MESSAGES should be positive")
-    if BUFFER_WORD_COUNT_THRESHOLD <= 0:
-        warnings.warn("BUFFER_WORD_COUNT_THRESHOLD should be positive")
-    if BUFFER_LONG_MESSAGE_TIMEOUT >= BUFFER_SHORT_MESSAGE_TIMEOUT:
-        warnings.warn("BUFFER_LONG_MESSAGE_TIMEOUT should be less than BUFFER_SHORT_MESSAGE_TIMEOUT for effective buffering")
-    if BUFFER_CLEANUP_INTERVAL <= 0:
-        warnings.warn("BUFFER_CLEANUP_INTERVAL should be positive")
-
-# Buffer Manager Configuration
-BUFFER_SHORT_MESSAGE_TIMEOUT = float(os.getenv('BUFFER_SHORT_MESSAGE_TIMEOUT', '4'))  # seconds
-BUFFER_LONG_MESSAGE_TIMEOUT = float(os.getenv('BUFFER_LONG_MESSAGE_TIMEOUT', '0.1'))   # seconds
-BUFFER_MAX_MESSAGES = int(os.getenv('BUFFER_MAX_MESSAGES', '8'))
-BUFFER_WORD_COUNT_THRESHOLD = int(os.getenv('BUFFER_WORD_COUNT_THRESHOLD', '30'))
-BUFFER_CLEANUP_INTERVAL = int(os.getenv('BUFFER_CLEANUP_INTERVAL', '300'))  # seconds
-
-SUMMARIZATION_PROMPT = """
-You are an AI that summarizes a conversation, but only focus on important information about the user:
-- Personal details, preferences, goals, decisions
-- Anything that could be useful for future interactions
-
-Existing summary about the user so far:
-{existing_summary}
-
-New conversation text:
-{text}
-
-Update the user-focused summary based on the new text, keeping it concise and only include relevant user details.
+New code should prefer importing AppSettings/build_settings from settings.py.
+Existing modules can keep importing these module-level names during migration.
 """
 
+import dotenv
 
-# Perform validation
-_validate_config()
+from settings import (
+    AppSettings,
+    DEFAULT_BOT_NAME,
+    DEFAULT_BOT_PERSONALITY,
+    DEFAULT_LMSTUDIO_MODEL,
+    DEFAULT_MAX_CONTEXT_TOKENS,
+    DEFAULT_MAX_CONVERSATION_HISTORY,
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_PROVIDER,
+    DEFAULT_RESERVED_TOKENS,
+    DEFAULT_TEMPERATURE,
+    SUMMARIZATION_PROMPT,
+    build_settings,
+)
+
+dotenv.load_dotenv()
+settings = build_settings()
+
+TELEGRAM_TOKEN = settings.TELEGRAM_TOKEN
+ADMIN_BOT_TOKEN = settings.admin.bot_token
+ADMIN_USER_IDS = settings.admin.user_ids
+TOKEN_ENCRYPTION_KEY = settings.admin.token_encryption_key
+
+DATABASE_URL = settings.db.url
+USE_PGVECTOR = settings.db.use_pgvector
+DB_PASSWORD = settings.db.password
+
+PROVIDER = settings.llm.provider
+AZURE_ENDPOINT = settings.llm.azure_endpoint
+AZURE_API_KEY = settings.llm.azure_api_key
+AZURE_MODEL = settings.llm.azure_model
+LMSTUDIO_MODEL = settings.llm.lmstudio_model
+LMSTUDIO_BASE_URL = settings.llm.lmstudio_base_url
+LMSTUDIO_AUTO_LOAD = settings.llm.lmstudio_auto_load
+LMSTUDIO_MAX_LOAD_WAIT = settings.llm.lmstudio_max_load_wait
+LMSTUDIO_SERVER_TIMEOUT = settings.llm.lmstudio_server_timeout
+LMSTUDIO_STARTUP_CHECK = settings.llm.lmstudio_startup_check
+GEMINI_API_KEY = settings.llm.gemini_api_key
+GEMINI_MODEL = settings.llm.gemini_model
+GEMINI_EMBEDDING_MODEL = settings.llm.gemini_embedding_model
+
+BOT_NAME = settings.bot.name
+BOT_PERSONALITY = settings.bot.personality
+MAX_CONVERSATION_HISTORY = settings.bot.max_conversation_history
+TEMPERATURE = settings.bot.temperature
+MAX_ACTIVE_MESSAGES = settings.bot.max_active_messages
+MAX_CONTEXT_TOKENS = settings.bot.max_context_tokens
+RESERVED_TOKENS = settings.bot.reserved_tokens
+AVAILABLE_HISTORY_TOKENS = settings.bot.available_history_tokens
+REQUEST_TIMEOUT = settings.bot.request_timeout
+MESSAGE_PREVIEW_LENGTH = settings.bot.message_preview_length
+SHORT_MESSAGE_THRESHOLD = settings.bot.short_message_threshold
+POLLING_INTERVAL = settings.bot.polling_interval
+
+PROMPT_MAX_MEMORY_ITEMS = settings.prompts.max_memory_items
+PROMPT_MEMORY_TOKEN_BUDGET_RATIO = settings.prompts.memory_token_budget_ratio
+PROMPT_TRUNCATION_LENGTH = settings.prompts.truncation_length
+PROMPT_INCLUDE_SYSTEM_TEMPLATE = settings.prompts.include_system_template
+PROMPT_HISTORY_BUDGET = settings.prompts.history_budget
+PROMPT_REPLY_TOKEN_BUDGET = settings.prompts.reply_token_budget
+
+MEMORY_ENABLED = settings.memory.enabled
+MEMORY_EMBEDDING_PROVIDER = settings.memory.embedding_provider
+MEMORY_SUMMARIZER_MODE = settings.memory.summarizer_mode
+MEMORY_EMBED_MODEL = settings.memory.embed_model
+MEMORY_EMBED_DIM = settings.memory.embed_dim
+VECTOR_STORE_TABLE_NAME = settings.memory.vector_store_table_name
+MEMORY_CHUNK_MAX_MESSAGES = settings.memory.chunk_max_messages
+MEMORY_CHUNK_TARGET_TOKENS = settings.memory.chunk_target_tokens
+MEMORY_TRIGGER_EVERY_N_MESSAGES = settings.memory.trigger_every_n_messages
+MEMORY_RETRIEVAL_EXPAND_NEIGHBORS = settings.memory.retrieval_expand_neighbors
+
+BOOK_RAG_ENABLED = settings.books.rag_enabled
+BOOKS_STORAGE_DIR = settings.books.storage_dir
+BOOKS_KEEP_SOURCE_FILES = settings.books.keep_source_files
+BOOK_CHUNK_TARGET_TOKENS = settings.books.chunk_target_tokens
+BOOK_CHUNK_OVERLAP_TOKENS = settings.books.chunk_overlap_tokens
+BOOK_RAG_TOP_K = settings.books.rag_top_k
+BOOK_RAG_MIN_SCORE = settings.books.rag_min_score
+BOOK_RAG_TOKEN_BUDGET_RATIO = settings.books.rag_token_budget_ratio
+BOOK_RAG_EXPAND_NEIGHBORS = settings.books.rag_expand_neighbors
+BOOK_EMBED_BATCH_SIZE = settings.books.embed_batch_size
+
+MIN_TYPING_SPEED = settings.typing.min_speed
+MAX_TYPING_SPEED = settings.typing.max_speed
+MAX_DELAY = settings.typing.max_delay
+RANDOM_OFFSET_MIN = settings.typing.random_offset_min
+RANDOM_OFFSET_MAX = settings.typing.random_offset_max
+INDICATE_TYPING_DURING_DELAY = settings.typing.indicate_during_delay
+
+REDIS_URL = settings.redis.url
+PROACTIVE_MESSAGING_ENABLED = settings.proactive.enabled
+PROACTIVE_MESSAGING_REDIS_URL = settings.proactive.redis_url
+PROACTIVE_MESSAGING_CADENCES = [cadence.as_dict() for cadence in settings.proactive.cadences]
+PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED = settings.proactive.quiet_hours_enabled
+PROACTIVE_MESSAGING_QUIET_HOURS_START = settings.proactive.quiet_hours_start
+PROACTIVE_MESSAGING_QUIET_HOURS_END = settings.proactive.quiet_hours_end
+PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES = settings.proactive.max_consecutive_outreaches
+PROACTIVE_MESSAGING_RETRY_DELAY = settings.proactive.retry_delay
+PROACTIVE_MESSAGING_MAX_RETRIES = settings.proactive.max_retries
+PROACTIVE_MESSAGING_RESTART_DELAY_MAX = settings.proactive.restart_delay_max
+PROACTIVE_MESSAGING_PROMPT = settings.proactive.prompt
+PROACTIVE_MESSAGING_RECENT_HISTORY_LIMIT = settings.proactive.recent_history_limit
+PROACTIVE_MESSAGING_RECENT_PROACTIVE_LIMIT = settings.proactive.recent_proactive_limit
+PROACTIVE_MESSAGING_MEMORY_HINT_LIMIT = settings.proactive.memory_hint_limit
+PROACTIVE_MESSAGING_RANDOM_SEED = settings.proactive.random_seed
+
+MESSAGE_QUEUE_REDIS_URL = settings.queue.redis_url
+MESSAGE_QUEUE_MAX_RETRIES = settings.queue.max_retries
+MESSAGE_QUEUE_LOCK_TIMEOUT = settings.queue.lock_timeout
+MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL = settings.queue.lock_refresh_interval
+MESSAGE_QUEUE_DISPATCHER_INTERVAL = settings.queue.dispatcher_interval
+
+BUFFER_SHORT_MESSAGE_TIMEOUT = settings.buffer.short_message_timeout
+BUFFER_LONG_MESSAGE_TIMEOUT = settings.buffer.long_message_timeout
+BUFFER_MAX_MESSAGES = settings.buffer.max_messages
+BUFFER_WORD_COUNT_THRESHOLD = settings.buffer.word_count_threshold
+BUFFER_CLEANUP_INTERVAL = settings.buffer.cleanup_interval
