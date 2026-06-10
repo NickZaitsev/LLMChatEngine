@@ -598,7 +598,7 @@ class PostgresConversationRepo:
     async def create_conversation(
         self,
         user_id: str,
-        persona_id: str,
+        persona_id: Optional[str] = None,
         bot_id: Optional[str] = None,
         title: Optional[str] = None,
         extra_data: Optional[Dict[str, Any]] = None
@@ -608,7 +608,7 @@ class PostgresConversationRepo:
 
         Args:
             user_id: UUID string of the user
-            persona_id: UUID string of the persona
+            persona_id: Optional UUID string of the persona
             title: Optional conversation title
             extra_data: Optional extra_data dictionary
 
@@ -620,7 +620,7 @@ class PostgresConversationRepo:
 
         try:
             user_uuid = UUID(user_id)
-            persona_uuid = UUID(persona_id)
+            persona_uuid = UUID(persona_id) if persona_id else None
             bot_uuid = UUID(bot_id) if bot_id else None
         except ValueError as e:
             raise ValueError(f"Invalid UUID format: {e}") from e

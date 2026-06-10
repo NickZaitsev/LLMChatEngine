@@ -383,7 +383,7 @@ class Conversation(Base):
     Attributes:
         id: Unique identifier for the conversation
         user_id: Foreign key reference to the user
-        persona_id: Foreign key reference to the persona
+        persona_id: Optional foreign key reference to the persona
         bot_id: Foreign key reference to the bot (nullable for migration)
         title: Optional title for the conversation
         extra_data: Additional conversation data stored as JSON
@@ -405,11 +405,11 @@ class Conversation(Base):
         nullable=False,
         doc="Foreign key reference to the user"
     )
-    persona_id: Mapped[uuid.UUID] = mapped_column(
+    persona_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), 
-        ForeignKey('personas.id', ondelete='CASCADE'), 
-        nullable=False,
-        doc="Foreign key reference to the persona"
+        ForeignKey('personas.id', ondelete='SET NULL'), 
+        nullable=True,
+        doc="Optional foreign key reference to the persona"
     )
     bot_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), 

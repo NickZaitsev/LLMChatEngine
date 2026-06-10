@@ -14,7 +14,7 @@ from uuid import UUID
 from config import MAX_CONVERSATION_HISTORY, PROMPT_REPLY_TOKEN_BUDGET, MAX_CONTEXT_TOKENS, RESERVED_TOKENS, AVAILABLE_HISTORY_TOKENS
 from core.utils import mask_db_url
 from storage import create_storage, Storage
-from storage.interfaces import Message, Conversation, User, Persona, MessageLog, MessageUser
+from storage.interfaces import Message, Conversation, User, MessageLog, MessageUser
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,6 @@ class PostgresConversationManager:
         self.storage: Optional[Storage] = None
         self._user_cache: Dict[int, User] = {}  # Cache for user objects
         self._conversation_cache: Dict[tuple[int, Optional[uuid.UUID]], Conversation] = {}  # Cache for conversation objects
-        self._default_persona_cache: Dict[str, Persona] = {}  # Cache for default personas
 
         logger.info("PostgresConversationManager initialized. DB: %s, pgvector: %s",
                    mask_db_url(db_url), use_pgvector)
@@ -103,22 +102,9 @@ class PostgresConversationManager:
             # Use the most recent conversation
             conversation = conversations[0] # Already sorted by creation time DESC
         else:
-            # Create default persona if needed
-            personas = await self.storage.personas.list_personas(str(user.id))
-            if not personas:
-                persona = await self.storage.personas.create_persona(
-                    user_id=str(user.id),
-                    name="Default Assistant",
-                    config={"personality": "helpful, warm, and attentive assistant"}
-                )
-                logger.info("Created default persona for user %d", user_id)
-            else:
-                persona = personas[0]
-
             # Create new conversation
             conversation = await self.storage.conversations.create_conversation(
                 user_id=str(user.id),
-                persona_id=str(persona.id),
                 bot_id=str(bot_id) if bot_id else None,
                 title=f"Chat with {user.username}",
                 extra_data={"auto_created": True}

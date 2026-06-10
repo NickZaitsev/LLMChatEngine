@@ -45,7 +45,7 @@ class Conversation:
     """Data class representing a conversation"""
     id: UUID
     user_id: UUID
-    persona_id: UUID
+    persona_id: Optional[UUID]
     title: Optional[str]
     extra_data: Dict[str, Any]
     created_at: datetime
@@ -174,7 +174,7 @@ class MessageHistoryRepo(Protocol):
 class ConversationRepo(Protocol):
     """Protocol for conversation repository operations"""
     
-    async def create_conversation(self, user_id: str, persona_id: str, bot_id: Optional[str] = None, title: Optional[str] = None, extra_data: Optional[Dict[str, Any]] = None) -> Conversation:
+    async def create_conversation(self, user_id: str, persona_id: Optional[str] = None, bot_id: Optional[str] = None, title: Optional[str] = None, extra_data: Optional[Dict[str, Any]] = None) -> Conversation:
         """Create a conversation record."""
         ...
     

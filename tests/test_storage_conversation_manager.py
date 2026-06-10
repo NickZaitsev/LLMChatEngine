@@ -25,6 +25,32 @@ async def test_ensure_user_and_conversation_refreshes_cached_conversation():
 
 
 @pytest.mark.asyncio
+async def test_ensure_user_and_conversation_does_not_create_default_persona():
+    manager = PostgresConversationManager("postgresql://u:p@h:5432/db", use_pgvector=False)
+    user = SimpleNamespace(id=uuid.uuid4(), username="123")
+    conversation = SimpleNamespace(id=uuid.uuid4(), persona_id=None)
+
+    manager.storage = MagicMock()
+    manager.storage.users.get_user_by_username = AsyncMock(return_value=user)
+    manager.storage.conversations.list_conversations = AsyncMock(return_value=[])
+    manager.storage.conversations.create_conversation = AsyncMock(return_value=conversation)
+    manager.storage.personas.create_persona = AsyncMock()
+    manager.storage.personas.list_personas = AsyncMock()
+
+    result = await manager._ensure_user_and_conversation(123)
+
+    assert result is conversation
+    manager.storage.personas.list_personas.assert_not_called()
+    manager.storage.personas.create_persona.assert_not_called()
+    manager.storage.conversations.create_conversation.assert_awaited_once_with(
+        user_id=str(user.id),
+        bot_id=None,
+        title="Chat with 123",
+        extra_data={"auto_created": True},
+    )
+
+
+@pytest.mark.asyncio
 async def test_clear_conversation_deletes_default_bot_user_history():
     manager = PostgresConversationManager("postgresql://u:p@h:5432/db", use_pgvector=False)
     conversation = SimpleNamespace(id="conv-1")
