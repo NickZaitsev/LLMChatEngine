@@ -13,6 +13,7 @@ from typing import List, Dict, Optional
 from uuid import UUID
 
 from config import MAX_CONVERSATION_HISTORY, PROMPT_REPLY_TOKEN_BUDGET, MAX_CONTEXT_TOKENS, RESERVED_TOKENS, AVAILABLE_HISTORY_TOKENS
+from core.utils import mask_db_url
 from storage import create_storage, Storage
 from storage.interfaces import Message, Conversation, User, Persona, MessageLog, MessageUser
 
@@ -46,7 +47,7 @@ class PostgresConversationManager:
         self._default_persona_cache: Dict[str, Persona] = {}  # Cache for default personas
 
         logger.info("PostgresConversationManager initialized. DB: %s, pgvector: %s",
-                   self._mask_db_url(db_url), use_pgvector)
+                   mask_db_url(db_url), use_pgvector)
 
     async def initialize(self):
         """Initialize the storage connection. Must be called before using the manager."""
@@ -591,21 +592,6 @@ class PostgresConversationManager:
                 "last_messages": [],
                 "formatted_messages": []
             }
-
-    def _mask_db_url(self, db_url: str) -> str:
-        """Mask sensitive parts of database URL for logging."""
-        try:
-            if '@' in db_url and '://' in db_url:
-                scheme_and_auth, rest = db_url.split('://', 1)
-                if '@' in rest:
-                    auth, host_and_path = rest.split('@', 1)
-                    if ':' in auth:
-                        user, _ = auth.split(':', 1)
-                        return f"{scheme_and_auth}://{user}:***@{host_and_path}"
-            return db_url[:20] + "***"
-        except Exception:
-            return "***masked***"
-
 
 # Factory function to create PostgreSQL conversation manager
 def create_conversation_manager(db_url: str, use_pgvector: bool = True) -> 'PostgresConversationManager':

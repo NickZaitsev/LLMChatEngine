@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.pool import NullPool, QueuePool, StaticPool
 from sqlalchemy import text
 
+from core.utils import mask_db_url
 from .models import Base, PGVECTOR_AVAILABLE
 from .repos import (
     PostgresMessageRepo,
@@ -122,7 +123,7 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
         logger.warning("pgvector requested but not available, falling back to file-based embeddings")
         use_pgvector = False
 
-    logger.info(f"Creating storage with database: {_mask_db_url(db_url)}, pgvector: {use_pgvector}")
+    logger.info(f"Creating storage with database: {mask_db_url(db_url)}, pgvector: {use_pgvector}")
 
     try:
         # Create async engine with appropriate connection pooling
@@ -207,32 +208,6 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
             except Exception:
                 pass
         raise
-
-
-def _mask_db_url(db_url: str) -> str:
-    """
-    Mask sensitive information in database URL for logging.
-
-    Args:
-        db_url: Full database URL
-
-    Returns:
-        Database URL with password masked
-    """
-    try:
-        if '@' in db_url and '://' in db_url:
-            scheme_and_auth, rest = db_url.split('://', 1)
-            if '@' in rest:
-                auth, host_and_path = rest.split('@', 1)
-                if ':' in auth:
-                    user, _ = auth.split(':', 1)
-                    return f"{scheme_and_auth}://{user}:***@{host_and_path}"
-        return db_url
-    except Exception:
-        return "***masked***"
-
-
-
 # Import token estimator for backward compatibility
 from .repos import TokenEstimator
 

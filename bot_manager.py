@@ -9,28 +9,16 @@ import asyncio
 import logging
 import uuid
 from typing import Dict, Optional, Any
-from dataclasses import dataclass
 
 from telegram.ext import Application
 
+from core.bot_config import BotConfig
 from token_encryption import decrypt_token
 from features import BotFeature, has_feature
 from message_manager import MessageDispatcher
 from config import MESSAGE_QUEUE_REDIS_URL, MESSAGE_QUEUE_MAX_RETRIES, MESSAGE_QUEUE_LOCK_TIMEOUT
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class BotConfig:
-    """Configuration for a single bot instance."""
-    id: uuid.UUID
-    token: str  # Decrypted token
-    name: str
-    personality: str
-    is_active: bool
-    feature_flags: Dict[str, Any]
-    llm_config: Dict[str, Any]
 
 
 class BotManager:

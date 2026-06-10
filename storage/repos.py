@@ -13,6 +13,7 @@ from typing import List, Dict, Any, Optional, Union
 from uuid import UUID, uuid4
 from pathlib import Path
 
+from core.tokens import TokenCounter
 from sqlalchemy import select, func, desc, and_, or_, text, delete
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload, joinedload
@@ -35,61 +36,11 @@ from .models import (
     PGVECTOR_AVAILABLE
 )
 
-# Try to import tiktoken for accurate token counting
-TIKTOKEN_AVAILABLE = False
-_encoding = None
-
-try:
-    import tiktoken
-    # Don't initialize encoding at top level to avoid crash if download fails
-    TIKTOKEN_AVAILABLE = True
-except ImportError:
-    pass
-
-def get_tiktoken_encoding():
-    """Lazy initialization of tiktoken encoding to avoid crash if internet is down during import"""
-    global _encoding
-    if TIKTOKEN_AVAILABLE and _encoding is None:
-        try:
-            # This can trigger a download if not cached
-            _encoding = tiktoken.get_encoding("cl100k_base")
-        except Exception as e:
-            logging.getLogger(__name__).warning(f"Failed to load tiktoken encoding: {e}")
-    return _encoding
-
 logger = logging.getLogger(__name__)
 
 
-class TokenEstimator:
-    """Helper class for estimating token counts"""
-
-    @staticmethod
-    def estimate_tokens(text: str) -> int:
-        """
-        Estimate token count for given text.
-
-        Uses tiktoken if available, otherwise falls back to character-based heuristic.
-
-        Args:
-            text: The text to estimate tokens for
-
-        Returns:
-            Estimated token count
-        """
-        if not text:
-            return 0
-
-        if TIKTOKEN_AVAILABLE:
-            encoding = get_tiktoken_encoding()
-            if encoding:
-                try:
-                    return len(encoding.encode(text))
-                except Exception as e:
-                    logger.warning(f"Failed to use tiktoken for token estimation: {e}")
-                    # Fall through to heuristic
-
-        # Heuristic: ~4 characters per token for mixed content
-        return max(1, len(text) // 4)
+class TokenEstimator(TokenCounter):
+    """Compatibility wrapper around the shared token counter."""
 
 
 class PostgresMessageRepo:

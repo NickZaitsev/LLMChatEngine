@@ -7,9 +7,9 @@ and proper token budgeting.
 """
 
 import logging
-import math
 from typing import Dict, List, Any, Optional, Mapping, Tuple, Protocol
 
+from core.tokens import TokenCounter, Tokenizer
 from storage.interfaces import (
     MessageRepo,
     PersonaRepo,
@@ -24,80 +24,6 @@ from .templates import (
 )
 import config
 logger = logging.getLogger(__name__)
-
-
-class Tokenizer(Protocol):
-    """Protocol for tokenizer implementations"""
-
-    def encode(self, text: str) -> List[int]:
-        """Encode text to tokens"""
-        ...
-
-    def count_tokens(self, text: str) -> int:
-        """Count tokens in text"""
-        ...
-
-
-class TokenCounter:
-    """Helper class for counting tokens with fallback heuristic"""
-
-    def __init__(self, tokenizer: Optional[Tokenizer] = None, auto_tiktoken: bool = True):
-        """
-        Initialize token counter.
-
-        Args:
-            tokenizer: Optional tokenizer implementation (tiktoken preferred)
-            auto_tiktoken: Whether to automatically try tiktoken if no tokenizer provided
-        """
-        self.tokenizer = tokenizer
-
-        # Try to import tiktoken if no tokenizer provided and auto_tiktoken is enabled
-        if not tokenizer and auto_tiktoken:
-            try:
-                import tiktoken
-                encoding = tiktoken.get_encoding("cl100k_base")
-
-                class TiktokenWrapper:
-                    """Adapter exposing the tokenizer protocol for tiktoken encodings."""
-
-                    def __init__(self, encoding):
-                        """Store the concrete tiktoken encoding."""
-                        self._encoding = encoding
-
-                    def encode(self, text: str) -> List[int]:
-                        """Encode text using the wrapped tiktoken encoding."""
-                        return self._encoding.encode(text)
-
-                    def count_tokens(self, text: str) -> int:
-                        """Count tokens using the wrapped tiktoken encoding."""
-                        return len(self._encoding.encode(text))
-
-                self.tokenizer = TiktokenWrapper(encoding)
-                logger.debug("Using tiktoken for token counting")
-            except ImportError:
-                logger.debug("tiktoken not available, using heuristic fallback")
-
-    def count_tokens(self, text: str) -> int:
-        """
-        Count tokens in text using tokenizer or heuristic fallback.
-
-        Args:
-            text: Text to count tokens for
-
-        Returns:
-            Token count
-        """
-        if not text:
-            return 0
-
-        if self.tokenizer:
-            try:
-                return self.tokenizer.count_tokens(text)
-            except Exception as e:
-                logger.warning(f"Tokenizer failed: {e}, using fallback")
-
-        # Fallback heuristic: ~4 characters per token
-        return max(1, math.ceil(len(text) / 4))
 
 
 class PromptAssembler:

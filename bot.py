@@ -9,6 +9,7 @@ import traceback
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
+from core.utils import mask_db_url
 from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                     PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED, PROACTIVE_MESSAGING_ENABLED,
                     PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
@@ -24,7 +25,7 @@ from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                     MEMORY_TRIGGER_EVERY_N_MESSAGES,
                     MEMORY_CHUNK_MAX_MESSAGES, MEMORY_CHUNK_TARGET_TOKENS,
                     MEMORY_RETRIEVAL_EXPAND_NEIGHBORS)
-from memory.llamaindex.embedding import LMStudioEmbeddingModel
+from memory.embedding_factory import build_embedding_model
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
 from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response, MessageQueueManager, MessageDispatcher
@@ -63,20 +64,6 @@ else:
 class TelegramChatBot:
     """Telegram-facing chat bot built on the shared LLMChatEngine services."""
 
-    def _mask_db_url(self, db_url: str) -> str:
-        """Mask sensitive parts of database URL for logging."""
-        try:
-            if '@' in db_url and '://' in db_url:
-                scheme_and_auth, rest = db_url.split('://', 1)
-                if '@' in rest:
-                    auth, host_and_path = rest.split('@', 1)
-                    if ':' in auth:
-                        user, _ = auth.split(':', 1)
-                        return f"{scheme_and_auth}://{user}:***@{host_and_path}"
-            return db_url[:20] + "***"
-        except Exception:
-            return "***masked***"
-
     def __init__(self):
         # Initialize PostgreSQL conversation manager (required)
         if not DATABASE_URL:
@@ -86,7 +73,7 @@ class TelegramChatBot:
             )
 
         self.conversation_manager = PostgresConversationManager(DATABASE_URL, USE_PGVECTOR)
-        logger.info("Using PostgreSQL conversation manager with database: %s", self._mask_db_url(DATABASE_URL))
+        logger.info("Using PostgreSQL conversation manager with database: %s", mask_db_url(DATABASE_URL))
 
         self.ai_handler = AIHandler()
         self.typing_manager = TypingIndicatorManager()
@@ -899,15 +886,7 @@ I'm designed to be flexible and adapt to your preferences."""
             )
 
             # 2. Initialize EmbeddingModel based on configured provider
-            if MEMORY_EMBEDDING_PROVIDER == 'gemini':
-                from memory.llamaindex.gemini import GeminiEmbeddingModel
-                embedding_model = GeminiEmbeddingModel(model_name=GEMINI_EMBEDDING_MODEL)
-                logger.info("Using Gemini embedding model: %s", GEMINI_EMBEDDING_MODEL)
-            elif MEMORY_EMBEDDING_PROVIDER == 'lmstudio':
-                embedding_model = LMStudioEmbeddingModel(MEMORY_EMBED_MODEL)
-                logger.info("Using LMStudio embedding model: %s", MEMORY_EMBED_MODEL)
-            else:
-                raise ValueError(f"Unsupported embedding provider: {MEMORY_EMBEDDING_PROVIDER}")
+            embedding_model = build_embedding_model()
 
             # 3. Initialize LlamaIndexMemoryManager (no LLM extraction needed)
             self.memory_manager = LlamaIndexMemoryManager(

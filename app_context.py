@@ -11,7 +11,6 @@ import asyncio
 import logging
 import uuid
 from typing import Optional, Tuple
-from memory.llamaindex.embedding import LMStudioEmbeddingModel
 from ai_handler import AIHandler
 from config import (
     DATABASE_URL, USE_PGVECTOR, PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
@@ -23,6 +22,7 @@ from config import (
 )
 from memory.manager import LlamaIndexMemoryManager
 from memory.llamaindex.vector_store import PgVectorStore
+from memory.embedding_factory import build_embedding_model
 from message_manager import MessageQueueManager, TypingIndicatorManager
 from prompt.assembler import PromptAssembler
 from storage_conversation_manager import PostgresConversationManager
@@ -134,20 +134,7 @@ class AppContext:
         # 3. Initialize Memory Manager (LlamaIndex stack)
         try:
             if MEMORY_ENABLED:
-                if MEMORY_EMBEDDING_PROVIDER == 'gemini':
-                    from memory.llamaindex.gemini import GeminiEmbeddingModel
-
-                    embedding_model = GeminiEmbeddingModel(
-                        model_name=GEMINI_EMBEDDING_MODEL
-                    )
-                    logger.info(f"Using Gemini embedding model: {GEMINI_EMBEDDING_MODEL}")
-                elif MEMORY_EMBEDDING_PROVIDER == 'lmstudio':
-                    embedding_model = LMStudioEmbeddingModel(
-                        model_name=MEMORY_EMBED_MODEL
-                    )
-                    logger.info(f"Using lmstudio embedding model: {MEMORY_EMBED_MODEL}")
-                else:
-                    raise ValueError(f"Unsupported embedding provider: {MEMORY_EMBEDDING_PROVIDER}")
+                embedding_model = build_embedding_model()
 
                 logger.info(f"Using embedding dimension: {MEMORY_EMBED_DIM}")
 

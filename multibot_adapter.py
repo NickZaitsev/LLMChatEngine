@@ -6,27 +6,14 @@ without modifying the original bot.py file.
 """
 
 import logging
-from typing import Optional, Dict, Any
-from dataclasses import dataclass
-import uuid
+from typing import Optional
 
 from telegram.ext import Application
 
 from config import TELEGRAM_TOKEN, BOT_NAME, BOT_PERSONALITY
+from core.bot_config import BotConfig
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class BotConfig:
-    """Configuration for a single bot instance."""
-    id: uuid.UUID
-    token: str  # Decrypted token
-    name: str
-    personality: str
-    is_active: bool
-    feature_flags: Dict[str, Any]
-    llm_config: Dict[str, Any]
 
 
 def create_bot_with_config(bot_config: Optional[BotConfig] = None):
