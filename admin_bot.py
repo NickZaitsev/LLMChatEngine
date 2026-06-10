@@ -21,7 +21,9 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from token_encryption import encrypt_token, decrypt_token
 from features import BotFeature, DEFAULT_FEATURE_FLAGS, has_feature
 from config import BOOKS_STORAGE_DIR, MEMORY_EMBED_DIM
+from knowledge.manager import BookKnowledgeManager
 from knowledge.store import BookVectorStore
+from memory.embedding_factory import build_embedding_model
 
 logger = logging.getLogger(__name__)
 
@@ -697,12 +699,15 @@ Use these commands to manage your bot fleet."""
             return
 
         try:
-            vector_store = BookVectorStore(
-                db_url=self.db_url,
-                table_name="book_chunks",
-                embed_dim=MEMORY_EMBED_DIM,
+            book_knowledge_manager = BookKnowledgeManager(
+                store=BookVectorStore(
+                    db_url=self.db_url,
+                    table_name="book_chunks",
+                    embed_dim=MEMORY_EMBED_DIM,
+                ),
+                embedding_model=build_embedding_model(),
             )
-            await vector_store.delete_book(str(book.id))
+            await book_knowledge_manager.delete_book(str(book.id))
             source_path = Path(BOOKS_STORAGE_DIR) / f"{book.id}.{book.file_format}"
             source_path.unlink(missing_ok=True)
             await self.storage.books.delete_book(str(book.id))

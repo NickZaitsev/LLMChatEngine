@@ -179,11 +179,11 @@ async def test_removebook_deletes_vectors_file_and_row(tmp_path, monkeypatch):
     context.args = [str(book_id)]
     monkeypatch.setattr("admin_bot.BOOKS_STORAGE_DIR", str(tmp_path))
 
-    vector_store = MagicMock()
-    vector_store.delete_book = AsyncMock()
-    with patch("admin_bot.BookVectorStore", return_value=vector_store):
+    manager = MagicMock()
+    manager.delete_book = AsyncMock()
+    with patch("admin_bot.BookKnowledgeManager", return_value=manager):
         await admin.removebook_command(update, context)
 
-    vector_store.delete_book.assert_awaited_once_with(str(book_id))
+    manager.delete_book.assert_awaited_once_with(str(book_id))
     admin.storage.books.delete_book.assert_awaited_once_with(str(book_id))
     assert not source_file.exists()
