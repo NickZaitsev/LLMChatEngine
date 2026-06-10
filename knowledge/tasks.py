@@ -7,8 +7,9 @@ from pathlib import Path
 
 from app_context import get_app_context
 from config import BOOKS_KEEP_SOURCE_FILES, BOOKS_STORAGE_DIR
+from core.celery_loop import run_coroutine
 from knowledge.parser import extract_text
-from memory.tasks import celery_app, run_coroutine
+from memory.tasks import celery_app
 
 logger = logging.getLogger(__name__)
 

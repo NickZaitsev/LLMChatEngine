@@ -9,13 +9,12 @@ Includes:
 
 import logging
 from celery import Celery
-import asyncio
-from celery.signals import worker_process_init, worker_process_shutdown
 
 import redis
 from app_context import get_app_context
 from config import SUMMARIZATION_PROMPT
 import celeryconfig
+from core.celery_loop import run_coroutine
 
 # Initialize Celery
 celery_app = Celery('memory_tasks')
@@ -24,35 +23,8 @@ celery_app.config_from_object(celeryconfig)
 logger = logging.getLogger(__name__)
 
 _task_lock_client = None
-_worker_loop = None
 SUMMARY_LOCK_TTL = 300
 MEMORY_LOCK_TTL = 600
-
-
-@worker_process_init.connect
-def _init_worker_loop(**kwargs):
-    """Create one event loop per Celery worker process."""
-    global _worker_loop
-    _worker_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(_worker_loop)
-
-
-@worker_process_shutdown.connect
-def _shutdown_worker_loop(**kwargs):
-    """Close the worker event loop during process shutdown."""
-    global _worker_loop
-    if _worker_loop and not _worker_loop.is_closed():
-        _worker_loop.close()
-    _worker_loop = None
-
-
-def run_coroutine(coro):
-    """Run an async task body on the worker process event loop."""
-    global _worker_loop
-    if _worker_loop is None or _worker_loop.is_closed():
-        _worker_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(_worker_loop)
-    return _worker_loop.run_until_complete(coro)
 
 
 def _get_task_lock_client():

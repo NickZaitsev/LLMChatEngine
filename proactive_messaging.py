@@ -5,7 +5,6 @@ This module handles the scheduling and sending of proactive messages to users
 based on configurable intervals, jitter, quiet hours, and cadence escalation.
 """
 
-import asyncio
 import logging
 import random
 import re
@@ -34,6 +33,7 @@ from config import (
 
 # Import AppContext for shared services
 from app_context import get_app_context, AppContext
+from core.celery_loop import run_coroutine
 
 # Import message queue manager and related functions
 from message_manager import clean_ai_response, generate_ai_response
@@ -478,7 +478,7 @@ def send_proactive_message(self, user_id: int, bot_id: Optional[str] = None):
 
     try:
         # Run the async part of the task
-        asyncio.run(send_proactive_message_async(self, user_id, bot_id=bot_id))
+        run_coroutine(send_proactive_message_async(self, user_id, bot_id=bot_id))
     except Exception as e:
         logger.error(f"Error in send_proactive_message task for user {user_id} bot {bot_id} [{task_id}]: {e}")
         # Retry with exponential backoff
@@ -488,11 +488,11 @@ def send_proactive_message(self, user_id: int, bot_id: Optional[str] = None):
             logger.error(f"Max retries exceeded for task {task_id} for user {user_id} bot {bot_id}")
             try:
                 normalized_bot_id = proactive_messaging_service._normalize_bot_id(bot_id)
-                user_state = asyncio.run(proactive_messaging_service._get_user_state(user_id, bot_id=normalized_bot_id))
+                user_state = run_coroutine(proactive_messaging_service._get_user_state(user_id, bot_id=normalized_bot_id))
                 user_state['scheduled_task_id'] = None
                 user_state['scheduled_time'] = None
                 user_state['last_error'] = str(e)
-                asyncio.run(proactive_messaging_service._set_user_state(user_id, user_state, bot_id=normalized_bot_id))
+                run_coroutine(proactive_messaging_service._set_user_state(user_id, user_state, bot_id=normalized_bot_id))
             except Exception as state_error:
                 logger.error("Failed to clear proactive task state after max retries for user %s bot %s: %s", user_id, bot_id, state_error)
 
@@ -645,7 +645,7 @@ def manage_proactive_messages(self):
         logger.info(f"Proactive messaging is disabled. Skipping task [{task_id}].")
         return
     try:
-        asyncio.run(manage_proactive_messages_async(self))
+        run_coroutine(manage_proactive_messages_async(self))
     except Exception as e:
         logger.error(f"Error in manage_proactive_messages task [{task_id}]: {e}")
 
