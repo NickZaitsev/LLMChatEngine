@@ -621,8 +621,31 @@ I'm designed to be flexible and adapt to your preferences."""
             }
 
             if personality_type in personalities:
-                self.ai_handler.update_personality(personalities[personality_type])
-                logger.info("Personality updated for user %s to: %s", user_id, personality_type)
+                if not self.bot_id:
+                    logger.warning("Cannot save personality override for user %s without bot_id", user_id)
+                    await query.edit_message_text("❌ Personality settings are unavailable for this bot.")
+                    return
+
+                try:
+                    conversation = await self.conversation_manager._ensure_user_and_conversation(
+                        user_id,
+                        bot_id=self.bot_id,
+                    )
+                    storage = self.conversation_manager.storage
+                    if not storage or not storage.user_settings:
+                        raise RuntimeError("User settings storage is not initialized")
+
+                    await storage.user_settings.update_settings(
+                        str(conversation.user_id),
+                        str(self.bot_id),
+                        {"personality_override": personalities[personality_type]},
+                    )
+                except Exception as e:
+                    logger.error("Failed to save personality override for user %s: %s", user_id, e)
+                    await query.edit_message_text("❌ I could not save that personality setting. Please try again later.")
+                    return
+
+                logger.info("Personality override saved for user %s to: %s", user_id, personality_type)
                 await query.edit_message_text(f"My personality has been updated. Current mode: {personality_type}.")
             else:
                 logger.warning("Invalid personality type requested by user %s: %s", user_id, personality_type)
@@ -916,6 +939,7 @@ I'm designed to be flexible and adapt to your preferences."""
                 conversation_repo=storage.conversations,
                 user_repo=storage.users,
                 persona_repo=storage.personas,
+                user_settings_repo=storage.user_settings,
                 config=prompt_config
             )
             logger.info("PromptAssembler initialized successfully with config: %s", prompt_config)

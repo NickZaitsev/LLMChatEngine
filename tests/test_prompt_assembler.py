@@ -437,11 +437,59 @@ class TestPromptAssembler:
             conversation_id=sample_conversation_id
             # Using default values from config
         )
-        
+
         # Should not include system template
-        system_messages = [msg for msg in messages if msg["role"] == "system" and prompt_assembler.personality in msg["content"]]
+        system_messages = [msg for msg in messages if msg["role"] == "system"]
         assert len(system_messages) == 0
         assert metadata["token_counts"]["system_tokens"] == 0
+
+    @pytest.mark.asyncio
+    async def test_user_personality_override_wins_for_prompt(
+        self,
+        mock_message_repo,
+        mock_memory_manager,
+        mock_persona_repo,
+        mock_tokenizer,
+        sample_conversation_id,
+    ):
+        """A user's /personality choice must not mutate the global bot personality."""
+        user_id = uuid4()
+        bot_id = uuid4()
+        conversation_repo = AsyncMock()
+        conversation_repo.get_conversation.return_value = SimpleNamespace(
+            id=uuid4(),
+            user_id=user_id,
+            bot_id=bot_id,
+            summary=None,
+            last_summarized_message_id=None,
+        )
+        user_repo = AsyncMock()
+        user_repo.get_user.return_value = SimpleNamespace(username="user123")
+        user_settings_repo = AsyncMock()
+        user_settings_repo.get_settings.return_value = SimpleNamespace(
+            settings={"personality_override": "Only this user's personality"}
+        )
+        mock_message_repo.get_last_user_message.return_value = None
+        mock_message_repo.fetch_active_messages.return_value = []
+        mock_memory_manager.get_context.return_value = ""
+
+        assembler = PromptAssembler(
+            message_repo=mock_message_repo,
+            memory_manager=mock_memory_manager,
+            conversation_repo=conversation_repo,
+            user_repo=user_repo,
+            persona_repo=mock_persona_repo,
+            user_settings_repo=user_settings_repo,
+            tokenizer=mock_tokenizer,
+            config={"include_system_template": True},
+        )
+        assembler.personality = "Shared bot personality"
+
+        messages, _ = await assembler.build_prompt_and_metadata(
+            conversation_id=sample_conversation_id
+        )
+
+        assert messages[0]["content"] == "Only this user's personality"
     
     @pytest.mark.asyncio
     async def test_message_ordering(self, prompt_assembler, sample_conversation_id, 

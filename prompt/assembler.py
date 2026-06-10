@@ -11,7 +11,14 @@ import math
 from typing import Dict, List, Any, Optional, Mapping, Tuple, Protocol
 from uuid import UUID
 
-from storage.interfaces import MessageRepo, PersonaRepo, ConversationRepo, UserRepo, Message
+from storage.interfaces import (
+    MessageRepo,
+    PersonaRepo,
+    ConversationRepo,
+    UserRepo,
+    UserBotSettingsRepo,
+    Message,
+)
 from memory.manager import LlamaIndexMemoryManager
 from .templates import (
     create_memory_context_message,
@@ -112,6 +119,7 @@ class PromptAssembler:
         conversation_repo: ConversationRepo,
         user_repo: UserRepo,
         persona_repo: Optional[PersonaRepo] = None,
+        user_settings_repo: Optional[UserBotSettingsRepo] = None,
         tokenizer: Optional[Tokenizer] = None,
         config: Mapping[str, Any] = None
     ):
@@ -136,6 +144,7 @@ class PromptAssembler:
         self.conversation_repo = conversation_repo
         self.user_repo = user_repo
         self.persona_repo = persona_repo
+        self.user_settings_repo = user_settings_repo
         self.token_counter = TokenCounter(tokenizer)
 
         # Set default config values
@@ -243,7 +252,24 @@ class PromptAssembler:
         #   -> config.BOT_PERSONALITY (env var fallback)
         personality_to_use = self.personality or config.BOT_PERSONALITY
 
-        if not self.personality and conversation and conversation.bot_id:
+        if self.user_settings_repo and conversation and conversation.bot_id:
+            try:
+                settings = await self.user_settings_repo.get_settings(
+                    str(conversation.user_id),
+                    str(conversation.bot_id),
+                )
+                personality_override = (settings.settings or {}).get("personality_override") if settings else None
+                if personality_override:
+                    personality_to_use = personality_override
+                    logger.info(
+                        "Loaded per-user personality override for user_id=%s bot_id=%s",
+                        conversation.user_id,
+                        conversation.bot_id,
+                    )
+            except Exception as e:
+                logger.warning("Failed to load per-user personality override: %s", e)
+
+        if personality_to_use == config.BOT_PERSONALITY and not self.personality and conversation and conversation.bot_id:
             try:
                 from storage.models import Bot as BotModel
                 from sqlalchemy import select
