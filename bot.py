@@ -5,11 +5,13 @@ import logging
 import random
 import time
 import traceback
+from typing import Optional
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 from core.utils import mask_db_url
+from core.bot_config import BotConfig
 from config import (TELEGRAM_TOKEN, BOT_NAME, DATABASE_URL, USE_PGVECTOR,
                     PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED, PROACTIVE_MESSAGING_ENABLED,
                     PROMPT_MAX_MEMORY_ITEMS, PROMPT_MEMORY_TOKEN_BUDGET_RATIO,
@@ -64,7 +66,7 @@ else:
 class TelegramChatBot:
     """Telegram-facing chat bot built on the shared LLMChatEngine services."""
 
-    def __init__(self):
+    def __init__(self, bot_config: Optional[BotConfig] = None):
         # Initialize PostgreSQL conversation manager (required)
         if not DATABASE_URL:
             raise RuntimeError(
@@ -80,10 +82,15 @@ class TelegramChatBot:
         self.application = None
         self.pending_clear_confirmation = set()
         self._storage_initialized = False
-        self.bot_id = None  # Will be set by multibot_adapter in multi-bot mode
-        self.bot_config = None # Will be set by multibot_adapter in multi-bot mode
-        self.bot_name = BOT_NAME
-        self.bot_token = TELEGRAM_TOKEN
+        self.bot_config = bot_config
+        self.bot_id = bot_config.id if bot_config else None
+        self.bot_name = bot_config.name if bot_config else BOT_NAME
+        self.bot_token = bot_config.token if bot_config else TELEGRAM_TOKEN
+        self.feature_flags = bot_config.feature_flags if bot_config else {}
+
+        if bot_config:
+            self.ai_handler.update_personality(bot_config.personality)
+            self.ai_handler.apply_llm_config(bot_config.llm_config)
 
         # Initialize memory and prompt components
         self.memory_manager = None
@@ -988,11 +995,40 @@ I'm designed to be flexible and adapt to your preferences."""
             except Exception as e:
                 logger.error("Error during storage cleanup: %s", e)
 
+    def build_application(self, token_override: Optional[str] = None) -> Application:
+        """Build and register the Telegram application handlers."""
+        token = token_override or self.bot_token
+        app = Application.builder().token(token).concurrent_updates(True).build()
+
+        app.add_handler(MessageHandler(filters.ALL, self._monitor_pending_clear), group=-1)
+
+        app.add_handler(CommandHandler("start", self.start_command))
+        app.add_handler(CommandHandler("help", self.help_command))
+        app.add_handler(CommandHandler("ping", self.ping_command))
+        app.add_handler(CommandHandler("clear", self.clear_command))
+        app.add_handler(CommandHandler("ok", self.ok_command))
+        app.add_handler(CommandHandler("stats", self.stats_command))
+        app.add_handler(CommandHandler("status", self.status_command))
+        app.add_handler(CommandHandler("debug", self.debug_command))
+        app.add_handler(CommandHandler("personality", self.personality_command))
+        app.add_handler(CommandHandler("stop", self.stop_command))
+        app.add_handler(CommandHandler("reset", self.reset_command))
+        app.add_handler(CommandHandler("deps", self.deps_command))
+
+        app.add_handler(CallbackQueryHandler(self.handle_callback_query))
+
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+        app.add_handler(MessageHandler(filters.PHOTO, self.handle_photo))
+        app.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
+
+        app.add_error_handler(self.error_handler)
+        return app
+
     def run(self):
         """Start the bot"""
         logger.info("Starting up %s...", self._get_bot_name())
 
-        self.application = Application.builder().token(self.bot_token).concurrent_updates(True).build()
+        self.application = self.build_application()
         logger.info("Application created successfully")
 
         # Initialize storage and LM Studio model in the event loop
@@ -1032,32 +1068,6 @@ I'm designed to be flexible and adapt to your preferences."""
             logger.error("Bot startup failed due to PostgreSQL configuration issues")
             logger.error("Please check README.md for setup and troubleshooting steps")
             raise SystemExit(1) from e
-
-        # High-priority watcher to manage /clear confirmation lifecycle
-        self.application.add_handler(MessageHandler(filters.ALL, self._monitor_pending_clear), group=-1)
-
-        # Add command handlers
-        self.application.add_handler(CommandHandler("start", self.start_command))
-        self.application.add_handler(CommandHandler("help", self.help_command))
-        self.application.add_handler(CommandHandler("ping", self.ping_command))
-        self.application.add_handler(CommandHandler("clear", self.clear_command))
-        self.application.add_handler(CommandHandler("ok", self.ok_command))
-        self.application.add_handler(CommandHandler("stats", self.stats_command))
-        self.application.add_handler(CommandHandler("status", self.status_command))
-        self.application.add_handler(CommandHandler("debug", self.debug_command))
-        self.application.add_handler(CommandHandler("personality", self.personality_command))
-        self.application.add_handler(CommandHandler("reset", self.reset_command))
-
-        # Add callback query handler for inline keyboards
-        self.application.add_handler(CallbackQueryHandler(self.handle_callback_query))
-
-        # Add message handlers
-        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
-        self.application.add_handler(MessageHandler(filters.PHOTO, self.handle_photo))
-        self.application.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
-
-        # Add global error handler
-        self.application.add_error_handler(self.error_handler)
 
         logger.info("All handlers registered successfully")
 

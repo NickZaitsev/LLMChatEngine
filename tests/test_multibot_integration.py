@@ -59,11 +59,9 @@ def test_user_bot_settings_model_creation():
     )
     assert settings.settings["theme"] == "dark"
 
-@patch('config.TELEGRAM_TOKEN', 'original_token')
-@patch('config.BOT_NAME', 'OriginalBot')
 @patch('bot.TelegramChatBot')
 def test_multibot_adapter(mock_bot_cls, mock_bot_config):
-    """Test that the adapter correctly patches config and creates bot."""
+    """Test that the adapter injects config without mutating config globals."""
     # Setup mock
     mock_instance = MagicMock()
     mock_bot_cls.return_value = mock_instance
@@ -72,74 +70,36 @@ def test_multibot_adapter(mock_bot_cls, mock_bot_config):
     bot = create_bot_with_config(mock_bot_config)
     
     # Verify bot was initialized
-    assert mock_bot_cls.called
-    
-    # Verify attributes were set on the instance
-    assert bot.bot_config == mock_bot_config
-    assert bot.bot_id == mock_bot_config.id
-    assert bot.bot_name == mock_bot_config.name
-    assert bot.bot_token == mock_bot_config.token
-    assert bot.feature_flags == mock_bot_config.feature_flags
-    
-    # Verify AI handler personality update was called
-    if hasattr(bot, 'ai_handler'):
-        bot.ai_handler.update_personality.assert_called_with(mock_bot_config.personality)
-        bot.ai_handler.apply_llm_config.assert_called_once_with(mock_bot_config.llm_config)
+    mock_bot_cls.assert_called_once_with(bot_config=mock_bot_config)
+    assert bot is mock_instance
 
-@patch('telegram.ext.filters')
-@patch('telegram.ext.CallbackQueryHandler')
-@patch('telegram.ext.MessageHandler')
-@patch('telegram.ext.CommandHandler')
-@patch('telegram.ext.Application.builder')
-def test_build_application_for_bot_registers_clear_watcher(
-    mock_builder,
-    mock_command_handler,
-    mock_message_handler,
-    mock_callback_handler,
-    mock_filters,
-):
-    """Test that multi-bot application wiring includes the /clear confirmation watcher."""
+
+def test_multibot_adapter_does_not_mutate_config(mock_bot_config):
+    import config
+
+    original_token = config.TELEGRAM_TOKEN
+    original_name = config.BOT_NAME
+    original_personality = config.BOT_PERSONALITY
+
+    with patch("bot.TelegramChatBot", return_value=MagicMock()):
+        create_bot_with_config(mock_bot_config)
+
+    assert config.TELEGRAM_TOKEN == original_token
+    assert config.BOT_NAME == original_name
+    assert config.BOT_PERSONALITY == original_personality
+
+def test_build_application_for_bot_delegates_to_bot_registration():
+    """Multi-bot application wiring uses the same registration path as single-bot."""
     from multibot_adapter import build_application_for_bot
 
     mock_app = MagicMock()
-    mock_builder.return_value.token.return_value.build.return_value = mock_app
+    mock_bot = MagicMock()
+    mock_bot.build_application.return_value = mock_app
 
-    mock_filters.ALL = MagicMock(name="ALL")
-    mock_filters.TEXT = MagicMock(name="TEXT")
-    mock_filters.COMMAND = MagicMock(name="COMMAND")
-    mock_filters.PHOTO = MagicMock(name="PHOTO")
-    mock_filters.VOICE = MagicMock(name="VOICE")
-    mock_filters.TEXT.__and__.return_value = mock_filters.TEXT
-    mock_filters.TEXT.__invert__.return_value = mock_filters.COMMAND
+    app = build_application_for_bot(mock_bot, "token")
 
-    class StubBot:
-        def __init__(self):
-            self._monitor_pending_clear = MagicMock()
-            self.start_command = MagicMock()
-            self.help_command = MagicMock()
-            self.clear_command = MagicMock()
-            self.ok_command = MagicMock()
-            self.stats_command = MagicMock()
-            self.debug_command = MagicMock()
-            self.status_command = MagicMock()
-            self.personality_command = MagicMock()
-            self.stop_command = MagicMock()
-            self.reset_command = MagicMock()
-            self.ping_command = MagicMock()
-            self.deps_command = MagicMock()
-            self.handle_callback_query = MagicMock()
-            self.handle_message = MagicMock()
-            self.handle_photo = MagicMock()
-            self.handle_voice = MagicMock()
-            self.error_handler = MagicMock()
-
-    mock_bot = StubBot()
-
-    build_application_for_bot(mock_bot, "token")
-
-    first_add_handler_call = mock_app.add_handler.call_args_list[0]
-    assert first_add_handler_call.kwargs["group"] == -1
-    mock_message_handler.assert_any_call(mock_filters.ALL, mock_bot._monitor_pending_clear)
+    assert app is mock_app
+    mock_bot.build_application.assert_called_once_with(token_override="token")
 
 @pytest.mark.asyncio
 async def test_vector_store_query_isolation():
