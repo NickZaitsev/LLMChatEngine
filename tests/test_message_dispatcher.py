@@ -63,7 +63,7 @@ class TestMessageDispatcher:
     
     def test_init_failure(self):
         """Test failed initialization of MessageDispatcher."""
-        with patch('redis.from_url') as mock_from_url:
+        with patch('message_manager.redis_async.from_url') as mock_from_url:
             mock_from_url.side_effect = Exception("Connection failed")
             with pytest.raises(Exception):
                 MessageDispatcher(self.redis_url)

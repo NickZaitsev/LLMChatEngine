@@ -14,8 +14,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from celery import Celery
 from celery.schedules import crontab
-import redis
+import redis.asyncio as redis_async
 import json
+import inspect
 from telegram import Bot
 
 from config import (
@@ -43,6 +44,10 @@ import celeryconfig
 
 # Initialize logger
 logger = logging.getLogger(__name__)
+
+
+async def _await_redis(value):
+    return await value if inspect.isawaitable(value) else value
 
 # Initialize Celery
 celery_app = Celery('proactive_messaging')
@@ -75,7 +80,7 @@ class ProactiveMessagingService:
         logger.info(f"  Cadences: {cadence_info}")
 
         # Initialize Redis client
-        self.redis_client = redis.from_url(self.redis_url)
+        self.redis_client = redis_async.from_url(self.redis_url)
         logger.info("Redis client initialized")
 
         # Message queue manager is now retrieved from AppContext, not initialized here
@@ -129,7 +134,7 @@ class ProactiveMessagingService:
                 state['scheduled_time'] = None
         return state
 
-    def _get_user_state(self, user_id: int, bot_id: Optional[Any] = None) -> dict:
+    async def _get_user_state(self, user_id: int, bot_id: Optional[Any] = None) -> dict:
         """
         Get user state from Redis.
 
@@ -140,13 +145,13 @@ class ProactiveMessagingService:
             User state dictionary
         """
         try:
-            state_json = self.redis_client.get(self._state_key(user_id, bot_id))
+            state_json = await _await_redis(self.redis_client.get(self._state_key(user_id, bot_id)))
             return self._deserialize_state(state_json)
         except Exception as e:
             logger.error(f"Error getting user state for user {user_id} and bot {bot_id} from Redis: {e}")
             return {}
 
-    def _set_user_state(self, user_id: int, state: dict, bot_id: Optional[Any] = None):
+    async def _set_user_state(self, user_id: int, state: dict, bot_id: Optional[Any] = None):
         """
         Set user state in Redis.
 
@@ -167,7 +172,7 @@ class ProactiveMessagingService:
             normalized_bot_id = self._normalize_bot_id(bot_id) or state_copy.get('bot_id')
             state_copy['bot_id'] = normalized_bot_id
             state_json = json.dumps(state_copy, default=str)
-            self.redis_client.set(self._state_key(user_id, normalized_bot_id), state_json)
+            await _await_redis(self.redis_client.set(self._state_key(user_id, normalized_bot_id), state_json))
         except Exception as e:
             logger.error(f"Error setting user state for user {user_id} and bot {bot_id} in Redis: {e}")
 
@@ -191,7 +196,7 @@ class ProactiveMessagingService:
                 state_copy[key] = value.isoformat()
         return json.dumps(state_copy, default=str)
 
-    def _get_all_user_states(self):
+    async def _get_all_user_states(self):
         """
         Get all user states from Redis.
 
@@ -200,7 +205,7 @@ class ProactiveMessagingService:
         """
         try:
             pattern = "proactive_messaging:user:*"
-            all_keys = self.redis_client.keys(pattern)
+            all_keys = await _await_redis(self.redis_client.keys(pattern))
 
             user_states = {}
             for key in all_keys:
@@ -221,7 +226,7 @@ class ProactiveMessagingService:
                     user_id = int(user_id_str)
                     bot_id_key = key_segments[3]
                     bot_id = None if bot_id_key == "default" else bot_id_key
-                    state_json = self.redis_client.get(key)
+                    state_json = await _await_redis(self.redis_client.get(key))
                     if state_json:
                         state = self._deserialize_state(state_json)
                         state['bot_id'] = state.get('bot_id') or bot_id
@@ -387,7 +392,7 @@ class ProactiveMessagingService:
         logger.debug(f"Jitter calculation: {base_interval} + {jitter_amount} = {final_interval}")
         return final_interval
 
-    def should_switch_to_long_term_mode(self, user_id: int, bot_id: Optional[Any] = None) -> bool:
+    async def should_switch_to_long_term_mode(self, user_id: int, bot_id: Optional[Any] = None) -> bool:
         """
         Check if user should be switched to long-term mode.
 
@@ -397,11 +402,11 @@ class ProactiveMessagingService:
         Returns:
             True if should switch to long-term mode, False otherwise
         """
-        user_state = self._get_user_state(user_id, bot_id=bot_id)
+        user_state = await self._get_user_state(user_id, bot_id=bot_id)
         consecutive_outreaches = user_state.get('consecutive_outreaches', 0)
         return consecutive_outreaches >= self.max_consecutive_outreaches
 
-    def reset_cadence(self, user_id: int, bot_id: Optional[uuid.UUID] = None):
+    async def reset_cadence(self, user_id: int, bot_id: Optional[uuid.UUID] = None):
         """
         Reset cadence to shortest interval for a user.
 
@@ -409,7 +414,7 @@ class ProactiveMessagingService:
             user_id: Telegram user ID
         """
         normalized_bot_id = self._normalize_bot_id(bot_id)
-        user_state = self._get_user_state(user_id, bot_id=normalized_bot_id)
+        user_state = await self._get_user_state(user_id, bot_id=normalized_bot_id)
         user_state.update({
             'cadence': CADENCE_LEVELS[0],
             'consecutive_outreaches': 0,
@@ -420,11 +425,11 @@ class ProactiveMessagingService:
             'is_active': True,
             'bot_id': normalized_bot_id or user_state.get('bot_id')
         })
-        self._set_user_state(user_id, user_state, bot_id=normalized_bot_id)
+        await self._set_user_state(user_id, user_state, bot_id=normalized_bot_id)
 
         logger.info(f"Reset cadence for user {user_id} to {CADENCE_LEVELS[0]}")
 
-    def update_user_reply_status(self, user_id: int, replied: bool = True, bot_id: Optional[uuid.UUID] = None):
+    async def update_user_reply_status(self, user_id: int, replied: bool = True, bot_id: Optional[uuid.UUID] = None):
         """
         Update user reply status and reset cadence if they replied.
 
@@ -433,21 +438,21 @@ class ProactiveMessagingService:
             replied: Whether user replied (default True)
         """
         normalized_bot_id = self._normalize_bot_id(bot_id)
-        user_state = self._get_user_state(user_id, bot_id=normalized_bot_id)
+        user_state = await self._get_user_state(user_id, bot_id=normalized_bot_id)
         user_state['user_replied'] = replied
         user_state['scheduled_task_id'] = None
         user_state['scheduled_time'] = None
         if normalized_bot_id:
             user_state['bot_id'] = normalized_bot_id
-        self._set_user_state(user_id, user_state, bot_id=normalized_bot_id)
+        await self._set_user_state(user_id, user_state, bot_id=normalized_bot_id)
 
         if replied:
             # When a user replies, we just reset their state.
             # The centralized `manage_proactive_messages` task will handle rescheduling.
-            self.reset_cadence(user_id, bot_id=bot_id)
+            await self.reset_cadence(user_id, bot_id=bot_id)
             logger.info(f"User {user_id} replied. Cadence state has been reset.")
 
-    def handle_user_message(self, user_id: int, bot_id: Optional[uuid.UUID] = None):
+    async def handle_user_message(self, user_id: int, bot_id: Optional[uuid.UUID] = None):
         """
         Handle incoming user message - reset cadence state.
         The `manage_proactive_messages` task will handle rescheduling.
@@ -456,7 +461,7 @@ class ProactiveMessagingService:
             user_id: Telegram user ID
         """
         # A user message resets their proactive messaging cadence.
-        self.reset_cadence(user_id, bot_id=bot_id)
+        await self.reset_cadence(user_id, bot_id=bot_id)
         logger.info(f"Handled user message for user {user_id}, cadence state reset.")
 
 # Initialize the service
@@ -483,11 +488,11 @@ def send_proactive_message(self, user_id: int, bot_id: Optional[str] = None):
             logger.error(f"Max retries exceeded for task {task_id} for user {user_id} bot {bot_id}")
             try:
                 normalized_bot_id = proactive_messaging_service._normalize_bot_id(bot_id)
-                user_state = proactive_messaging_service._get_user_state(user_id, bot_id=normalized_bot_id)
+                user_state = asyncio.run(proactive_messaging_service._get_user_state(user_id, bot_id=normalized_bot_id))
                 user_state['scheduled_task_id'] = None
                 user_state['scheduled_time'] = None
                 user_state['last_error'] = str(e)
-                proactive_messaging_service._set_user_state(user_id, user_state, bot_id=normalized_bot_id)
+                asyncio.run(proactive_messaging_service._set_user_state(user_id, user_state, bot_id=normalized_bot_id))
             except Exception as state_error:
                 logger.error("Failed to clear proactive task state after max retries for user %s bot %s: %s", user_id, bot_id, state_error)
 
@@ -502,7 +507,7 @@ async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str]
 
     # Get user state
     normalized_bot_id = proactive_messaging_service._normalize_bot_id(bot_id)
-    user_state = proactive_messaging_service._get_user_state(user_id, bot_id=normalized_bot_id)
+    user_state = await proactive_messaging_service._get_user_state(user_id, bot_id=normalized_bot_id)
     logger.debug(f"User {user_id} state: {user_state}")
 
     # This task is now simplified: its only job is to send a message.
@@ -608,7 +613,7 @@ async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str]
     finally:
         if success:
             # CRITICAL: Update state only after a successful send/enqueue.
-            user_state = proactive_messaging_service._get_user_state(user_id, bot_id=resolved_bot_id or normalized_bot_id)
+            user_state = await proactive_messaging_service._get_user_state(user_id, bot_id=resolved_bot_id or normalized_bot_id)
 
             current_cadence = user_state.get('cadence', CADENCE_LEVELS[0])
             next_cadence = proactive_messaging_service.get_next_interval(current_cadence)
@@ -623,7 +628,7 @@ async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str]
             if resolved_bot_id:
                 user_state['bot_id'] = str(resolved_bot_id)
 
-            proactive_messaging_service._set_user_state(user_id, user_state, bot_id=resolved_bot_id or normalized_bot_id)
+            await proactive_messaging_service._set_user_state(user_id, user_state, bot_id=resolved_bot_id or normalized_bot_id)
 
             logger.info(
                 f"Updated user {user_id} bot {resolved_bot_id} state post-outreach. "
@@ -657,17 +662,17 @@ async def manage_proactive_messages_async(task):
     task_id = task.request.id
     logger.info(f"Running proactive message management task [{task_id}]")
 
-    user_states = proactive_messaging_service._get_all_user_states()
+    user_states = await proactive_messaging_service._get_all_user_states()
     now = proactive_messaging_service._utc_now()
 
     for (user_id, bot_id), state in user_states.items():
         lock_key = proactive_messaging_service._state_key(user_id, bot_id).replace("user:", "lock:")
         lock = proactive_messaging_service.redis_client.lock(lock_key, timeout=60)
 
-        if lock.acquire(blocking=False):
+        if await _await_redis(lock.acquire(blocking=False)):
             try:
                 # Re-fetch state now that we have the lock
-                state = proactive_messaging_service._get_user_state(user_id, bot_id=bot_id)
+                state = await proactive_messaging_service._get_user_state(user_id, bot_id=bot_id)
 
                 logger.info(f"Processing user {user_id} bot {bot_id} with state: {state}")
 
@@ -686,13 +691,13 @@ async def manage_proactive_messages_async(task):
                         )
                         state['scheduled_task_id'] = None
                         state['scheduled_time'] = None
-                        proactive_messaging_service._set_user_state(user_id, state, bot_id=bot_id)
+                        await proactive_messaging_service._set_user_state(user_id, state, bot_id=bot_id)
                     else:
                         logger.debug(f"Skipping user {user_id} bot {bot_id}: task {state['scheduled_task_id']} is already scheduled.")
                         continue
 
                 current_cadence_name = state.get('cadence', CADENCE_LEVELS[0])
-                if proactive_messaging_service.should_switch_to_long_term_mode(user_id, bot_id=bot_id):
+                if await proactive_messaging_service.should_switch_to_long_term_mode(user_id, bot_id=bot_id):
                     current_cadence_name = CADENCE_LEVELS[-1]
 
                 cadence_config = CADENCE_MAP.get(current_cadence_name)
@@ -701,7 +706,7 @@ async def manage_proactive_messages_async(task):
                 if not last_message_time:
                     logger.info(f"User {user_id} bot {bot_id} has no 'last_proactive_message' timestamp. Initializing it to the current time.")
                     state['last_proactive_message'] = now
-                    proactive_messaging_service._set_user_state(user_id, state, bot_id=bot_id)
+                    await proactive_messaging_service._set_user_state(user_id, state, bot_id=bot_id)
                     continue
 
                 interval_with_jitter = proactive_messaging_service.get_interval_with_jitter(current_cadence_name)
@@ -719,7 +724,7 @@ async def manage_proactive_messages_async(task):
 
                     state['scheduled_task_id'] = new_task.id
                     state['scheduled_time'] = scheduled_time
-                    proactive_messaging_service._set_user_state(user_id, state, bot_id=bot_id)
+                    await proactive_messaging_service._set_user_state(user_id, state, bot_id=bot_id)
 
                     logger.info(
                         f"Scheduled new proactive message for user {user_id} bot {bot_id} with task ID {new_task.id} "
@@ -729,7 +734,7 @@ async def manage_proactive_messages_async(task):
             except Exception as e:
                 logger.error(f"Error processing user {user_id} bot {bot_id} in manage_proactive_messages: {e}", exc_info=True)
             finally:
-                lock.release()
+                await _await_redis(lock.release())
 
 
 # Celery Beat Schedule (only if enabled)

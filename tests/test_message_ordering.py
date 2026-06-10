@@ -25,9 +25,9 @@ async def test_message_splitting_and_ordering():
     mock_redis.scan.return_value = (0, [])
     
     # Mock the from_url method to return our mock
-    import redis
-    original_from_url = redis.from_url
-    redis.from_url = MagicMock(return_value=mock_redis)
+    import message_manager
+    original_from_url = message_manager.redis_async.from_url
+    message_manager.redis_async.from_url = MagicMock(return_value=mock_redis)
     
     try:
         # Create MessageQueueManager instance
@@ -92,7 +92,7 @@ async def test_message_splitting_and_ordering():
         
     finally:
         # Restore original from_url method
-        redis.from_url = original_from_url
+        message_manager.redis_async.from_url = original_from_url
 
 
 def test_split_message_logic():
@@ -103,9 +103,9 @@ def test_split_message_logic():
     mock_redis = MagicMock()
     mock_redis.ping.return_value = True
     
-    import redis
-    original_from_url = redis.from_url
-    redis.from_url = MagicMock(return_value=mock_redis)
+    import message_manager
+    original_from_url = message_manager.redis_async.from_url
+    message_manager.redis_async.from_url = MagicMock(return_value=mock_redis)
     
     try:
         queue_manager = MessageQueueManager("redis://test:6379/0")
@@ -130,7 +130,7 @@ def test_split_message_logic():
         print("PASS: Message splitting logic test passed!")
         
     finally:
-        redis.from_url = original_from_url
+        message_manager.redis_async.from_url = original_from_url
 
 
 async def main():

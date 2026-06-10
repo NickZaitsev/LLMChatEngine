@@ -140,7 +140,8 @@ async def test_manage_proactive_messages_reschedules_stale_task(mock_apply_async
     assert final_state["scheduled_task_id"] == "replacement-task"
     assert final_state["scheduled_time"] is not None
 
-def test_handle_user_message_resets_cadence(proactive_service, mock_redis_client):
+@pytest.mark.asyncio
+async def test_handle_user_message_resets_cadence(proactive_service, mock_redis_client):
     """Test that handling a user message simply resets the user's state."""
     user_id = 789
     # Simulate a user in a high-cadence state
@@ -150,7 +151,7 @@ def test_handle_user_message_resets_cadence(proactive_service, mock_redis_client
         'scheduled_task_id': 'some_old_task'
     })
     
-    proactive_service.handle_user_message(user_id)
+    await proactive_service.handle_user_message(user_id)
     
     # ASSERT: The only thing that should happen is the state is reset.
     state_str = mock_redis_client.set.call_args[0][1]
@@ -160,12 +161,13 @@ def test_handle_user_message_resets_cadence(proactive_service, mock_redis_client
     assert state['consecutive_outreaches'] == 0
     assert state['scheduled_task_id'] is None
 
-def test_handle_user_message_persists_bot_id(proactive_service, mock_redis_client):
+@pytest.mark.asyncio
+async def test_handle_user_message_persists_bot_id(proactive_service, mock_redis_client):
     """Test that handling a user message stores the active bot ID for multi-bot routing."""
     user_id = 790
     bot_id = "8c52d8d6-f8c7-4523-8f4c-44d468704d2c"
 
-    proactive_service.handle_user_message(user_id, bot_id=bot_id)
+    await proactive_service.handle_user_message(user_id, bot_id=bot_id)
 
     state_str = mock_redis_client.set.call_args[0][1]
     state = json.loads(state_str)
@@ -282,13 +284,13 @@ async def test_send_proactive_message_uses_bot_scoped_ai_runtime(proactive_servi
     task = MagicMock()
     task.request.id = "task-123"
 
-    proactive_service._get_user_state = MagicMock(return_value={
+    proactive_service._get_user_state = AsyncMock(return_value={
         "scheduled_task_id": "task-123",
         "cadence": CADENCE_LEVELS[0],
         "consecutive_outreaches": 0,
         "bot_id": bot_id,
     })
-    proactive_service._set_user_state = MagicMock()
+    proactive_service._set_user_state = AsyncMock()
 
     conversation = MagicMock()
     conversation.id = "conv-1"
@@ -318,14 +320,14 @@ async def test_send_proactive_message_does_not_advance_state_on_failure(proactiv
     task = MagicMock()
     task.request.id = "task-999"
 
-    proactive_service._get_user_state = MagicMock(return_value={
+    proactive_service._get_user_state = AsyncMock(return_value={
         "scheduled_task_id": "task-999",
         "scheduled_time": datetime.now(),
         "cadence": CADENCE_LEVELS[0],
         "consecutive_outreaches": 1,
         "bot_id": bot_id,
     })
-    proactive_service._set_user_state = MagicMock()
+    proactive_service._set_user_state = AsyncMock()
 
     conversation = MagicMock()
     conversation.id = "conv-1"

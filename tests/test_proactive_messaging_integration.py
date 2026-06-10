@@ -94,11 +94,13 @@ async def test_handle_message_triggers_proactive_messaging(bot_instance):
         
         # Mock proactive messaging service
         if bot_instance.proactive_messaging_service:
-            bot_instance.proactive_messaging_service.handle_user_message = MagicMock()
+            bot_instance.proactive_messaging_service.handle_user_message = AsyncMock()
         
         # Mock buffer manager dispatch method to simulate immediate dispatch
         original_dispatch = bot_instance.buffer_manager.dispatch_buffer
+        original_schedule = bot_instance.buffer_manager.schedule_dispatch
         bot_instance.buffer_manager.dispatch_buffer = AsyncMock(return_value="Hello bot!")
+        bot_instance.buffer_manager.schedule_dispatch = AsyncMock()
         
         # Call handle_message
         await bot_instance.handle_message(mock_update, mock_context)
@@ -108,7 +110,7 @@ async def test_handle_message_triggers_proactive_messaging(bot_instance):
         
         # Check that proactive messaging service was called
         if bot_instance.proactive_messaging_service:
-            bot_instance.proactive_messaging_service.handle_user_message.assert_called_once_with(
+            bot_instance.proactive_messaging_service.handle_user_message.assert_awaited_once_with(
                 12345,
                 bot_id=bot_instance.bot_id
             )
@@ -122,6 +124,7 @@ async def test_handle_message_triggers_proactive_messaging(bot_instance):
         
         # Restore original dispatch method
         bot_instance.buffer_manager.dispatch_buffer = original_dispatch
+        bot_instance.buffer_manager.schedule_dispatch = original_schedule
 
 
 @pytest.mark.asyncio
@@ -155,13 +158,15 @@ async def test_handle_message_proactive_messaging_failure(bot_instance):
         
         # Make proactive messaging service raise an exception
         if bot_instance.proactive_messaging_service:
-            bot_instance.proactive_messaging_service.handle_user_message = MagicMock(
+            bot_instance.proactive_messaging_service.handle_user_message = AsyncMock(
                 side_effect=Exception("Proactive messaging error")
             )
         
         # Mock buffer manager dispatch method to simulate immediate dispatch
         original_dispatch = bot_instance.buffer_manager.dispatch_buffer
+        original_schedule = bot_instance.buffer_manager.schedule_dispatch
         bot_instance.buffer_manager.dispatch_buffer = AsyncMock(return_value="Hello bot!")
+        bot_instance.buffer_manager.schedule_dispatch = AsyncMock()
         
         # Call handle_message - should not raise an exception
         try:
@@ -174,6 +179,7 @@ async def test_handle_message_proactive_messaging_failure(bot_instance):
         finally:
             # Restore original dispatch method
             bot_instance.buffer_manager.dispatch_buffer = original_dispatch
+            bot_instance.buffer_manager.schedule_dispatch = original_schedule
         
         assert success  # Should not raise an exception
 

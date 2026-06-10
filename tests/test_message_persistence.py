@@ -27,29 +27,23 @@ async def test_message_persistence():
     mock_typing_manager_instance.stop_typing = AsyncMock()
     mock_typing_manager_class.return_value = mock_typing_manager_instance
     
-    with patch('redis.Redis.ping') as mock_ping, \
-         patch('redis.Redis.rpush') as mock_rpush, \
-         patch('redis.Redis.sadd') as mock_sadd, \
-         patch('redis.Redis.llen') as mock_llen, \
-         patch('redis.Redis.lpop') as mock_lpop, \
-         patch('redis.Redis.scan') as mock_scan, \
-         patch('redis.Redis.register_script') as mock_register_script, \
+    mock_redis = Mock()
+    with patch('message_manager.redis_async.from_url', return_value=mock_redis), \
          patch('message_manager.Bot', new=mock_bot_class), \
          patch('message_manager.TypingIndicatorManager', new=mock_typing_manager_class):
         
         # Mock Redis methods
-        mock_ping.return_value = True
-        mock_rpush.return_value = 1
-        mock_sadd.return_value = 1
-        mock_llen.return_value = 1
-        mock_lpop.return_value = None  # No messages to pop initially
+        mock_redis.rpush.return_value = 1
+        mock_redis.sadd.return_value = 1
+        mock_redis.llen.return_value = 1
+        mock_redis.lpop.return_value = None  # No messages to pop initially
         # Mock scan to return some test keys
-        mock_scan.side_effect = [(1, [b'queue:12345']), (0, [])]
+        mock_redis.scan.side_effect = [(1, [b'queue:12345']), (0, [])]
         
         # Mock Lua scripts
         mock_script = Mock()
         mock_script.return_value = 1
-        mock_register_script.return_value = mock_script
+        mock_redis.register_script.return_value = mock_script
         
         # Initialize components
         queue_manager = MessageQueueManager(redis_url)

@@ -7,8 +7,10 @@ import random
 import time
 import json
 import redis
+import redis.asyncio as redis_async
 import uuid
 import traceback
+import inspect
 from datetime import datetime, timezone
 from config import MIN_TYPING_SPEED, MAX_TYPING_SPEED, MAX_DELAY, RANDOM_OFFSET_MIN, RANDOM_OFFSET_MAX, MESSAGE_QUEUE_MAX_RETRIES, MESSAGE_QUEUE_LOCK_TIMEOUT, MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL, MESSAGE_QUEUE_DISPATCHER_INTERVAL
 import textwrap
@@ -19,6 +21,10 @@ from telegram.error import Forbidden, BadRequest
 from config import TELEGRAM_TOKEN
 
 logger = logging.getLogger(__name__)
+
+
+async def _await_redis(value):
+    return await value if inspect.isawaitable(value) else value
 
 def clean_ai_response(text: str) -> str:
     """
@@ -225,9 +231,7 @@ class MessageQueueManager:
             redis_url: Redis connection URL
         """
         try:
-            self.redis_client = redis.from_url(redis_url)
-            # Test the connection
-            self.redis_client.ping()
+            self.redis_client = redis_async.from_url(redis_url)
             logger.info("MessageQueueManager initialized with Redis URL: %s", redis_url)
         except Exception as e:
             logger.error("Failed to initialize MessageQueueManager with Redis URL %s: %s", redis_url, e)
@@ -294,7 +298,7 @@ class MessageQueueManager:
 
             # Add user/bot route to active users set first
             routing_key = self._routing_key(user_id, bot_id)
-            self.redis_client.sadd("dispatcher:active_users", routing_key)
+            await _await_redis(self.redis_client.sadd("dispatcher:active_users", routing_key))
 
             # Enqueue each part as a separate message
             total_parts = len(message_parts)
@@ -320,7 +324,7 @@ class MessageQueueManager:
                 queue_key = self._queue_key(user_id, bot_id)
 
                 # Add message to user's Redis list using RPUSH
-                result = self.redis_client.rpush(queue_key, message_json)
+                result = await _await_redis(self.redis_client.rpush(queue_key, message_json))
 
                 logger.info("Enqueued message part %d/%d for user %s (chat %s) of type %s. Queue position: %s",
                            i + 1, total_parts, user_id, chat_id, message_type, result)
@@ -350,7 +354,7 @@ class MessageQueueManager:
                 raise ValueError("user_id must be a positive integer")
 
             queue_key = self._queue_key(user_id, bot_id)
-            size = self.redis_client.llen(queue_key)
+            size = await _await_redis(self.redis_client.llen(queue_key))
             return size
         except ValueError as e:
             logger.error("Validation error when getting queue size for user %s: %s", user_id, e)
@@ -396,9 +400,7 @@ class MessageDispatcher:
             lock_timeout: Timeout for distributed locks in seconds
         """
         try:
-            self.redis_client = redis.from_url(redis_url)
-            # Test the connection
-            self.redis_client.ping()
+            self.redis_client = redis_async.from_url(redis_url)
             logger.info("MessageDispatcher initialized with Redis URL: %s", redis_url)
 
             self.max_retries = max_retries
@@ -534,7 +536,7 @@ class MessageDispatcher:
                 logger.warning("Invalid user ID in active users set: %s", raw_routing_key)
                 return
 
-            lock_acquired = self.acquire_lock(user_id, bot_id)
+            lock_acquired = await _await_redis(self.acquire_lock(user_id, bot_id))
 
             if not lock_acquired:
                 return
@@ -544,7 +546,7 @@ class MessageDispatcher:
             except Exception as e:
                 logger.error("Error processing queue for user %s bot %s: %s", user_id, bot_id, e)
             finally:
-                self.release_lock(user_id, bot_id)
+                await _await_redis(self.release_lock(user_id, bot_id))
 
     async def _process_active_users(self, active_users):
         semaphore = asyncio.Semaphore(self.max_concurrent_users)
@@ -556,7 +558,7 @@ class MessageDispatcher:
             await asyncio.gather(*tasks)
 
 
-    def acquire_lock(self, user_id: int, bot_id: str = None) -> bool:
+    async def acquire_lock(self, user_id: int, bot_id: str = None) -> bool:
         """
         Acquire a distributed lock for a user queue.
 
@@ -568,10 +570,10 @@ class MessageDispatcher:
         """
         try:
             lock_key = self._lock_key(user_id, bot_id)
-            result = self.lock_script(
+            result = await _await_redis(self.lock_script(
                 keys=[lock_key],
                 args=[self.instance_id, self.lock_timeout]
-            )
+            ))
             lock_acquired = bool(result)
 
             if lock_acquired:
@@ -584,7 +586,7 @@ class MessageDispatcher:
             logger.error("Error acquiring lock for user %s: %s", user_id, e)
             return False
 
-    def release_lock(self, user_id: int, bot_id: str = None) -> bool:
+    async def release_lock(self, user_id: int, bot_id: str = None) -> bool:
         """
         Release a distributed lock for a user queue.
 
@@ -596,10 +598,10 @@ class MessageDispatcher:
         """
         try:
             lock_key = self._lock_key(user_id, bot_id)
-            result = self.unlock_script(
+            result = await _await_redis(self.unlock_script(
                 keys=[lock_key],
                 args=[self.instance_id]
-            )
+            ))
             lock_released = bool(result)
 
             if lock_released:
@@ -612,7 +614,7 @@ class MessageDispatcher:
             logger.error("Error releasing lock for user %s: %s", user_id, e)
             return False
 
-    def renew_lock(self, user_id: int, bot_id: str = None) -> bool:
+    async def renew_lock(self, user_id: int, bot_id: str = None) -> bool:
         """
         Renew a distributed lock for a user queue.
 
@@ -624,10 +626,10 @@ class MessageDispatcher:
         """
         try:
             lock_key = self._lock_key(user_id, bot_id)
-            result = self.renew_script(
+            result = await _await_redis(self.renew_script(
                 keys=[lock_key],
                 args=[self.instance_id, self.lock_timeout]
-            )
+            ))
             lock_renewed = bool(result)
 
             if lock_renewed:
@@ -653,7 +655,7 @@ class MessageDispatcher:
             added_count = 0
 
             while True:
-                cursor, keys = self.redis_client.scan(cursor=cursor, match=pattern)
+                cursor, keys = await _await_redis(self.redis_client.scan(cursor=cursor, match=pattern))
                 scanned_count += len(keys)
 
                 # Add users with non-empty queues to the active users set
@@ -671,9 +673,9 @@ class MessageDispatcher:
                             else:
                                 logger.warning("Invalid queue key format: %s", key_str)
                                 continue
-                            queue_size = self.redis_client.llen(key_str)
+                            queue_size = await _await_redis(self.redis_client.llen(key_str))
                             if queue_size > 0:
-                                self.redis_client.sadd("dispatcher:active_users", routing_key)
+                                await _await_redis(self.redis_client.sadd("dispatcher:active_users", routing_key))
                                 logger.info("Found existing queue for routing key %s with %s messages", routing_key, queue_size)
                                 added_count += 1
                             else:
@@ -706,7 +708,7 @@ class MessageDispatcher:
             while self.running:
                 try:
                     # Get set of active users
-                    active_users = self.redis_client.smembers("dispatcher:active_users")
+                    active_users = await _await_redis(self.redis_client.smembers("dispatcher:active_users"))
 
                     if not active_users:
                         # No active users, sleep for a bit
@@ -767,7 +769,7 @@ class MessageDispatcher:
 
                 try:
                     # BLPOP blocks until a message is available or times out
-                    result = self.redis_client.blpop([queue_key], timeout=1)
+                    result = await _await_redis(self.redis_client.blpop([queue_key], timeout=1))
                 except redis.RedisError as e:
                     logger.error("Redis error while fetching message from queue for user %s: %s", user_id, e)
                     # Continue with the loop to retry
@@ -777,7 +779,7 @@ class MessageDispatcher:
                 if not result:
                     # No more messages in queue, remove user from active set
                     try:
-                        self.redis_client.srem("dispatcher:active_users", routing_key)
+                        await _await_redis(self.redis_client.srem("dispatcher:active_users", routing_key))
                         logger.info("Finished processing queue for user %s bot %s. Processed %s messages", user_id, bot_id, message_count)
                     except redis.RedisError as e:
                         logger.error("Redis error while removing user %s bot %s from active set: %s", user_id, bot_id, e)
@@ -833,7 +835,7 @@ class MessageDispatcher:
         try:
             while True:
                 await asyncio.sleep(MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL)
-                lock_renewed = self.renew_lock(user_id, bot_id)
+                lock_renewed = await _await_redis(self.renew_lock(user_id, bot_id))
                 if not lock_renewed:
                     logger.warning("Failed to renew lock for user %s bot %s", user_id, bot_id)
                     if lock_lost_event:
@@ -962,14 +964,14 @@ class MessageDispatcher:
                 message["retry_count"] = retry_count + 1
                 message_json = json.dumps(message, ensure_ascii=False)
                 queue_key = self._queue_key(user_id, bot_id)
-                self.redis_client.rpush(queue_key, message_json)
-                self.redis_client.sadd("dispatcher:active_users", self._routing_key(user_id, bot_id))
+                await _await_redis(self.redis_client.rpush(queue_key, message_json))
+                await _await_redis(self.redis_client.sadd("dispatcher:active_users", self._routing_key(user_id, bot_id)))
                 logger.info("Requeued failed message for user %s bot %s (retry %s)", user_id, bot_id, retry_count + 1)
             else:
                 # Move to dead letter queue
                 dlq_key = self._dlq_key(user_id, bot_id)
                 message_json = json.dumps(message, ensure_ascii=False)
-                self.redis_client.rpush(dlq_key, message_json)
+                await _await_redis(self.redis_client.rpush(dlq_key, message_json))
                 logger.error("Moved message to dead letter queue for user %s bot %s after %s retries", user_id, bot_id, self.max_retries)
 
         except Exception as e:
@@ -980,13 +982,13 @@ class MessageDispatcher:
         """Disable proactive messaging for a user due to permanent error (blocked/chat not found)."""
         try:
             state_key = f"proactive_messaging:user:{user_id}:{bot_id or 'default'}"
-            state_json = self.redis_client.get(state_key)
+            state_json = await _await_redis(self.redis_client.get(state_key))
             if state_json:
                 state = json.loads(state_json)
                 state['is_active'] = False
                 state['last_error'] = "Permanent failure (Chat not found / Forbidden)"
                 state['error_time'] = datetime.now(timezone.utc).isoformat()
-                self.redis_client.set(state_key, json.dumps(state, default=str))
+                await _await_redis(self.redis_client.set(state_key, json.dumps(state, default=str)))
                 logger.info("Proactive messaging disabled for user %s bot %s in Redis", user_id, bot_id)
             else:
                 # Create a minimal state to mark as inactive
@@ -997,7 +999,7 @@ class MessageDispatcher:
                     'last_error': "Permanent failure (Chat not found / Forbidden)",
                     'error_time': datetime.now(timezone.utc).isoformat()
                 }
-                self.redis_client.set(state_key, json.dumps(state, default=str))
+                await _await_redis(self.redis_client.set(state_key, json.dumps(state, default=str)))
                 logger.info("Created inactive state for user %s bot %s in Redis", user_id, bot_id)
         except Exception as e:
             logger.error("Error while trying to disable proactive messaging in Redis for user %s bot %s: %s", user_id, bot_id, e)

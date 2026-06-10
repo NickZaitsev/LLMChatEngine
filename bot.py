@@ -152,7 +152,7 @@ class TelegramChatBot:
 
         if self.proactive_messaging_service and self._feature_enabled(BotFeature.PROACTIVE_MESSAGING):
             try:
-                self.proactive_messaging_service.handle_user_message(user_id, bot_id=self.bot_id)
+                await self.proactive_messaging_service.handle_user_message(user_id, bot_id=self.bot_id)
                 logger.info("Proactive messaging service notified of user message from %s.", user_id)
             except Exception as e:
                 logger.error("Failed to notify proactive messaging service for user %s: %s", user_id, e)
