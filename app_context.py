@@ -7,7 +7,6 @@ This ensures that these components are created only once and can be reused
 across the application, particularly in Celery tasks.
 """
 
-import asyncio
 import logging
 import uuid
 from typing import Optional, Tuple
@@ -54,69 +53,19 @@ class AppContext:
         self.message_queue_manager: Optional[MessageQueueManager] = None
         self.typing_manager: Optional[TypingIndicatorManager] = None
         self.bot: Optional[Bot] = None
-        self._loop = None  # Track which event loop owns the current connections
 
         self._initialized = True
         logger.info("AppContext created but not yet initialized.")
 
-    def _dispose_old_resources(self):
-        """
-        Best-effort cleanup of old database resources.
-
-        When the event loop changes (e.g. between asyncio.run() calls in
-        Celery tasks), we can't await async dispose because the old engine
-        is bound to a now-closed loop.  Using dispose(close=False) tells
-        SQLAlchemy to discard the pool *without* attempting to close the
-        underlying asyncpg connections (which would fail with
-        MissingGreenlet).  The abandoned TCP sockets are cleaned up by the
-        OS / garbage collector.
-        """
-        if self.conversation_manager and self.conversation_manager.storage:
-            engine = self.conversation_manager.storage.engine
-            if engine:
-                try:
-                    # close=False: drop the pool without calling connection.close()
-                    # on each asyncpg connection (avoids MissingGreenlet error).
-                    engine.sync_engine.dispose(close=False)
-                    logger.info("Disposed old Storage engine pool (close=False).")
-                except Exception as e:
-                    logger.warning("Could not dispose old engine pool: %s (will be GC'd)", e)
-
     async def initialize(self):
         """
         Initializes all shared services. This should be called once on application startup.
-
-        In Celery workers (prefork), each task may call asyncio.run() which creates
-        a fresh event loop and closes it afterward. The async engine/sessions from a
-        previous loop become invalid, so we detect loop changes and re-create all
-        loop-bound components.
         """
-        current_loop = asyncio.get_running_loop()
-
-        # Check if we need to re-initialize due to loop change
-        if self._loop is not None and self._loop is not current_loop:
-            logger.warning(
-                "Event loop changed (id %s -> %s). Re-initializing AppContext components.",
-                id(self._loop), id(current_loop),
-            )
-            # Dispose old DB connections first to avoid leaked resources
-            self._dispose_old_resources()
-            # Reset all loop-bound components
-            self.conversation_manager = None
-            self.memory_manager = None
-            self.book_knowledge_manager = None
-            self.prompt_assembler = None
-            self.ai_handler = None
-            self.message_queue_manager = None
-            self.typing_manager = None
-            self.bot = None
-
         if self.conversation_manager:
-            logger.info("AppContext already initialized on current loop.")
+            logger.info("AppContext already initialized.")
             return
 
-        self._loop = current_loop
-        logger.info("Initializing AppContext on loop id=%s ...", id(current_loop))
+        logger.info("Initializing AppContext ...")
 
         # 1. Initialize Conversation Manager (Database)
         try:
@@ -287,9 +236,7 @@ async def get_app_context() -> AppContext:
     Returns the initialized AppContext instance.
     If not initialized or the loop has changed, it will initialize it first.
     """
-    current_loop = asyncio.get_running_loop()
     if (not app_context._initialized
-            or not app_context.conversation_manager
-            or app_context._loop is not current_loop):
+            or not app_context.conversation_manager):
         await app_context.initialize()
     return app_context
