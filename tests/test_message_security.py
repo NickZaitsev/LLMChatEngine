@@ -186,5 +186,26 @@ async def test_legacy_token_fallback_is_read_only_and_warning_is_token_free(capl
 
     assert "deprecated" in caplog.text.lower()
     assert "legacy-secret" not in caplog.text
-    retried = json.loads(dispatcher.redis_client.rpush.await_args.args[1])
+    retried = json.loads(dispatcher.requeue_script.await_args.kwargs["args"][1])
     assert "bot_token" not in retried
+
+
+@pytest.mark.asyncio
+async def test_failed_message_requeue_reactivates_route_atomically():
+    redis_client = ScriptRedis()
+    with patch("message_manager.redis_async.from_url", return_value=redis_client):
+        dispatcher = MessageDispatcher("redis://redis:6379/0", token_resolver=AsyncMock())
+
+    await dispatcher.handle_failed_message(
+        {"user_id": 7, "chat_id": 11, "text": "x", "message_type": "regular",
+         "bot_id": "bot-123", "retry_count": 0}
+    )
+
+    # A single atomic script re-pushes the message and re-activates the route;
+    # no separate rpush/sadd pair that could leave messages without a route.
+    dispatcher.requeue_script.assert_awaited_once()
+    call = dispatcher.requeue_script.await_args
+    assert call.kwargs["keys"] == ["queue:7:bot-123", "dispatcher:active_users"]
+    assert call.kwargs["args"][0] == "7:bot-123"
+    redis_client.rpush.assert_not_awaited()
+    redis_client.sadd.assert_not_awaited()

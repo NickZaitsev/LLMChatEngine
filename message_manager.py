@@ -501,6 +501,17 @@ class MessageDispatcher:
             return 0
             """)
 
+            # Requeue a failed message and (re)activate its route atomically so a
+            # crash between the two operations can never orphan the message.
+            self.requeue_script = self.redis_client.register_script("""
+            local queue_key = KEYS[1]
+            local active_routes_key = KEYS[2]
+            local routing_key = ARGV[1]
+            redis.call('RPUSH', queue_key, ARGV[2])
+            redis.call('SADD', active_routes_key, routing_key)
+            return 1
+            """)
+
         except Exception as e:
             logger.error("Failed to initialize MessageDispatcher: %s", e)
             raise
@@ -1033,12 +1044,13 @@ class MessageDispatcher:
             safe_message = {key: value for key, value in message.items() if key not in {"bot_token", "token"}}
 
             if retry_count < self.max_retries:
-                # Increment retry count and requeue
+                # Increment retry count and requeue atomically with route activation.
                 safe_message["retry_count"] = retry_count + 1
                 message_json = json.dumps(safe_message, ensure_ascii=False)
-                queue_key = self._queue_key(user_id, bot_id)
-                await _await_redis(self.redis_client.rpush(queue_key, message_json))
-                await _await_redis(self.redis_client.sadd("dispatcher:active_users", self._routing_key(user_id, bot_id)))
+                await _await_redis(self.requeue_script(
+                    keys=[self._queue_key(user_id, bot_id), "dispatcher:active_users"],
+                    args=[self._routing_key(user_id, bot_id), message_json],
+                ))
                 logger.info("Requeued failed message for user %s bot %s (retry %s)", user_id, bot_id, retry_count + 1)
             else:
                 # Move to dead letter queue
