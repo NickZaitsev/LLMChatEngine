@@ -151,6 +151,8 @@ To ground a persona bot in an author's books:
 
 Book files are stored under `BOOKS_STORAGE_DIR` until ingestion finishes. In Docker, that path is backed by the shared `book_files` volume so the admin bot and Celery memory worker can both access uploads.
 
+A full walkthrough (persona prompt example, supported formats, ingestion statuses, troubleshooting, copyright and embedding-dimension notes) is in [docs/persona-bots.md](docs/persona-bots.md) (in Russian).
+
 ## Development
 
 Create the pinned local environment:
