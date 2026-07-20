@@ -50,9 +50,10 @@ async def test_basic_integration():
             
             print("[PASS] Message enqueued successfully")
             
-            # Verify user was added to active users set
-            # We can't directly test this with our current mock setup, but we know rpush and sadd were called
-            mock_redis.sadd.assert_called_once_with("dispatcher:active_users", f"{user_id}:default")
+            queue_manager.enqueue_script.assert_called_once()
+            enqueue_call = queue_manager.enqueue_script.call_args.kwargs
+            assert enqueue_call["keys"] == [f"queue:{user_id}:default", "dispatcher:active_users"]
+            assert enqueue_call["args"][0] == f"{user_id}:default"
             
             print("[PASS] User added to active users set")
             

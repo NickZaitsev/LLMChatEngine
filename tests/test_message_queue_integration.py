@@ -45,11 +45,7 @@ class TestMessageQueueIntegration:
                 bot.message_queue_manager = MessageQueueManager(self.redis_url)
                 
                 # Mock Redis methods
-                with patch.object(bot.message_queue_manager.redis_client, 'rpush') as mock_rpush, \
-                     patch.object(bot.message_queue_manager.redis_client, 'sadd') as mock_sadd:
-                    
-                    mock_rpush.return_value = 1
-                    mock_sadd.return_value = 1
+                with patch.object(bot.message_queue_manager, 'enqueue_script', new=AsyncMock(return_value=1)) as mock_enqueue:
                     
                     # Test enqueueing a message through the bot's interface
                     # This simulates what happens in _dispatch_buffered_message
@@ -62,12 +58,12 @@ class TestMessageQueueIntegration:
                         )
                         
                         # Verify the message was enqueued
-                        mock_rpush.assert_called_once()
-                        args = mock_rpush.call_args[0]
-                        assert args[0] == f"queue:{self.user_id}:default"
+                        mock_enqueue.assert_awaited_once()
+                        args = mock_enqueue.await_args.kwargs
+                        assert args["keys"][0] == f"queue:{self.user_id}:default"
                         
                         # Verify the message content
-                        message_json = args[1]
+                        message_json = args["args"][1]
                         message_data = json.loads(message_json)
                         assert message_data["user_id"] == self.user_id
                         assert message_data["chat_id"] == self.chat_id
@@ -87,11 +83,7 @@ class TestMessageQueueIntegration:
             service.message_queue_manager = MessageQueueManager(self.redis_url)
             
             # Mock Redis methods
-            with patch.object(service.message_queue_manager.redis_client, 'rpush') as mock_rpush, \
-                 patch.object(service.message_queue_manager.redis_client, 'sadd') as mock_sadd:
-                
-                mock_rpush.return_value = 1
-                mock_sadd.return_value = 1
+            with patch.object(service.message_queue_manager, 'enqueue_script', new=AsyncMock(return_value=1)) as mock_enqueue:
                 
                 # Test enqueueing a proactive message
                 if service.message_queue_manager:
@@ -103,12 +95,12 @@ class TestMessageQueueIntegration:
                     )
                     
                     # Verify the message was enqueued
-                    mock_rpush.assert_called_once()
-                    args = mock_rpush.call_args[0]
-                    assert args[0] == f"queue:{self.user_id}:default"
+                    mock_enqueue.assert_awaited_once()
+                    args = mock_enqueue.await_args.kwargs
+                    assert args["keys"][0] == f"queue:{self.user_id}:default"
                     
                     # Verify the message content
-                    message_json = args[1]
+                    message_json = args["args"][1]
                     message_data = json.loads(message_json)
                     assert message_data["user_id"] == self.user_id
                     assert message_data["chat_id"] == self.user_id

@@ -242,6 +242,10 @@ class BotManager:
         if not config:
             raise ValueError(f"Bot config not found: {bot_id}")
 
+        dispatcher = self.service_container.message_dispatcher
+        if dispatcher is not None:
+            await dispatcher.invalidate_bot(str(bot_id))
+
         # If bot is running, update its config
         if bot_id in self.bots:
             bot_instance = self.bots[bot_id]

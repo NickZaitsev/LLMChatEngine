@@ -232,9 +232,19 @@ class MessageQueueManager:
         """
         try:
             self.redis_client = redis_async.from_url(redis_url)
-            logger.info("MessageQueueManager initialized with Redis URL: %s", redis_url)
+            self.enqueue_script = self.redis_client.register_script("""
+            local queue_key = KEYS[1]
+            local active_routes_key = KEYS[2]
+            local routing_key = ARGV[1]
+            for index = 2, #ARGV do
+                redis.call('RPUSH', queue_key, ARGV[index])
+            end
+            redis.call('SADD', active_routes_key, routing_key)
+            return #ARGV - 1
+            """)
+            logger.info("MessageQueueManager initialized")
         except Exception as e:
-            logger.error("Failed to initialize MessageQueueManager with Redis URL %s: %s", redis_url, e)
+            logger.error("Failed to initialize MessageQueueManager: %s", e)
             raise
 
     @staticmethod
@@ -261,7 +271,7 @@ class MessageQueueManager:
         """
         return _split_ai_response(text)
 
-    async def enqueue_message(self, user_id: int, chat_id: int, text: str, message_type: str = "regular", bot_token: str = None, bot_id: str = None):
+    async def enqueue_message(self, user_id: int, chat_id: int, text: str, message_type: str = "regular", bot_id: str = None):
         """
         Enqueue a message for a user in their Redis list. If the message needs to be split,
         split it first and enqueue each part as a separate message to maintain order.
@@ -271,7 +281,6 @@ class MessageQueueManager:
             chat_id: Chat ID
             text: Message text
             message_type: Type of message ("regular" or "proactive")
-            bot_token: Optional bot token for multi-bot support
             bot_id: Optional bot ID for multi-bot proactive state routing
         """
         try:
@@ -296,12 +305,9 @@ class MessageQueueManager:
                 logger.warning("No message parts to enqueue for user %s", user_id)
                 return
 
-            # Add user/bot route to active users set first
             routing_key = self._routing_key(user_id, bot_id)
-            await _await_redis(self.redis_client.sadd("dispatcher:active_users", routing_key))
-
-            # Enqueue each part as a separate message
             total_parts = len(message_parts)
+            serialized_parts = []
             for i, part_text in enumerate(message_parts):
                 # Create message payload for this part
                 message_data = {
@@ -313,21 +319,19 @@ class MessageQueueManager:
                     "retry_count": 0,
                     "part_index": i,
                     "total_parts": total_parts,
-                    "bot_token": bot_token,
-                    "bot_id": bot_id
+                    "bot_id": bot_id,
                 }
+                serialized_parts.append(json.dumps(message_data, ensure_ascii=False))
 
-                # Serialize message data
-                message_json = json.dumps(message_data, ensure_ascii=False)
-
-                # Redis key for user's queue
-                queue_key = self._queue_key(user_id, bot_id)
-
-                # Add message to user's Redis list using RPUSH
-                result = await _await_redis(self.redis_client.rpush(queue_key, message_json))
-
-                logger.info("Enqueued message part %d/%d for user %s (chat %s) of type %s. Queue position: %s",
-                           i + 1, total_parts, user_id, chat_id, message_type, result)
+            queue_key = self._queue_key(user_id, bot_id)
+            await _await_redis(self.enqueue_script(
+                keys=[queue_key, "dispatcher:active_users"],
+                args=[routing_key, *serialized_parts],
+            ))
+            logger.info(
+                "Atomically enqueued %d message parts for user %s (chat %s) of type %s",
+                total_parts, user_id, chat_id, message_type,
+            )
 
         except ValueError as e:
             logger.error("Validation error when enqueuing message for user %s: %s", user_id, e)
@@ -390,7 +394,7 @@ class MessageDispatcher:
     BOT_CACHE_MAX_SIZE = 50
     MAX_CONCURRENT_USERS = 20
 
-    def __init__(self, redis_url: str, max_retries: int = 3, lock_timeout: int = 30):
+    def __init__(self, redis_url: str, max_retries: int = 3, lock_timeout: int = 30, token_resolver=None):
         """
         Initialize the MessageDispatcher.
 
@@ -401,7 +405,7 @@ class MessageDispatcher:
         """
         try:
             self.redis_client = redis_async.from_url(redis_url)
-            logger.info("MessageDispatcher initialized with Redis URL: %s", redis_url)
+            logger.info("MessageDispatcher initialized")
 
             self.max_retries = max_retries
             self.lock_timeout = lock_timeout
@@ -412,6 +416,7 @@ class MessageDispatcher:
             # building an HTTP connection pool per message part.
             self.bot = None
             self._bot_cache = OrderedDict()
+            self.token_resolver = token_resolver
             self.typing_manager = TypingIndicatorManager()
 
             # Unique identifier for this dispatcher instance
@@ -467,38 +472,65 @@ class MessageDispatcher:
             end
             """)
 
+            self.cleanup_route_script = self.redis_client.register_script("""
+            local queue_key = KEYS[1]
+            local active_routes_key = KEYS[2]
+            local routing_key = ARGV[1]
+            if redis.call('LLEN', queue_key) == 0 then
+                return redis.call('SREM', active_routes_key, routing_key)
+            end
+            return 0
+            """)
+
         except Exception as e:
-            logger.error("Failed to initialize MessageDispatcher with Redis URL %s: %s", redis_url, e)
+            logger.error("Failed to initialize MessageDispatcher: %s", e)
             raise
 
-    def _get_bot_for_token(self, bot_token: str):
-        """Return a cached Telegram Bot for a token, creating it if needed."""
+    async def _get_bot_for_route(self, route_id: str, bot_token: str):
+        """Return a client cached by route ID, replacing rotated credentials."""
         if not bot_token:
             return None
 
-        cached_bot = self._bot_cache.get(bot_token)
-        if cached_bot is not None:
-            self._bot_cache.move_to_end(bot_token)
-            return cached_bot
+        cached = self._bot_cache.get(route_id)
+        if cached is not None and cached[0] == bot_token:
+            self._bot_cache.move_to_end(route_id)
+            return cached[1]
+        if cached is not None:
+            await self._close_bot(cached[1])
 
         bot = Bot(token=bot_token)
-        self._bot_cache[bot_token] = bot
-        self._bot_cache.move_to_end(bot_token)
+        self._bot_cache[route_id] = (bot_token, bot)
+        self._bot_cache.move_to_end(route_id)
 
         while len(self._bot_cache) > self.BOT_CACHE_MAX_SIZE:
-            self._bot_cache.popitem(last=False)
+            _, (_, evicted_bot) = self._bot_cache.popitem(last=False)
+            await self._close_bot(evicted_bot)
 
         return bot
 
-    def _get_default_bot(self):
-        """Return the lazily-created default bot, if a default token exists."""
-        if not TELEGRAM_TOKEN:
-            return None
+    @staticmethod
+    async def _close_bot(bot) -> None:
+        shutdown = getattr(bot, "shutdown", None)
+        if shutdown:
+            await shutdown()
 
-        if self.bot is None:
-            self.bot = self._get_bot_for_token(TELEGRAM_TOKEN)
+    async def _resolve_token(self, bot_id: str | None) -> str:
+        if self.token_resolver is None:
+            if bot_id is not None or not TELEGRAM_TOKEN:
+                raise LookupError("no token resolver is configured for this route")
+            return TELEGRAM_TOKEN
+        resolve = getattr(self.token_resolver, "resolve", self.token_resolver)
+        return await resolve(bot_id)
 
-        return self.bot
+    async def invalidate_bot(self, bot_id: str | None) -> None:
+        route_id = bot_id or "default"
+        if self.token_resolver is not None:
+            invalidate = getattr(self.token_resolver, "invalidate", None)
+            if invalidate:
+                await invalidate(bot_id)
+        cached = self._bot_cache.pop(route_id, None)
+        if cached:
+            await self._close_bot(cached[1])
 
     @staticmethod
     def _normalize_bot_key(bot_id: str = None) -> str:
@@ -779,7 +811,10 @@ class MessageDispatcher:
                 if not result:
                     # No more messages in queue, remove user from active set
                     try:
-                        await _await_redis(self.redis_client.srem("dispatcher:active_users", routing_key))
+                        await _await_redis(self.cleanup_route_script(
+                            keys=[queue_key, "dispatcher:active_users"],
+                            args=[routing_key],
+                        ))
                         logger.info("Finished processing queue for user %s bot %s. Processed %s messages", user_id, bot_id, message_count)
                     except redis.RedisError as e:
                         logger.error("Redis error while removing user %s bot %s from active set: %s", user_id, bot_id, e)
@@ -901,18 +936,23 @@ class MessageDispatcher:
 
             # Send the message part
             try:
-                # Use bot_token from message if available, otherwise fallback to dispatcher's default bot.
                 bot_to_use = None
-                bot_token = message.get("bot_token")
-
-                if bot_token:
-                    try:
-                        bot_to_use = self._get_bot_for_token(bot_token)
-                    except Exception as e:
-                        logger.error("Failed to create bot instance from token for user %s: %s", user_id, e)
+                bot_id = message.get("bot_id")
+                route_id = str(bot_id) if bot_id else "default"
+                try:
+                    bot_token = await self._resolve_token(str(bot_id) if bot_id else None)
+                except LookupError:
+                    legacy_token = message.get("bot_token") if bot_id is None else None
+                    if not legacy_token:
+                        logger.warning("Unable to resolve Telegram credentials for route %s", route_id)
                         return False
-                else:
-                    bot_to_use = self._get_default_bot()
+                    logger.warning("Using deprecated token-bearing legacy queue payload for default route")
+                    bot_token = legacy_token
+                try:
+                    bot_to_use = await self._get_bot_for_route(route_id, bot_token)
+                except Exception as e:
+                    logger.error("Failed to create bot instance for route %s: %s", route_id, e)
+                    return False
 
                 if not bot_to_use:
                     logger.error("No bot instance available to send message for user %s", user_id)
@@ -958,11 +998,12 @@ class MessageDispatcher:
             user_id = message["user_id"]
             bot_id = message.get("bot_id")
             retry_count = message.get("retry_count", 0)
+            safe_message = {key: value for key, value in message.items() if key not in {"bot_token", "token"}}
 
             if retry_count < self.max_retries:
                 # Increment retry count and requeue
-                message["retry_count"] = retry_count + 1
-                message_json = json.dumps(message, ensure_ascii=False)
+                safe_message["retry_count"] = retry_count + 1
+                message_json = json.dumps(safe_message, ensure_ascii=False)
                 queue_key = self._queue_key(user_id, bot_id)
                 await _await_redis(self.redis_client.rpush(queue_key, message_json))
                 await _await_redis(self.redis_client.sadd("dispatcher:active_users", self._routing_key(user_id, bot_id)))
@@ -970,7 +1011,7 @@ class MessageDispatcher:
             else:
                 # Move to dead letter queue
                 dlq_key = self._dlq_key(user_id, bot_id)
-                message_json = json.dumps(message, ensure_ascii=False)
+                message_json = json.dumps(safe_message, ensure_ascii=False)
                 await _await_redis(self.redis_client.rpush(dlq_key, message_json))
                 logger.error("Moved message to dead letter queue for user %s bot %s after %s retries", user_id, bot_id, self.max_retries)
 

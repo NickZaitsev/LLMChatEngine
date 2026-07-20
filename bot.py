@@ -182,7 +182,6 @@ class TelegramChatBot:
                     chat_id=chat_id,
                     text=cleaned_ai_response,
                     message_type="regular",
-                    bot_token=self.bot_token,
                     bot_id=str(self.bot_id) if self.bot_id else None
                 )
                 logger.info("Response enqueued for user %s", user_id)

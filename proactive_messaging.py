@@ -594,7 +594,6 @@ async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str]
                     chat_id=user_id,
                     text=cleaned_response,
                     message_type="proactive",
-                    bot_token=bot_token,
                     bot_id=str(resolved_bot_id) if resolved_bot_id else None
                 )
                 success = True

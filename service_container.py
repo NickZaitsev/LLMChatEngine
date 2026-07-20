@@ -9,6 +9,7 @@ from ai_handler import AIHandler
 from core.abstractions import EmbeddingModel
 from core.bot_config import BotConfig
 from memory.embedding_factory import build_embedding_model
+from messaging.token_resolver import BotTokenResolver
 from message_manager import MessageDispatcher, MessageQueueManager, TypingIndicatorManager
 from prompt.assembler import PromptAssembler
 from settings import AppSettings, build_settings
@@ -104,6 +105,11 @@ class ServiceContainer:
             queue_settings.redis_url,
             queue_settings.max_retries,
             queue_settings.lock_timeout,
+            token_resolver=BotTokenResolver(
+                self.storage.bots,
+                default_token=self.settings.TELEGRAM_TOKEN,
+                max_cache_size=50,
+            ),
         )
 
         self._initialized = True
