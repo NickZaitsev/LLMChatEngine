@@ -207,7 +207,8 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
 
     except Exception as e:
         logger.error(f"Failed to create storage: {e}")
-        # Clean up engine if it was created
+        # Clean up engine if it was created. Best-effort: the original error is
+        # re-raised below regardless of whether disposal succeeds.
         if 'engine' in locals():
             try:
                 await engine.dispose()

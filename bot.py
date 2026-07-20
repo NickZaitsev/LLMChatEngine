@@ -640,7 +640,8 @@ I'm designed to be flexible and adapt to your preferences."""
                 return
             # Any other next message cancels the pending confirmation
             self.pending_clear_confirmation.remove(user_id)
-            logger.info("Pending clear confirmation cancelled for user %s due to next message: '%s'", user_id, text)
+            # Do not log the user's message text; only the fact of cancellation.
+            logger.info("Pending clear confirmation cancelled for user %s by next message", user_id)
             await update.message.reply_text("❌ Clear cancelled. To clear history, send /clear and then /ok as your next message.")
         except Exception as e:
             logger.error("Error in _monitor_pending_clear: %s", e)
@@ -652,9 +653,12 @@ I'm designed to be flexible and adapt to your preferences."""
         user_message = update.message.text
         chat_id = update.effective_chat.id
 
+        # The message text is personal content: log only length at INFO, and
+        # keep a truncated preview at DEBUG for troubleshooting.
+        logger.info("Message from user %s (%d chars)", user_id, len(user_message))
         message_preview = (user_message[:MESSAGE_PREVIEW_LENGTH] + "..."
                           if len(user_message) > MESSAGE_PREVIEW_LENGTH else user_message)
-        logger.info("Message from user %s: '%s' (%d chars)", user_id, message_preview, len(user_message))
+        logger.debug("Message from user %s: '%s'", user_id, message_preview)
         route_key = self._buffer_route_key(user_id)
 
         # Store chat context for buffered dispatch

@@ -238,9 +238,11 @@ class ModelClient:
             if self.provider == "gemini":
                 # Placeholder for any Gemini-specific info in the future
                 pass
-        except Exception:
-            pass
-            
+        except Exception as e:
+            # Best-effort diagnostics only: never fail the caller because an
+            # optional provider attribute could not be read.
+            logger.debug("Could not collect optional provider info: %s", e)
+
         return info
     
     async def get_lmstudio_status(self):
@@ -294,8 +296,9 @@ class AIHandler:
         Returns None when generation fails after retry handling; callers decide
         whether to stay silent or send a user-facing fallback.
         """
-        logger.info("generate_response called with user_message: %s, conversation_id: %s, prompt_assembler: %s",
-                   user_message[:50] if user_message else "None", conversation_id, self.prompt_assembler)
+        # User message text is personal content: never log it above DEBUG.
+        logger.debug("generate_response called (conversation_id: %s, prompt_assembler set: %s)",
+                     conversation_id, self.prompt_assembler is not None)
         if not self.model_client:
             logger.error("ModelClient not available; cannot generate AI response")
             return None
@@ -309,7 +312,7 @@ class AIHandler:
 
             # Use PromptAssembler if available and conversation_id is provided
             if self.prompt_assembler and conversation_id:
-                logger.info("Using PromptAssembler for advanced prompt building")
+                logger.debug("Using PromptAssembler for advanced prompt building")
                 try:
                     messages = await self.prompt_assembler.build_prompt(
                         conversation_id=conversation_id,
@@ -341,7 +344,7 @@ class AIHandler:
                             messages.append({"role": role, "content": user_message})
                             logger.debug("Added %s message to prompt: %s", role, user_message[:50] + "..." if len(user_message) > 50 else user_message)
                     
-                    logger.info("PromptAssembler built %d messages for LLM", len(messages))
+                    logger.debug("PromptAssembler built %d messages for LLM", len(messages))
                     
                 except Exception as e:
                     logger.error("PromptAssembler failed: %s", e)

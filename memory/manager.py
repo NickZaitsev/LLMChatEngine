@@ -163,7 +163,9 @@ class LlamaIndexMemoryManager:
             logger.info("<== Vector store query returned %d nodes", len(nodes))
 
             for i, node in enumerate(nodes):
-                logger.info(
+                # Retrieved node text is personal chat content: keep it out of
+                # INFO logs. Truncated preview only at DEBUG.
+                logger.debug(
                     "  Node %d [Score: %s]: %s... (Metadata: %s)",
                     i + 1,
                     getattr(node, "score", "N/A"),

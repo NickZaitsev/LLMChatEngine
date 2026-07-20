@@ -175,7 +175,9 @@ Use these commands to manage your bot fleet."""
         # Store encrypted token
         self._pending_bot_data[self._session_key(update)]['token'] = token
 
-        # Delete the message containing the token for security
+        # Delete the message containing the token for security.
+        # Best-effort boundary: deletion can fail (already deleted, missing
+        # permission) and must never block the /addbot flow.
         try:
             await update.message.delete()
         except Exception:
