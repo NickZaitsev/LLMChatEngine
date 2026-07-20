@@ -524,19 +524,32 @@ Follow existing test layout in `tests/` (deterministic, fake providers — see `
 
 # Unified Execution Order
 
+The original ordered plan has been fully executed. See the **Current Completion Audit** below for the per-item status and evidence, and **Historical Execution Order (2026-06-11)** at the end for the original planned sequencing.
+
 ---
 
-# Current Completion Audit — 2026-06-11
+# Current Completion Audit — 2026-07-20
 
 Evidence used for this audit:
-- `ruff check .` passed.
-- `pytest -q` passed with `199 passed, 55 deselected`.
-- Repository searches for raw SQL/model leaks, config imports, `uuid5("telegram_user_...")`, book manager construction, async loop usage, and deprecated warning sources.
+- `python -m compileall -q .` passed.
+- `python -m pytest -q` passed with `240 passed, 55 deselected` (baseline at the start of this pass was `232 passed, 55 deselected`; new regression tests were added for the security and decomposition work).
+- `python -m ruff check .` passed.
+- `python -m mypy messaging message_manager.py --ignore-missing-imports` reports no errors.
+- `docker compose config` succeeds; Postgres/Redis publish no host ports; internal `redis:6379`/`postgres:5432` URLs are intact.
+- Repository searches: no `"bot_token":` writers in runtime code; no runtime `from config import` outside tests/migrations; no `_user_cache`; no `asyncio.sleep(1)`/`while ... self.bots` polling in `bot_manager.py`; no `asyncio.run(shutdown_handler(...))` in `bot.py`; no retrieved-node content logged at INFO.
+
+> Historical note: the previous audit was dated 2026-06-11 and predates the branch commits `feat(security): resolve bot tokens at delivery`, `fix(runtime): harden credentials and resource shutdown`, `feat(config): enforce typed settings bounds`, `refactor(config): migrate runtime to typed settings`, and `refactor(runtime): make bot lifecycle event driven`, plus this pass. Several items it marked `[partial]`/`[open]` are now complete with tests.
 
 Status key:
 - `[done]` acceptance criteria are satisfied by current code and tests.
 - `[partial]` material progress exists, but the plan item is not fully accepted.
 - `[open]` still requires implementation.
+
+## Workstream A — Message delivery & runtime security
+
+- `[done] A1` New queue payloads carry `bot_id` only, never a token. Tokens are resolved at the delivery boundary by `messaging.token_resolver.BotTokenResolver` (owned by `ServiceContainer`, backed by `PostgresBotRepo` + `decrypt_token`), with a bounded id-keyed cache and `invalidate()` on reload/rotation. The dispatcher caches Telegram clients by route id and rebuilds on rotation. A read-only legacy fallback consumes an old `bot_token` payload for the default route, emits a token-free deprecation warning, and no writer produces the field. Unknown/inactive bot ids fail closed. Covered by `tests/test_message_security.py` and `tests/test_bot_token_resolver.py`.
+- `[done] A2` Publication and route activation are one atomic Lua script (`enqueue_script`); empty-queue deactivation is atomic and conditional on `LLEN == 0` (`cleanup_route_script`); the retry requeue re-pushes and re-activates the route atomically (`requeue_script`). `redis.asyncio` throughout. Ordering and bounded cross-user concurrency preserved. Covered by `tests/test_message_security.py`, `tests/test_message_ordering.py`, `tests/test_message_persistence.py`.
+- `[done] A3` Redis/DB URLs are masked with `core.utils.mask_url` in dispatcher/proactive/runtime logs; sensitive content is DEBUG-only and truncated. `docker-compose.yml` publishes no host ports for Postgres/Redis, adds healthchecks with `depends_on: condition: service_healthy`, and keeps container-to-container access via `redis:6379`/`postgres:5432`. Async Redis clients, engines, Telegram clients, and container resources close exactly once. Covered by `tests/test_runtime_security.py`.
 
 ## Part 1 Status
 
@@ -554,7 +567,7 @@ Status key:
 - `[done] 1.1` Orphaned `PostgresMemoryRepo`, `Memory` model, and `memories_embeddings` references are gone from non-history code.
 - `[done] 1.2` Sync wrapper methods were removed from `PostgresConversationManager`; production uses async methods.
 - `[done] 1.3` Shared `BotConfig`, `mask_db_url`, token counting, and embedding factory exist; embedding factory now accepts `AppSettings`.
-- `[partial] 1.4` Listed dead-code removals are mostly complete, but a final explicit grep/review pass is still needed before marking the whole item done.
+- `[done] 1.4` Final grep pass confirms every listed remnant is gone: no `self.user_states`, no `_get_error_response`, no duplicate `LMStudio` imports, `get_response` has no `user_id` parameter, no `isinstance(route_key, int)` shim, and `enqueue_message` carries no `bot`/`typing_manager` back-compat params.
 - `[done] 1.5` `conversations.persona_id` is nullable via migration, and first-contact conversation creation no longer fabricates a default persona.
 - `[done] 1.6` `messages_user` model/repo/storage wiring is removed, with a migration dropping the table.
 
@@ -563,21 +576,21 @@ Status key:
 - `[done] 2.2` `ServiceContainer` owns process-shared storage, conversation manager, embedding model, memory manager, queue manager, typing manager, dispatcher, and book knowledge manager; bot, manager, admin, and Celery context consume it.
 - `[done] 2.3` Bot access goes through `PostgresBotRepo`; `from storage.models import Bot` is limited to storage/migrations.
 - `[done] 2.4` `PromptAssembler` no longer imports SQL/model classes or queries the DB for bot personality; section builders and token metadata are split out.
-- `[partial] 2.5` `AppSettings` exists and is injected through the container and prompt assembler, but several runtime modules still import compatibility globals from `config.py`.
+- `[done] 2.5` `AppSettings` is injected through the composition root. No runtime module imports `from config import ...`; the only remaining importers are tests and Alembic migration files (both acceptable — `config.py` stays as a thin shim). `tests/test_app_settings.py` constructs `AppSettings(...)` directly and proves validators.
 - `[done] 2.6` Canonical identity is documented in `docs/user-identity.md`: raw Telegram integer ID at runtime boundaries, `users.id` as internal relational UUID, and `messages_log` UUID derivation confined to `PostgresMessageHistoryRepo`.
 
 ### P3 — Async and runtime hygiene
-- `[partial] 3.1` `bot.py` uses PTB lifecycle hooks and has no `get_event_loop`, but the `__main__` block still uses `asyncio.run(shutdown_handler(...))` in exception paths.
+- `[done] 3.1` `bot.py` uses `post_init(self._on_startup)`/`post_shutdown(self._on_shutdown)`; `__main__` is just `TelegramChatBot().run()`; `cleanup()` is idempotent (guarded by `_cleaned_up` + `_cleanup_lock`). No `asyncio.run`/`shutdown_handler`. Covered by `tests/test_bot_lifecycle.py`.
 - `[done] 3.2` Celery tasks use a persistent worker loop helper (`core/celery_loop.py`); `AppContext` no longer tracks event-loop identity or disposes engines on loop changes.
 - `[done] 3.3` `TypingIndicatorManager` lock state is reference-counted and cleaned up.
-- `[open] 3.4` `bot_manager` still uses polling sleeps for bot lifetime/watchdog control.
+- `[done] 3.4` `bot_manager` is event-driven: per-bot `asyncio.Event` stop signals, a `_dispatcher_watchdog_event` woken by the dispatcher's done-callback, and no `asyncio.sleep(1)`/`while bot_id in self.bots` polling. Exactly one shared dispatcher per process. Covered by `tests/test_bot_lifecycle.py` and `tests/test_message_security.py::test_bot_reload_invalidates_dispatcher_token_and_client_cache`.
 
 ### P4 — Decomposition, logging, error policy
-- `[open] 4.1` `message_manager.py` has not been split into a package.
-- `[partial] 4.2` Some privacy/noise reductions landed, but runtime modules still need a focused logging audit.
-- `[partial] 4.3` Exception policy is improved in touched paths, but broad catches remain and have not been audited systematically.
+- `[done] 4.1` `message_manager.py` is split into the `messaging/` package (`formatting.py`, `typing.py`, `queue.py`, `dispatcher.py`, `sending.py`, plus the existing `token_resolver.py`). `message_manager.py` remains a re-export shim for one release. Import compatibility is covered by `tests/test_messaging_package.py`; no circular imports (`dispatcher → {sending, typing, queue}`, `sending → {formatting, typing}`, `queue → formatting`).
+- `[done] 4.2` Focused logging audit landed: user message text (`ai_handler.generate_response`, `bot.py` handle/clear paths) and retrieved memory node content (`memory/manager.py`) are DEBUG-only and truncated; INFO keeps IDs/counts only. Redis URLs are masked via `mask_url`. Covered by `tests/test_logging_privacy.py` and `tests/test_runtime_security.py`.
+- `[done] 4.3` Exception policy completed for the touched runtime paths: broad catches remain only at documented boundaries (Telegram handlers, dispatcher iteration, lifecycle, Celery entrypoints). The three `except Exception: pass` sites (`admin_bot.py` token-message delete, `ai_handler.get_provider_info` diagnostics, `storage/__init__.py` cleanup-on-failure) are now annotated as explicit best-effort boundaries; the diagnostics one logs at DEBUG instead of silently swallowing. No blind mass rewrite was performed.
 - `[done] 4.4` Photo/voice replies are now neutral fallbacks instead of persona-conflicting canned romantic replies.
-- `[partial] 4.5` Conversation caching stores conversation IDs only, but `_user_cache` is still present in code and should be removed before marking this item fully complete.
+- `[done] 4.5` Conversation caching stores conversation IDs only; the unused `_user_cache` field has been removed (grep confirms no references remain).
 
 ## Part 2 Status
 
@@ -585,18 +598,22 @@ Status key:
 - `[done] Phase B` `knowledge/` parser, chunker, vector store, manager, and Celery ingestion task exist and are tested.
 - `[done] Phase C` Admin feature flag, file storage, `/addbook`, `/listbooks`, `/removebook`, and service-container wiring exist and are tested.
 - `[done] Phase D.1-D.2` `PromptAssembler` injects book context with feature gating and receives the shared `BookKnowledgeManager` from the container.
-- `[partial] Phase D.3` `AppSettings.books` exists, but some book modules still import compatibility globals from `config.py`; `env_example.txt` still needs an explicit final audit.
-- `[open] Phase E` Persona setup documentation has not been added.
+- `[done] Phase D.3` `AppSettings.books` holds every book setting with validators (ratios in [0,1], positive limits/batch sizes/dimensions, overlap < target, coherent budgets), proven by `tests/test_app_settings.py`. Book modules take settings from the composition root, not `config.py` globals. `env_example.txt` lists every book variable once with the shared-volume comment and the embedding-dimension warning; `tests/test_env_example.py` asserts the file matches `AppSettings.model_fields` exactly.
+- `[done] Phase E` Persona setup documentation added at `docs/persona-bots.md` (Russian), linked from README, and guarded by `tests/test_persona_docs.py`.
 - `[done] Phase F` Focused tests exist for book repo, parser, chunker, knowledge manager, ingestion task, admin commands, and prompt book RAG.
 
 ## Remaining High-Signal Work
 
-1. Finish the typed settings migration by removing remaining runtime `from config import ...` usage where practical.
-2. Finish `bot_manager` event-driven stop/watchdog cleanup.
-3. Remove the remaining `_user_cache` field or prove it is needed.
-4. Audit logging and broad exception catches in touched runtime paths.
-5. Add persona setup documentation and final `env_example.txt` review for book settings.
-6. Run a final requirement-by-requirement audit before marking the goal complete.
+All Part 1, Part 2, and Workstream A items above are `[done]` with tests as of 2026-07-20. No `[partial]`/`[open]` items remain.
+
+Follow-up (out of scope for this pass, not blockers):
+- Retire the `message_manager.py` re-export shim after one release once external imports migrate to the `messaging` package.
+- Translate README and the remaining English `docs/` to Russian per `AGENTS.md` (the new `docs/persona-bots.md` is already Russian).
+- Optionally extend the systematic exception-policy review beyond the paths touched here.
+
+## Historical Execution Order (2026-06-11)
+
+Retained for provenance; superseded by the audit above. This was the originally planned ordering before the branch commits and this pass completed the work.
 
 | Step | Items | Risk | Notes |
 |---|---|---|---|
