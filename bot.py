@@ -13,12 +13,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from core.utils import mask_db_url
 from core.bot_config import BotConfig
 from service_container import ServiceContainer
-from config import (TELEGRAM_TOKEN, BOT_NAME,
-                    PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED, PROACTIVE_MESSAGING_ENABLED,
-                    MESSAGE_PREVIEW_LENGTH,
-                    POLLING_INTERVAL,
-                    MEMORY_TRIGGER_EVERY_N_MESSAGES,
-                    MEMORY_CHUNK_MAX_MESSAGES, MEMORY_CHUNK_TARGET_TOKENS)
+from settings import settings as app_settings
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
 from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response
@@ -31,6 +26,18 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+TELEGRAM_TOKEN = app_settings.TELEGRAM_TOKEN
+BOT_NAME = app_settings.bot.name
+PROVIDER = app_settings.llm.provider
+LMSTUDIO_STARTUP_CHECK = app_settings.llm.lmstudio_startup_check
+MEMORY_ENABLED = app_settings.memory.enabled
+PROACTIVE_MESSAGING_ENABLED = app_settings.proactive.enabled
+MESSAGE_PREVIEW_LENGTH = app_settings.bot.message_preview_length
+POLLING_INTERVAL = app_settings.bot.polling_interval
+MEMORY_TRIGGER_EVERY_N_MESSAGES = app_settings.memory.trigger_every_n_messages
+MEMORY_CHUNK_MAX_MESSAGES = app_settings.memory.chunk_max_messages
+MEMORY_CHUNK_TARGET_TOKENS = app_settings.memory.chunk_target_tokens
 
 # Proactive messaging import (conditional)
 try:

@@ -6,10 +6,10 @@ import logging
 from pathlib import Path
 
 from app_context import get_app_context
-from config import BOOKS_KEEP_SOURCE_FILES, BOOKS_STORAGE_DIR
 from core.celery_loop import run_coroutine
 from knowledge.parser import extract_text
 from memory.tasks import celery_app
+from settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ def ingest_book(book_id: str):
 async def ingest_book_async(book_id: str) -> None:
     """Parse, chunk, embed, and mark one uploaded book."""
     app_context = await get_app_context()
+    book_settings = settings.books
     if not app_context.conversation_manager:
         raise RuntimeError("Conversation manager is not initialized")
     if not app_context.book_knowledge_manager:
@@ -39,7 +40,7 @@ async def ingest_book_async(book_id: str) -> None:
         logger.error("Book %s not found", book_id)
         return
 
-    file_path = Path(BOOKS_STORAGE_DIR) / f"{book.id}.{book.file_format}"
+    file_path = Path(book_settings.storage_dir) / f"{book.id}.{book.file_format}"
     await book_repo.update_status(str(book.id), "processing")
 
     try:
@@ -58,7 +59,7 @@ async def ingest_book_async(book_id: str) -> None:
             chunk_count=chunk_count,
             char_count=len(text),
         )
-        if not BOOKS_KEEP_SOURCE_FILES:
+        if not book_settings.keep_source_files:
             _delete_source_file(file_path)
         logger.info("Finished book ingestion for %s (%d chunks)", book.id, chunk_count)
     except Exception as exc:

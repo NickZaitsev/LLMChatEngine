@@ -13,7 +13,6 @@ from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import expression
-import config
 
 # Try to import pgvector, but handle gracefully if not available
 try:

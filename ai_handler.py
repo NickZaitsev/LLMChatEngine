@@ -7,25 +7,26 @@ import random
 import sys
 from typing import List, Dict, Any, Optional
 
-from config import (
-    AZURE_API_KEY,
-    AZURE_ENDPOINT,
-    AZURE_MODEL,
-    BOT_PERSONALITY,
-    GEMINI_API_KEY,
-    GEMINI_MODEL,
-    LMSTUDIO_AUTO_LOAD,
-    LMSTUDIO_BASE_URL,
-    LMSTUDIO_MAX_LOAD_WAIT,
-    LMSTUDIO_MODEL,
-    LMSTUDIO_SERVER_TIMEOUT,
-    MAX_ACTIVE_MESSAGES,
-    MEMORY_ENABLED,
-    PROMPT_HISTORY_BUDGET,
-    PROMPT_REPLY_TOKEN_BUDGET,
-    PROVIDER,
-    TEMPERATURE,
-)
+from settings import settings
+
+_llm_settings = settings.llm
+AZURE_API_KEY = _llm_settings.azure_api_key
+AZURE_ENDPOINT = _llm_settings.azure_endpoint
+AZURE_MODEL = _llm_settings.azure_model
+GEMINI_API_KEY = _llm_settings.gemini_api_key
+GEMINI_MODEL = _llm_settings.gemini_model
+LMSTUDIO_AUTO_LOAD = _llm_settings.lmstudio_auto_load
+LMSTUDIO_BASE_URL = _llm_settings.lmstudio_base_url
+LMSTUDIO_MAX_LOAD_WAIT = _llm_settings.lmstudio_max_load_wait
+LMSTUDIO_MODEL = _llm_settings.lmstudio_model
+LMSTUDIO_SERVER_TIMEOUT = _llm_settings.lmstudio_server_timeout
+PROVIDER = _llm_settings.provider
+BOT_PERSONALITY = settings.bot.personality
+MAX_ACTIVE_MESSAGES = settings.bot.max_active_messages
+MEMORY_ENABLED = settings.memory.enabled
+PROMPT_HISTORY_BUDGET = settings.prompts.history_budget
+PROMPT_REPLY_TOKEN_BUDGET = settings.prompts.reply_token_budget
+TEMPERATURE = settings.bot.temperature
 
 # Import OpenAI clients (v1+)
 try:

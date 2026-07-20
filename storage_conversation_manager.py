@@ -11,12 +11,18 @@ import uuid
 from typing import List, Dict, Optional
 from uuid import UUID
 
-from config import MAX_CONVERSATION_HISTORY, PROMPT_REPLY_TOKEN_BUDGET, MAX_CONTEXT_TOKENS, RESERVED_TOKENS, AVAILABLE_HISTORY_TOKENS
 from core.utils import mask_db_url
+from settings import settings
 from storage import create_storage, Storage
 from storage.interfaces import Message, Conversation, User, MessageLog
 
 logger = logging.getLogger(__name__)
+
+MAX_CONVERSATION_HISTORY = settings.bot.max_conversation_history
+PROMPT_REPLY_TOKEN_BUDGET = settings.prompts.reply_token_budget
+MAX_CONTEXT_TOKENS = settings.bot.max_context_tokens
+RESERVED_TOKENS = settings.bot.reserved_tokens
+AVAILABLE_HISTORY_TOKENS = settings.bot.available_history_tokens
 
 
 class PostgresConversationManager:

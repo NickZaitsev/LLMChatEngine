@@ -12,13 +12,23 @@ import uuid
 import traceback
 import inspect
 from datetime import datetime, timezone
-from config import MIN_TYPING_SPEED, MAX_TYPING_SPEED, MAX_DELAY, RANDOM_OFFSET_MIN, RANDOM_OFFSET_MAX, MESSAGE_QUEUE_MAX_RETRIES, MESSAGE_QUEUE_LOCK_TIMEOUT, MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL, MESSAGE_QUEUE_DISPATCHER_INTERVAL
+from settings import settings as app_settings
 import textwrap
 import re
 from typing import Dict, Set, Optional, Any, Hashable
 from telegram import Bot
 from telegram.error import Forbidden, BadRequest
-from config import TELEGRAM_TOKEN
+
+MIN_TYPING_SPEED = app_settings.typing.min_speed
+MAX_TYPING_SPEED = app_settings.typing.max_speed
+MAX_DELAY = app_settings.typing.max_delay
+RANDOM_OFFSET_MIN = app_settings.typing.random_offset_min
+RANDOM_OFFSET_MAX = app_settings.typing.random_offset_max
+MESSAGE_QUEUE_MAX_RETRIES = app_settings.queue.max_retries
+MESSAGE_QUEUE_LOCK_TIMEOUT = app_settings.queue.lock_timeout
+MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL = app_settings.queue.lock_refresh_interval
+MESSAGE_QUEUE_DISPATCHER_INTERVAL = app_settings.queue.dispatcher_interval
+TELEGRAM_TOKEN = app_settings.TELEGRAM_TOKEN
 
 logger = logging.getLogger(__name__)
 

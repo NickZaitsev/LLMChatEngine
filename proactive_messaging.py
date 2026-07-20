@@ -18,19 +18,20 @@ import json
 import inspect
 from telegram import Bot
 
-from config import (
-    PROACTIVE_MESSAGING_ENABLED,
-    PROACTIVE_MESSAGING_REDIS_URL,
-    PROACTIVE_MESSAGING_CADENCES,
-    PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED,
-    PROACTIVE_MESSAGING_QUIET_HOURS_START,
-    PROACTIVE_MESSAGING_QUIET_HOURS_END,
-    PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES,
-    PROACTIVE_MESSAGING_PROMPT,
-    PROACTIVE_MESSAGING_RESTART_DELAY_MAX,
-    TELEGRAM_TOKEN
-)
 from core.utils import mask_url
+from settings import settings
+
+_proactive_settings = settings.proactive
+PROACTIVE_MESSAGING_ENABLED = _proactive_settings.enabled
+PROACTIVE_MESSAGING_REDIS_URL = _proactive_settings.redis_url
+PROACTIVE_MESSAGING_CADENCES = [cadence.as_dict() for cadence in _proactive_settings.cadences]
+PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED = _proactive_settings.quiet_hours_enabled
+PROACTIVE_MESSAGING_QUIET_HOURS_START = _proactive_settings.quiet_hours_start
+PROACTIVE_MESSAGING_QUIET_HOURS_END = _proactive_settings.quiet_hours_end
+PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES = _proactive_settings.max_consecutive_outreaches
+PROACTIVE_MESSAGING_PROMPT = _proactive_settings.prompt
+PROACTIVE_MESSAGING_RESTART_DELAY_MAX = _proactive_settings.restart_delay_max
+TELEGRAM_TOKEN = settings.TELEGRAM_TOKEN
 
 # Import AppContext for shared services
 from app_context import get_app_context, AppContext

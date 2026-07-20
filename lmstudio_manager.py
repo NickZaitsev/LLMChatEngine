@@ -7,7 +7,9 @@ import json
 from typing import Optional, Dict, List
 from urllib.parse import urljoin
 
-from config import LMSTUDIO_MAX_LOAD_WAIT
+from settings import settings
+
+LMSTUDIO_MAX_LOAD_WAIT = settings.llm.lmstudio_max_load_wait
 
 logger = logging.getLogger(__name__)
 

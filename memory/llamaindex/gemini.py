@@ -6,7 +6,7 @@ from typing import List
 
 from llama_index.embeddings.gemini import GeminiEmbedding
 
-import config
+from settings import settings
 from core.abstractions import EmbeddingModel as EmbeddingModelAbstraction
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ class GeminiEmbeddingModel(EmbeddingModelAbstraction):
         """
         logger.info(f"Loading Gemini embedding model {model_name}...")
         self._model = GeminiEmbedding(
-            api_key=config.GEMINI_API_KEY,
+            api_key=settings.llm.gemini_api_key,
             model_name=model_name,
         )
 

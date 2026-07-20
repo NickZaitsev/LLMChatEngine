@@ -20,7 +20,9 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 
 from token_encryption import encrypt_token, decrypt_token
 from features import BotFeature, DEFAULT_FEATURE_FLAGS, has_feature
-from config import BOOKS_STORAGE_DIR
+from settings import settings
+
+BOOKS_STORAGE_DIR = settings.books.storage_dir
 from service_container import ServiceContainer
 from settings import build_settings
 

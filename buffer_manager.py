@@ -4,17 +4,17 @@ import asyncio
 import time
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Callable, Any, Hashable
-from config import (
-    BUFFER_SHORT_MESSAGE_TIMEOUT,
-    BUFFER_LONG_MESSAGE_TIMEOUT,
-    BUFFER_MAX_MESSAGES,
-    BUFFER_WORD_COUNT_THRESHOLD,
-    BUFFER_CLEANUP_INTERVAL,
-    INDICATE_TYPING_DURING_DELAY
-)
+from settings import settings
 import logging
 
 logger = logging.getLogger(__name__)
+
+BUFFER_SHORT_MESSAGE_TIMEOUT = settings.buffer.short_message_timeout
+BUFFER_LONG_MESSAGE_TIMEOUT = settings.buffer.long_message_timeout
+BUFFER_MAX_MESSAGES = settings.buffer.max_messages
+BUFFER_WORD_COUNT_THRESHOLD = settings.buffer.word_count_threshold
+BUFFER_CLEANUP_INTERVAL = settings.buffer.cleanup_interval
+INDICATE_TYPING_DURING_DELAY = settings.typing.indicate_during_delay
 
 
 @dataclass
