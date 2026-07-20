@@ -73,7 +73,7 @@ async def generate_ai_response(
     role: str = "user",
     show_typing: bool = True,
     route_key: Optional[Hashable] = None
-) -> str:
+) -> Optional[str]:
     """
     Generate AI response with typing indicator management.
 

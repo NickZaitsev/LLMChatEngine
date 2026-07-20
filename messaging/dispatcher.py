@@ -54,7 +54,7 @@ class MessageDispatcher:
             # Telegram bots are created lazily and cached by token. This avoids
             # building an HTTP connection pool per message part.
             self.bot = None
-            self._bot_cache = OrderedDict()
+            self._bot_cache: "OrderedDict[str, tuple[str, Bot]]" = OrderedDict()
             self.token_resolver = token_resolver
             self.typing_manager = TypingIndicatorManager()
 
