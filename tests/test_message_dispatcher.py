@@ -30,8 +30,8 @@ class TestMessageDispatcher:
     def test_init_success(self):
         """Test successful initialization of MessageDispatcher."""
         with patch('redis.Redis.ping') as mock_ping, \
-             patch('message_manager.Bot') as mock_bot, \
-             patch('message_manager.TypingIndicatorManager') as mock_typing_manager:
+             patch('messaging.dispatcher.Bot') as mock_bot, \
+             patch('messaging.dispatcher.TypingIndicatorManager') as mock_typing_manager:
             
             mock_ping.return_value = True
             mock_bot.return_value = Mock()
@@ -48,9 +48,9 @@ class TestMessageDispatcher:
     def test_init_with_empty_default_token(self):
         """Dispatcher can start without a process-wide Telegram token."""
         with patch('redis.Redis.ping') as mock_ping, \
-             patch('message_manager.TELEGRAM_TOKEN', ''), \
-             patch('message_manager.Bot') as mock_bot, \
-             patch('message_manager.TypingIndicatorManager') as mock_typing_manager:
+             patch('messaging.dispatcher.TELEGRAM_TOKEN', ''), \
+             patch('messaging.dispatcher.Bot') as mock_bot, \
+             patch('messaging.dispatcher.TypingIndicatorManager') as mock_typing_manager:
 
             mock_ping.return_value = True
             mock_typing_manager.return_value = Mock()
@@ -90,9 +90,9 @@ class TestMessageDispatcher:
         mock_typing_manager_class.return_value = mock_typing_manager_instance
         
         with patch('redis.Redis.ping') as mock_ping, \
-             patch('message_manager.Bot', new=mock_bot_class), \
-             patch('message_manager.TypingIndicatorManager', new=mock_typing_manager_class), \
-             patch('message_manager.send_ai_response', new=mock_send_ai_response):
+             patch('messaging.dispatcher.Bot', new=mock_bot_class), \
+             patch('messaging.dispatcher.TypingIndicatorManager', new=mock_typing_manager_class), \
+             patch('messaging.dispatcher.send_ai_response', new=mock_send_ai_response):
             
             mock_ping.return_value = True
             
@@ -130,9 +130,9 @@ class TestMessageDispatcher:
         mock_typing_manager_class.return_value = mock_typing_manager_instance
 
         with patch('redis.Redis.ping') as mock_ping, \
-             patch('message_manager.Bot', new=mock_bot_class), \
-             patch('message_manager.TypingIndicatorManager', new=mock_typing_manager_class), \
-             patch('message_manager.send_ai_response', new=mock_send_ai_response):
+             patch('messaging.dispatcher.Bot', new=mock_bot_class), \
+             patch('messaging.dispatcher.TypingIndicatorManager', new=mock_typing_manager_class), \
+             patch('messaging.dispatcher.send_ai_response', new=mock_send_ai_response):
 
             mock_ping.return_value = True
             dispatcher = MessageDispatcher(self.redis_url)
@@ -173,9 +173,9 @@ class TestMessageDispatcher:
         mock_typing_manager_class.return_value = mock_typing_manager_instance
         
         with patch('redis.Redis.ping') as mock_ping, \
-             patch('message_manager.Bot', new=mock_bot_class), \
-             patch('message_manager.TypingIndicatorManager', new=mock_typing_manager_class), \
-             patch('message_manager.send_ai_response', new=mock_send_ai_response):
+             patch('messaging.dispatcher.Bot', new=mock_bot_class), \
+             patch('messaging.dispatcher.TypingIndicatorManager', new=mock_typing_manager_class), \
+             patch('messaging.dispatcher.send_ai_response', new=mock_send_ai_response):
             
             mock_ping.return_value = True
             
@@ -209,8 +209,8 @@ class TestMessageDispatcher:
         mock_typing_manager_class.return_value = mock_typing_manager_instance
         
         with patch('redis.Redis.ping') as mock_ping, \
-             patch('message_manager.Bot', new=mock_bot_class), \
-             patch('message_manager.TypingIndicatorManager', new=mock_typing_manager_class):
+             patch('messaging.dispatcher.Bot', new=mock_bot_class), \
+             patch('messaging.dispatcher.TypingIndicatorManager', new=mock_typing_manager_class):
             
             mock_ping.return_value = True
             
@@ -256,8 +256,8 @@ class TestMessageDispatcher:
         mock_typing_manager_class.return_value = mock_typing_manager_instance
         
         with patch('redis.Redis.ping') as mock_ping, \
-             patch('message_manager.Bot', new=mock_bot_class), \
-             patch('message_manager.TypingIndicatorManager', new=mock_typing_manager_class):
+             patch('messaging.dispatcher.Bot', new=mock_bot_class), \
+             patch('messaging.dispatcher.TypingIndicatorManager', new=mock_typing_manager_class):
             
             mock_ping.return_value = True
             
@@ -295,8 +295,8 @@ class TestMessageDispatcher:
         mock_typing_manager_class.return_value = mock_typing_manager_instance
         
         with patch('redis.Redis.ping') as mock_ping, \
-             patch('message_manager.Bot', new=mock_bot_class), \
-             patch('message_manager.TypingIndicatorManager', new=mock_typing_manager_class):
+             patch('messaging.dispatcher.Bot', new=mock_bot_class), \
+             patch('messaging.dispatcher.TypingIndicatorManager', new=mock_typing_manager_class):
             
             mock_ping.return_value = True
             dispatcher = MessageDispatcher(self.redis_url)
@@ -332,8 +332,8 @@ class TestMessageDispatcher:
         mock_typing_manager_class.return_value = Mock()
 
         with patch('redis.Redis.ping') as mock_ping, \
-             patch('message_manager.Bot', new=mock_bot_class), \
-             patch('message_manager.TypingIndicatorManager', new=mock_typing_manager_class):
+             patch('messaging.dispatcher.Bot', new=mock_bot_class), \
+             patch('messaging.dispatcher.TypingIndicatorManager', new=mock_typing_manager_class):
             mock_ping.return_value = True
             dispatcher = MessageDispatcher(self.redis_url)
             dispatcher.running = True
@@ -361,8 +361,8 @@ class TestMessageDispatcher:
         mock_typing_manager_class.return_value = Mock()
 
         with patch('redis.Redis.ping') as mock_ping, \
-             patch('message_manager.Bot', new=mock_bot_class), \
-             patch('message_manager.TypingIndicatorManager', new=mock_typing_manager_class):
+             patch('messaging.dispatcher.Bot', new=mock_bot_class), \
+             patch('messaging.dispatcher.TypingIndicatorManager', new=mock_typing_manager_class):
             mock_ping.return_value = True
             dispatcher = MessageDispatcher(self.redis_url)
             dispatcher.acquire_lock = Mock(return_value=True)

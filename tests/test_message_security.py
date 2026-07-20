@@ -82,8 +82,8 @@ async def test_dispatcher_resolves_by_bot_id_once_and_reuses_client_for_parts():
 
     with (
         patch("message_manager.redis_async.from_url", return_value=redis_client),
-        patch("message_manager.Bot", return_value=first_bot) as bot_class,
-        patch("message_manager.send_ai_response", new=AsyncMock()),
+        patch("messaging.dispatcher.Bot", return_value=first_bot) as bot_class,
+        patch("messaging.dispatcher.send_ai_response", new=AsyncMock()),
     ):
         dispatcher = MessageDispatcher("redis://redis:6379/0", token_resolver=resolver)
         message = {
@@ -107,8 +107,8 @@ async def test_dispatcher_invalidation_closes_id_cached_client():
     bot = SimpleNamespace(shutdown=AsyncMock())
     with (
         patch("message_manager.redis_async.from_url", return_value=redis_client),
-        patch("message_manager.Bot", return_value=bot),
-        patch("message_manager.send_ai_response", new=AsyncMock()),
+        patch("messaging.dispatcher.Bot", return_value=bot),
+        patch("messaging.dispatcher.send_ai_response", new=AsyncMock()),
     ):
         dispatcher = MessageDispatcher("redis://redis:6379/0", token_resolver=resolver)
         await dispatcher.process_message(
@@ -142,7 +142,7 @@ async def test_unknown_bot_id_fails_without_using_legacy_token(caplog):
     resolver = SimpleNamespace(resolve=AsyncMock(side_effect=LookupError("unknown bot")))
     with (
         patch("message_manager.redis_async.from_url", return_value=redis_client),
-        patch("message_manager.Bot") as bot_class,
+        patch("messaging.dispatcher.Bot") as bot_class,
         caplog.at_level(logging.WARNING),
     ):
         dispatcher = MessageDispatcher("redis://redis:6379/0", token_resolver=resolver)
@@ -176,8 +176,8 @@ async def test_legacy_token_fallback_is_read_only_and_warning_is_token_free(capl
     }
     with (
         patch("message_manager.redis_async.from_url", return_value=redis_client),
-        patch("message_manager.Bot", return_value=legacy_bot),
-        patch("message_manager.send_ai_response", new=AsyncMock()),
+        patch("messaging.dispatcher.Bot", return_value=legacy_bot),
+        patch("messaging.dispatcher.send_ai_response", new=AsyncMock()),
         caplog.at_level(logging.WARNING),
     ):
         dispatcher = MessageDispatcher("redis://redis:6379/0", token_resolver=resolver)

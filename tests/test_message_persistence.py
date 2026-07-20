@@ -29,8 +29,8 @@ async def test_message_persistence():
     
     mock_redis = Mock()
     with patch('message_manager.redis_async.from_url', return_value=mock_redis), \
-         patch('message_manager.Bot', new=mock_bot_class), \
-         patch('message_manager.TypingIndicatorManager', new=mock_typing_manager_class):
+         patch('messaging.dispatcher.Bot', new=mock_bot_class), \
+         patch('messaging.dispatcher.TypingIndicatorManager', new=mock_typing_manager_class):
         
         # Mock Redis methods
         mock_redis.rpush.return_value = 1
