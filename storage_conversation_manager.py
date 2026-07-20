@@ -14,7 +14,7 @@ from uuid import UUID
 from core.utils import mask_db_url
 from settings import settings
 from storage import create_storage, Storage
-from storage.interfaces import Message, Conversation, User, MessageLog
+from storage.interfaces import Message, Conversation, MessageLog
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,6 @@ class PostgresConversationManager:
         self.use_pgvector = use_pgvector
         self.storage: Optional[Storage] = storage
         self._owns_storage = storage is None
-        self._user_cache: Dict[int, User] = {}  # Cache for user objects
         self._conversation_id_cache: Dict[tuple[int, Optional[uuid.UUID]], uuid.UUID] = {}
 
         logger.info("PostgresConversationManager initialized. DB: %s, pgvector: %s",
@@ -99,9 +98,6 @@ class PostgresConversationManager:
                 extra_data={"telegram_id": user_id, "created_at": time.time()}
             )
             logger.info("Created new user: %s (telegram_id: %d)", user.id, user_id)
-
-        # Cache user
-        self._user_cache[user_id] = user
 
         # Check for existing conversation
         conversations = await self.storage.conversations.list_conversations(str(user.id), bot_id=str(bot_id) if bot_id else None)

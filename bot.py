@@ -75,6 +75,8 @@ class TelegramChatBot:
         self.ai_handler = AIHandler()
         self.typing_manager = self.service_container.typing_manager or TypingIndicatorManager()
         self.application = None
+        self._cleanup_lock = asyncio.Lock()
+        self._cleaned_up = False
         self.pending_clear_confirmation = set()
         self._storage_initialized = False
         self.bot_config = bot_config
@@ -914,6 +916,14 @@ I'm designed to be flexible and adapt to your preferences."""
 
     async def cleanup(self):
         """Cleanup resources when shutting down"""
+        async with self._cleanup_lock:
+            if self._cleaned_up:
+                return
+            self._cleaned_up = True
+            await self._cleanup_resources()
+
+    async def _cleanup_resources(self) -> None:
+        """Perform the single owned cleanup path."""
         logger.info("Cleaning up bot resources...")
 
         # Stop message dispatcher
@@ -931,6 +941,8 @@ I'm designed to be flexible and adapt to your preferences."""
                     self.dispatcher_task.cancel()
                     await self.dispatcher_task
                 logger.info("Dispatcher task cleaned up successfully")
+            except asyncio.CancelledError:
+                pass
             except Exception as e:
                 logger.error("Error during dispatcher task cleanup: %s", e)
 
@@ -993,21 +1005,6 @@ I'm designed to be flexible and adapt to your preferences."""
         self.application.run_polling(allowed_updates=Update.ALL_TYPES, poll_interval=POLLING_INTERVAL)
 
 
-async def shutdown_handler(bot_instance):
-    """Handle graceful shutdown"""
-    await bot_instance.cleanup()
-
-
 if __name__ == "__main__":
     logger.info("Starting %s application", BOT_NAME)
-    bot = TelegramChatBot()
-    try:
-        bot.run()
-    except KeyboardInterrupt:
-        logger.info("Bot shutdown requested by user (Ctrl+C)")
-        logger.info("%s is shutting down", bot._get_bot_name())
-        asyncio.run(shutdown_handler(bot))
-
-    except Exception as e:
-        logger.error("Error running bot: %s", e)
-        asyncio.run(shutdown_handler(bot))
+    TelegramChatBot().run()

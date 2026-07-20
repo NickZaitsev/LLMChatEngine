@@ -49,8 +49,10 @@ class BotManager:
         )
         self._running = False
         self._tasks: Dict[uuid.UUID, asyncio.Task] = {}
+        self._stop_events: Dict[uuid.UUID, asyncio.Event] = {}
         self.shared_dispatcher = None
         self._shared_dispatcher_task: Optional[asyncio.Task] = None
+        self._dispatcher_watchdog_event = asyncio.Event()
 
     async def _init_storage(self):
         """Initialize database storage."""
@@ -102,7 +104,17 @@ class BotManager:
         await self.service_container.initialize()
         self.shared_dispatcher = self.service_container.message_dispatcher
         self._shared_dispatcher_task = asyncio.create_task(self.shared_dispatcher.start_dispatching())
+        self._shared_dispatcher_task.add_done_callback(self._on_dispatcher_done)
         logger.info("Shared message dispatcher started")
+
+    def _on_dispatcher_done(self, task: asyncio.Future) -> None:
+        """Wake the dispatcher watchdog immediately after an unexpected exit."""
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                logger.error("Shared message dispatcher crashed: %s", error)
+        if self._running and self.bots:
+            self._dispatcher_watchdog_event.set()
 
     async def _stop_shared_dispatcher(self) -> None:
         """Stop the shared dispatcher if it is running."""
@@ -145,6 +157,8 @@ class BotManager:
 
         bot_instance = create_bot_with_config(config, service_container=self.service_container)
         self.bots[bot_id] = bot_instance
+        stop_event = asyncio.Event()
+        self._stop_events[bot_id] = stop_event
 
         # Build and start application
         app = build_application_for_bot(bot_instance, config.token)
@@ -171,21 +185,17 @@ class BotManager:
                 await app.updater.start_polling()
                 logger.info(f"Bot {config.name} ({bot_id}) started successfully")
 
-                # Wait until stopped
-                while bot_id in self.bots:
-                    await asyncio.sleep(1)
+                await stop_event.wait()
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 logger.error(f"Bot {bot_id} crashed: {e}")
             finally:
                 self.bots.pop(bot_id, None)
                 self._tasks.pop(bot_id, None)
+                self._stop_events.pop(bot_id, None)
                 if bot_id in self.applications:
-                    try:
-                        await app.updater.stop()
-                        await app.stop()
-                        await app.shutdown()
-                    except Exception:
-                        pass
+                    await self._shutdown_application(app, bot_id)
                     self.applications.pop(bot_id, None)
                 if not self.bots and self._shared_dispatcher_task:
                     await self._stop_shared_dispatcher()
@@ -206,14 +216,13 @@ class BotManager:
 
         bot_name = self.bot_configs[bot_id].name if bot_id in self.bot_configs else str(bot_id)
 
-        # Remove from bots dict (triggers shutdown in run loop)
-        del self.bots[bot_id]
-
-        # Cancel task
-        if bot_id in self._tasks:
-            self._tasks[bot_id].cancel()
+        task = self._tasks.get(bot_id)
+        stop_event = self._stop_events.get(bot_id)
+        if stop_event:
+            stop_event.set()
+        if task:
             try:
-                await self._tasks[bot_id]
+                await task
             except asyncio.CancelledError:
                 pass
             self._tasks.pop(bot_id, None)
@@ -225,6 +234,21 @@ class BotManager:
             await self._stop_shared_dispatcher()
 
         logger.info(f"Stopped bot: {bot_name}")
+
+    @staticmethod
+    async def _shutdown_application(app: Application, bot_id: uuid.UUID) -> None:
+        """Stop PTB application components independently."""
+        for label, operation in (
+            ("updater", app.updater.stop),
+            ("application", app.stop),
+            ("application resources", app.shutdown),
+        ):
+            try:
+                await operation()
+            except RuntimeError as exc:
+                logger.debug("Bot %s %s was already stopped: %s", bot_id, label, exc)
+            except Exception as exc:
+                logger.error("Failed to stop bot %s %s: %s", bot_id, label, exc)
 
     async def reload_bot_config(self, bot_id: uuid.UUID) -> None:
         """
@@ -323,18 +347,22 @@ class BotManager:
 
         logger.info(f"Running {len(self.bots)} bots")
 
-        # Keep running until stopped
+        # Event-driven dispatcher watchdog.
         while self._running:
+            await self._dispatcher_watchdog_event.wait()
+            self._dispatcher_watchdog_event.clear()
+            if not self._running:
+                break
             if self.bots and (self._shared_dispatcher_task is None or self._shared_dispatcher_task.done()):
                 try:
                     await self._ensure_shared_dispatcher()
                 except Exception as e:
                     logger.error("Failed to ensure shared dispatcher while bots are running: %s", e)
-            await asyncio.sleep(1)
 
     async def stop_all(self) -> None:
         """Stop all running bots."""
         self._running = False
+        self._dispatcher_watchdog_event.set()
 
         # Stop all bots
         bot_ids = list(self.bots.keys())
