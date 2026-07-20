@@ -38,7 +38,7 @@ from app_context import get_app_context, AppContext
 from core.celery_loop import run_coroutine
 
 # Import message queue manager and related functions
-from message_manager import clean_ai_response, generate_ai_response
+from messaging import clean_ai_response, generate_ai_response
 
 
 # Import celery configuration

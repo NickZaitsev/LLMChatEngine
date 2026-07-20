@@ -1,6 +1,30 @@
 # Plan: Production readiness fixes (post-master-plan review)
 
-Status: plan, 2026-07-20.
+Status: implemented 2026-07-20 in branch `codex/finish-master-plan-security`.
+
+## Implementation notes (divergences from the original plan)
+
+- **requirements-lock.txt**: at implementation time the lock file was already a
+  full pinned closure that included the dev tools (`pytest`, `ruff`, `mypy`,
+  etc.), and it was stored as UTF-16 (a likely cause of the CI breakage). It was
+  re-encoded losslessly to UTF-8 and kept as the complete pinned CI closure
+  rather than trimmed to runtime-only: re-deriving a strict runtime-only closure
+  is not reproducible in this environment, and the production **image** already
+  excludes test deps because the Dockerfile installs `requirements.txt` (from
+  which `pytest`/`pytest-asyncio`/`aiosqlite` were removed). CI installs
+  `requirements-lock.txt -r requirements-dev.txt`.
+- **docker-compose env scoping**: implemented with a shared non-secret
+  `x-app-config` anchor (values sourced from `.env` as `${VAR:-default}`) plus
+  per-service secret enumeration. `celery-memory` receives `AZURE_API_KEY` and
+  `GEMINI_API_KEY` (not only embedding vars) because it runs the LLM-backed
+  conversation summarizer (`memory/tasks.py` calls `ai_handler.get_response`).
+  `celery-beat` depends only on `redis` (it never touches the DB) and receives
+  only `REDIS_URL`/`LOG_LEVEL`.
+- **Volumes/network**: pinned via explicit `name: llmchatengine_*` matching the
+  names Compose already generated under the default project prefix, so no data
+  migration is required.
+- **mypy scope**: CI runs `mypy messaging --ignore-missing-imports` (the
+  `message_manager.py` target was dropped together with the shim in step 6).
 
 ## Context
 

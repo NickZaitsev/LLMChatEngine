@@ -1,22 +1,147 @@
+# Container logging: cap json-file growth so disks never fill.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
+# Non-secret application configuration shared by the bot and the workers.
+# Values come from the top-level `.env` (used only for ${VAR} interpolation —
+# `.env` is never mounted into a container wholesale). Secrets are NOT here;
+# each service declares only the secrets it actually needs.
+x-app-config: &app-config
+  LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+  USE_PGVECTOR: "${USE_PGVECTOR:-true}"
+  # Redis lives on the internal network under the service name, regardless of
+  # what the operator's .env says (their value may target the host).
+  REDIS_URL: "redis://redis:6379/0"
+  PROVIDER: "${PROVIDER:-azure}"
+  AZURE_ENDPOINT: "${AZURE_ENDPOINT:-}"
+  AZURE_MODEL: "${AZURE_MODEL:-}"
+  GEMINI_MODEL: "${GEMINI_MODEL:-}"
+  GEMINI_EMBEDDING_MODEL: "${GEMINI_EMBEDDING_MODEL:-}"
+  LMSTUDIO_MODEL: "${LMSTUDIO_MODEL:-}"
+  LMSTUDIO_BASE_URL: "${LMSTUDIO_BASE_URL:-http://host.docker.internal:1234/v1}"
+  LMSTUDIO_AUTO_LOAD: "${LMSTUDIO_AUTO_LOAD:-true}"
+  LMSTUDIO_MAX_LOAD_WAIT: "${LMSTUDIO_MAX_LOAD_WAIT:-300}"
+  LMSTUDIO_SERVER_TIMEOUT: "${LMSTUDIO_SERVER_TIMEOUT:-80}"
+  LMSTUDIO_STARTUP_CHECK: "${LMSTUDIO_STARTUP_CHECK:-true}"
+  BOT_NAME: "${BOT_NAME:-Bot}"
+  BOT_PERSONALITY: "${BOT_PERSONALITY:-}"
+  MAX_CONVERSATION_HISTORY: "${MAX_CONVERSATION_HISTORY:-100}"
+  TEMPERATURE: "${TEMPERATURE:-0.8}"
+  MAX_ACTIVE_MESSAGES: "${MAX_ACTIVE_MESSAGES:-50}"
+  REQUEST_TIMEOUT: "${REQUEST_TIMEOUT:-80}"
+  MESSAGE_PREVIEW_LENGTH: "${MESSAGE_PREVIEW_LENGTH:-50}"
+  SHORT_MESSAGE_THRESHOLD: "${SHORT_MESSAGE_THRESHOLD:-10}"
+  POLLING_INTERVAL: "${POLLING_INTERVAL:-0.5}"
+  MAX_CONTEXT_TOKENS: "${MAX_CONTEXT_TOKENS:-8000}"
+  RESERVED_TOKENS: "${RESERVED_TOKENS:-500}"
+  PROMPT_MAX_MEMORY_ITEMS: "${PROMPT_MAX_MEMORY_ITEMS:-3}"
+  PROMPT_MEMORY_TOKEN_BUDGET_RATIO: "${PROMPT_MEMORY_TOKEN_BUDGET_RATIO:-0.4}"
+  PROMPT_TRUNCATION_LENGTH: "${PROMPT_TRUNCATION_LENGTH:-200}"
+  PROMPT_INCLUDE_SYSTEM_TEMPLATE: "${PROMPT_INCLUDE_SYSTEM_TEMPLATE:-true}"
+  PROMPT_HISTORY_BUDGET: "${PROMPT_HISTORY_BUDGET:-7500}"
+  PROMPT_REPLY_TOKEN_BUDGET: "${PROMPT_REPLY_TOKEN_BUDGET:-500}"
+  MEMORY_ENABLED: "${MEMORY_ENABLED:-true}"
+  MEMORY_SUMMARIZER_MODE: "${MEMORY_SUMMARIZER_MODE:-local}"
+  MEMORY_EMBEDDING_PROVIDER: "${MEMORY_EMBEDDING_PROVIDER:-lmstudio}"
+  MEMORY_EMBED_MODEL: "${MEMORY_EMBED_MODEL:-text-embedding-qwen3-embedding-0.6b}"
+  MEMORY_EMBED_DIM: "${MEMORY_EMBED_DIM:-1024}"
+  VECTOR_STORE_TABLE_NAME: "${VECTOR_STORE_TABLE_NAME:-llama_pg_vector_store}"
+  MEMORY_CHUNK_MAX_MESSAGES: "${MEMORY_CHUNK_MAX_MESSAGES:-4}"
+  MEMORY_CHUNK_TARGET_TOKENS: "${MEMORY_CHUNK_TARGET_TOKENS:-300}"
+  MEMORY_TRIGGER_EVERY_N_MESSAGES: "${MEMORY_TRIGGER_EVERY_N_MESSAGES:-4}"
+  MEMORY_RETRIEVAL_EXPAND_NEIGHBORS: "${MEMORY_RETRIEVAL_EXPAND_NEIGHBORS:-1}"
+  BOOK_RAG_ENABLED: "${BOOK_RAG_ENABLED:-true}"
+  BOOKS_STORAGE_DIR: "${BOOKS_STORAGE_DIR:-./book_files}"
+  BOOKS_KEEP_SOURCE_FILES: "${BOOKS_KEEP_SOURCE_FILES:-false}"
+  BOOK_CHUNK_TARGET_TOKENS: "${BOOK_CHUNK_TARGET_TOKENS:-400}"
+  BOOK_CHUNK_OVERLAP_TOKENS: "${BOOK_CHUNK_OVERLAP_TOKENS:-50}"
+  BOOK_RAG_TOP_K: "${BOOK_RAG_TOP_K:-4}"
+  BOOK_RAG_MIN_SCORE: "${BOOK_RAG_MIN_SCORE:-0.35}"
+  BOOK_RAG_TOKEN_BUDGET_RATIO: "${BOOK_RAG_TOKEN_BUDGET_RATIO:-0.25}"
+  BOOK_RAG_EXPAND_NEIGHBORS: "${BOOK_RAG_EXPAND_NEIGHBORS:-1}"
+  BOOK_EMBED_BATCH_SIZE: "${BOOK_EMBED_BATCH_SIZE:-64}"
+  MIN_TYPING_SPEED: "${MIN_TYPING_SPEED:-10}"
+  MAX_TYPING_SPEED: "${MAX_TYPING_SPEED:-30}"
+  MAX_DELAY: "${MAX_DELAY:-5}"
+  RANDOM_OFFSET_MIN: "${RANDOM_OFFSET_MIN:-0.1}"
+  RANDOM_OFFSET_MAX: "${RANDOM_OFFSET_MAX:-0.5}"
+  INDICATE_TYPING_DURING_DELAY: "${INDICATE_TYPING_DURING_DELAY:-false}"
+  PROACTIVE_MESSAGING_ENABLED: "${PROACTIVE_MESSAGING_ENABLED:-true}"
+  PROACTIVE_MESSAGING_INTERVAL_1H: "${PROACTIVE_MESSAGING_INTERVAL_1H:-3600}"
+  PROACTIVE_MESSAGING_INTERVAL_9H: "${PROACTIVE_MESSAGING_INTERVAL_9H:-32400}"
+  PROACTIVE_MESSAGING_INTERVAL_1D: "${PROACTIVE_MESSAGING_INTERVAL_1D:-86400}"
+  PROACTIVE_MESSAGING_INTERVAL_1W: "${PROACTIVE_MESSAGING_INTERVAL_1W:-604800}"
+  PROACTIVE_MESSAGING_INTERVAL_1MO: "${PROACTIVE_MESSAGING_INTERVAL_1MO:-2592000}"
+  PROACTIVE_MESSAGING_JITTER_1H: "${PROACTIVE_MESSAGING_JITTER_1H:-900}"
+  PROACTIVE_MESSAGING_JITTER_9H: "${PROACTIVE_MESSAGING_JITTER_9H:-1800}"
+  PROACTIVE_MESSAGING_JITTER_1D: "${PROACTIVE_MESSAGING_JITTER_1D:-7200}"
+  PROACTIVE_MESSAGING_JITTER_1W: "${PROACTIVE_MESSAGING_JITTER_1W:-43200}"
+  PROACTIVE_MESSAGING_JITTER_1MO: "${PROACTIVE_MESSAGING_JITTER_1MO:-86400}"
+  PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED: "${PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED:-true}"
+  PROACTIVE_MESSAGING_QUIET_HOURS_START: "${PROACTIVE_MESSAGING_QUIET_HOURS_START:-02:30}"
+  PROACTIVE_MESSAGING_QUIET_HOURS_END: "${PROACTIVE_MESSAGING_QUIET_HOURS_END:-08:00}"
+  PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES: "${PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES:-5}"
+  PROACTIVE_MESSAGING_RETRY_DELAY: "${PROACTIVE_MESSAGING_RETRY_DELAY:-300}"
+  PROACTIVE_MESSAGING_MAX_RETRIES: "${PROACTIVE_MESSAGING_MAX_RETRIES:-3}"
+  PROACTIVE_MESSAGING_RESTART_DELAY_MAX: "${PROACTIVE_MESSAGING_RESTART_DELAY_MAX:-900}"
+  PROACTIVE_MESSAGING_RECENT_HISTORY_LIMIT: "${PROACTIVE_MESSAGING_RECENT_HISTORY_LIMIT:-8}"
+  PROACTIVE_MESSAGING_RECENT_PROACTIVE_LIMIT: "${PROACTIVE_MESSAGING_RECENT_PROACTIVE_LIMIT:-6}"
+  PROACTIVE_MESSAGING_MEMORY_HINT_LIMIT: "${PROACTIVE_MESSAGING_MEMORY_HINT_LIMIT:-5}"
+  PROACTIVE_MESSAGING_RANDOM_SEED: "${PROACTIVE_MESSAGING_RANDOM_SEED:-}"
+  PROACTIVE_MESSAGING_PROMPT: "${PROACTIVE_MESSAGING_PROMPT:-}"
+  MESSAGE_QUEUE_MAX_RETRIES: "${MESSAGE_QUEUE_MAX_RETRIES:-3}"
+  MESSAGE_QUEUE_LOCK_TIMEOUT: "${MESSAGE_QUEUE_LOCK_TIMEOUT:-30}"
+  MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL: "${MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL:-10}"
+  MESSAGE_QUEUE_DISPATCHER_INTERVAL: "${MESSAGE_QUEUE_DISPATCHER_INTERVAL:-0.1}"
+  BUFFER_SHORT_MESSAGE_TIMEOUT: "${BUFFER_SHORT_MESSAGE_TIMEOUT:-4}"
+  BUFFER_LONG_MESSAGE_TIMEOUT: "${BUFFER_LONG_MESSAGE_TIMEOUT:-0.1}"
+  BUFFER_MAX_MESSAGES: "${BUFFER_MAX_MESSAGES:-8}"
+  BUFFER_WORD_COUNT_THRESHOLD: "${BUFFER_WORD_COUNT_THRESHOLD:-30}"
+  BUFFER_CLEANUP_INTERVAL: "${BUFFER_CLEANUP_INTERVAL:-300}"
+
 services:
+  # One-shot schema migration. Every service that touches the database waits for
+  # this to complete successfully, so workers never start against missing tables.
+  migrate:
+    build: .
+    container_name: llm-chat-engine-migrate
+    command: alembic upgrade head
+    restart: "no"
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://ai_bot:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/ai_bot"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - llmchatengine_network
+    logging: *default-logging
+
   llm-chat-engine:
     build: .
     container_name: llm-chat-engine
     restart: unless-stopped
-    command: bash -c "alembic upgrade head && python run_multibot.py"
-    env_file: .env
+    command: python run_multibot.py
     environment:
-      - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/ai_bot
-      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
-      - ADMIN_BOT_TOKEN=${ADMIN_BOT_TOKEN}
-      - ADMIN_USER_IDS=${ADMIN_USER_IDS}
+      <<: *app-config
+      DATABASE_URL: "postgresql+asyncpg://ai_bot:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/ai_bot"
+      TELEGRAM_TOKEN: "${TELEGRAM_TOKEN:-}"
+      ADMIN_BOT_TOKEN: "${ADMIN_BOT_TOKEN}"
+      ADMIN_USER_IDS: "${ADMIN_USER_IDS}"
+      TOKEN_ENCRYPTION_KEY: "${TOKEN_ENCRYPTION_KEY}"
+      AZURE_API_KEY: "${AZURE_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     networks:
-      - backup_network
+      - llmchatengine_network
     dns:
       - 8.8.8.8
       - 8.8.4.4
@@ -24,6 +149,8 @@ services:
       - "host-machine:host-gateway"
     volumes:
       - book_files:/app/book_files
+    logging: *default-logging
+
   postgres:
     image: pgvector/pgvector:pg15
     container_name: llm-chat-engine-postgres
@@ -37,12 +164,13 @@ services:
       - ./init-pgvector.sql:/docker-entrypoint-initdb.d/init-pgvector.sql
       - backups:/backups
     networks:
-      - backup_network
+      - llmchatengine_network
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ai_bot -d ai_bot" ]
       interval: 5s
       timeout: 3s
       retries: 3
+    logging: *default-logging
 
   postgres-backup:
     build: ./backup
@@ -56,110 +184,127 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - backup_network
+      - llmchatengine_network
+    logging: *default-logging
 
   redis:
-    image: redis:alpine
+    image: redis:7.4-alpine
     container_name: llm-chat-engine-redis
     restart: unless-stopped
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
     networks:
-      - backup_network
+      - llmchatengine_network
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 3
+    logging: *default-logging
 
   celery-worker:
     build: .
     container_name: llm-chat-engine-celery-worker
     restart: unless-stopped
     command: celery -A proactive_messaging worker --concurrency=5 --loglevel=info --statedb=/var/lib/celery/worker_state/state.db -Q proactive_messaging
-    env_file: .env
     environment:
-      - PYTHONPATH=/app
-      - REDIS_URL=redis://redis:6379/0
-      - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/ai_bot
-      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
+      <<: *app-config
+      PYTHONPATH: /app
+      DATABASE_URL: "postgresql+asyncpg://ai_bot:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/ai_bot"
+      TOKEN_ENCRYPTION_KEY: "${TOKEN_ENCRYPTION_KEY}"
+      AZURE_API_KEY: "${AZURE_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
     volumes:
-      - .:/app
       - celery_worker_state:/var/lib/celery/worker_state
     networks:
-      - backup_network
+      - llmchatengine_network
     dns:
       - 8.8.8.8
       - 8.8.4.4
     extra_hosts:
       - "host-machine:host-gateway"
+    logging: *default-logging
 
   celery-beat:
     build: .
     container_name: llm-chat-engine-celery-beat
     restart: unless-stopped
     command: celery -A proactive_messaging beat --loglevel=info --scheduler celery.beat.PersistentScheduler -s /var/lib/celery/beat_schedule/schedule
-    env_file: .env
+    # The scheduler only pushes task envelopes to Redis; it never touches the
+    # database or Telegram tokens, so it gets neither.
     environment:
-      - REDIS_URL=redis://redis:6379/0
-      - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/ai_bot
+      REDIS_URL: "redis://redis:6379/0"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
     depends_on:
       redis:
         condition: service_healthy
-      postgres:
-        condition: service_healthy
     volumes:
-      - .:/app
       - celery_beat_schedule:/var/lib/celery/beat_schedule
     networks:
-      - backup_network
+      - llmchatengine_network
     dns:
       - 8.8.8.8
       - 8.8.4.4
     extra_hosts:
       - "host-machine:host-gateway"
+    logging: *default-logging
 
   celery-memory:
     build: .
     container_name: llm-chat-engine-celery-memory
     restart: unless-stopped
     command: celery -A memory.tasks:celery_app worker --concurrency=5 --loglevel=info -Q memory_tasks
-    env_file: .env
+    # Runs embedding + summarization tasks: needs the DB and the LLM/embedding
+    # provider secrets, but not the Telegram or admin tokens.
     environment:
-      - PYTHONPATH=/app
-      - REDIS_URL=redis://redis:6379/0
-      - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/ai_bot
+      <<: *app-config
+      PYTHONPATH: /app
+      DATABASE_URL: "postgresql+asyncpg://ai_bot:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/ai_bot"
+      AZURE_API_KEY: "${AZURE_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
     volumes:
-      - .:/app
       - book_files:/app/book_files
     networks:
-      - backup_network
+      - llmchatengine_network
     dns:
       - 8.8.8.8
       - 8.8.4.4
     extra_hosts:
       - "host-machine:host-gateway"
+    logging: *default-logging
 
 volumes:
+  # Physical names are pinned so ownership is explicit and matches the volumes
+  # Compose already created under the default project prefix (no data migration).
   postgres_data:
+    name: llmchatengine_postgres_data
   backups:
+    name: llmchatengine_backups
   redis_data:
+    name: llmchatengine_redis_data
   celery_beat_schedule:
+    name: llmchatengine_celery_beat_schedule
   celery_worker_state:
+    name: llmchatengine_celery_worker_state
   book_files:
-
+    name: llmchatengine_book_files
 
 networks:
-  backup_network:
+  llmchatengine_network:
+    name: llmchatengine_network
     driver: bridge

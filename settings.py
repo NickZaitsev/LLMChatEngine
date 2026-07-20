@@ -188,6 +188,8 @@ class AppSettings(BaseSettings):
         super().__init__(**data)
         self._explicit_fields = explicit_fields
 
+    LOG_LEVEL: str = "INFO"
+
     TELEGRAM_TOKEN: str | None = None
     ADMIN_BOT_TOKEN: str | None = None
     ADMIN_USER_IDS: list[int] = Field(default_factory=list)
@@ -296,6 +298,17 @@ class AppSettings(BaseSettings):
     BUFFER_MAX_MESSAGES: int = 8
     BUFFER_WORD_COUNT_THRESHOLD: int = 30
     BUFFER_CLEANUP_INTERVAL: int = 300
+
+    @field_validator("LOG_LEVEL", mode="before")
+    @classmethod
+    def _normalize_log_level(cls, value: Any) -> str:
+        if value in (None, ""):
+            return "INFO"
+        level = str(value).strip().upper()
+        valid = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}
+        if level not in valid:
+            raise ValueError(f"LOG_LEVEL must be one of {sorted(valid)}")
+        return level
 
     @field_validator("ADMIN_USER_IDS", mode="before")
     @classmethod

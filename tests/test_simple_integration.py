@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import asyncio
 from unittest.mock import Mock, patch
 
-from message_manager import MessageQueueManager, MessageDispatcher
+from messaging import MessageQueueManager, MessageDispatcher
 
 async def test_basic_integration():
     """Test basic integration between MessageQueueManager and MessageDispatcher with mocked Redis"""
@@ -16,7 +16,7 @@ async def test_basic_integration():
     
     try:
         mock_redis = Mock()
-        with patch('message_manager.redis_async.from_url', return_value=mock_redis):
+        with patch('messaging.queue.redis_async.from_url', return_value=mock_redis):
             
             # Mock Redis methods
             mock_redis.rpush.return_value = 1

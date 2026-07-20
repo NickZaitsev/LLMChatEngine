@@ -4,7 +4,7 @@ import json
 from unittest.mock import Mock, patch, AsyncMock
 import redis
 
-from message_manager import MessageQueueManager, MessageDispatcher
+from messaging import MessageQueueManager, MessageDispatcher
 
 @pytest.mark.asyncio
 async def test_message_persistence():
@@ -28,7 +28,7 @@ async def test_message_persistence():
     mock_typing_manager_class.return_value = mock_typing_manager_instance
     
     mock_redis = Mock()
-    with patch('message_manager.redis_async.from_url', return_value=mock_redis), \
+    with patch('messaging.queue.redis_async.from_url', return_value=mock_redis), \
          patch('messaging.dispatcher.Bot', new=mock_bot_class), \
          patch('messaging.dispatcher.TypingIndicatorManager', new=mock_typing_manager_class):
         

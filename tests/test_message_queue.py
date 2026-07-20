@@ -4,7 +4,7 @@ import json
 from unittest.mock import AsyncMock, Mock, patch
 import redis
 
-from message_manager import MessageQueueManager
+from messaging import MessageQueueManager
 
 class TestMessageQueueManager:
     """Test cases for MessageQueueManager class."""
@@ -35,7 +35,7 @@ class TestMessageQueueManager:
     
     def test_init_failure(self):
         """Test failed initialization of MessageQueueManager."""
-        with patch('message_manager.redis_async.from_url') as mock_from_url:
+        with patch('messaging.queue.redis_async.from_url') as mock_from_url:
             mock_from_url.side_effect = Exception("Connection failed")
             with pytest.raises(Exception):
                 MessageQueueManager(self.redis_url)

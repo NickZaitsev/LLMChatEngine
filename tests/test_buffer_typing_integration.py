@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from buffer_manager import BufferManager
-from message_manager import TypingIndicatorManager
+from messaging import TypingIndicatorManager
 
 # Set up logging
 logging.basicConfig(

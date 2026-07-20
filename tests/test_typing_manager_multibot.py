@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from message_manager import TypingIndicatorManager
+from messaging import TypingIndicatorManager
 
 
 @pytest.mark.asyncio

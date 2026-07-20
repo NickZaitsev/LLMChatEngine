@@ -61,6 +61,17 @@ def test_app_settings_reject_invalid_ratios_limits_batches_and_dimensions(field,
         AppSettings(**{field: value})
 
 
+def test_app_settings_normalizes_log_level():
+    assert AppSettings(LOG_LEVEL="debug").LOG_LEVEL == "DEBUG"
+    assert AppSettings(LOG_LEVEL="").LOG_LEVEL == "INFO"
+    assert AppSettings().LOG_LEVEL == "INFO"
+
+
+def test_app_settings_reject_invalid_log_level():
+    with pytest.raises(ValidationError):
+        AppSettings(LOG_LEVEL="verbose")
+
+
 def test_app_settings_reject_incoherent_overlaps_budgets_and_lock_refresh():
     invalid_settings = [
         {"BOOK_CHUNK_TARGET_TOKENS": 100, "BOOK_CHUNK_OVERLAP_TOKENS": 100},

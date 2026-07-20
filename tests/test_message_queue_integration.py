@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch, AsyncMock
 import redis
 
-from message_manager import MessageQueueManager
+from messaging import MessageQueueManager
 from bot import TelegramChatBot
 from proactive_messaging import ProactiveMessagingService
 

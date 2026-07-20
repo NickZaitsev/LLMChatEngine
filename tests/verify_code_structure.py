@@ -191,37 +191,35 @@ def verify_migration_structure():
 
 
 def verify_requirements():
-    """Verify requirements.txt has all necessary dependencies."""
+    """Verify runtime and dev requirement files list their expected packages."""
     print("Verifying requirements...")
-    
+
     if not os.path.exists('requirements.txt'):
         print("[ERROR] requirements.txt not found")
         return False
-    
+
     with open('requirements.txt', 'r') as f:
-        requirements = f.read()
-    
-    expected_packages = [
-        'sqlalchemy',
-        'asyncpg',
-        'alembic',
-        'pgvector',
-        'tiktoken',
-        'pytest',
-        'pytest-asyncio',
-        'aiosqlite'
-    ]
-    
-    missing = []
-    for package in expected_packages:
-        if package not in requirements:
-            missing.append(package)
-    
+        runtime = f.read()
+
+    dev = ''
+    if os.path.exists('requirements-dev.txt'):
+        with open('requirements-dev.txt', 'r') as f:
+            dev = f.read()
+
+    # Runtime-only dependencies must stay in requirements.txt.
+    runtime_packages = ['sqlalchemy', 'asyncpg', 'alembic', 'pgvector', 'tiktoken']
+    # Test-only dependencies live in requirements-dev.txt so they never ship in
+    # the production image.
+    dev_packages = ['pytest', 'pytest-asyncio', 'aiosqlite']
+
+    missing = [pkg for pkg in runtime_packages if pkg not in runtime]
+    missing += [pkg for pkg in dev_packages if pkg not in dev]
+
     if missing:
-        print(f"[WARN] Missing packages in requirements.txt: {missing}")
+        print(f"[WARN] Missing expected packages: {missing}")
     else:
-        print("[OK] All expected packages present in requirements.txt")
-    
+        print("[OK] Runtime and dev requirement files list their expected packages")
+
     return len(missing) == 0
 
 

@@ -1,17 +1,18 @@
-# User Identity
+# Идентификация пользователя
 
-Telegram user identity has one canonical external form in this codebase:
+У идентификатора пользователя Telegram в этом проекте одна каноническая внешняя форма:
 
-- `telegram_id` (`int`) is the external user identifier used at runtime boundaries.
-- `users.id` (`UUID`) is the internal relational identifier for conversation-owned data.
-- `users.username` stores `str(telegram_id)` for the Telegram integration.
-- `messages.extra_data["telegram_user_id"]` may store the raw Telegram ID for debugging and traceability.
+- `telegram_id` (`int`) — внешний идентификатор пользователя, используемый на границах во время работы.
+- `users.id` (`UUID`) — внутренний реляционный идентификатор данных, принадлежащих диалогу.
+- `users.username` хранит `str(telegram_id)` для интеграции с Telegram.
+- `messages.extra_data["telegram_user_id"]` может хранить исходный Telegram ID для отладки и трассируемости.
 
-`messages_log.user_id` is an analytics-table compatibility detail. The column is UUID-shaped, so
-`PostgresMessageHistoryRepo` derives a deterministic UUID from the raw Telegram ID before writing
-that table. Callers must still pass the raw Telegram integer ID; they must not derive or persist
-`uuid5(NAMESPACE_OID, f"telegram_user_{telegram_id}")` outside the message-history repository.
+`messages_log.user_id` — деталь совместимости с аналитической таблицей. Столбец имеет форму UUID,
+поэтому `PostgresMessageHistoryRepo` детерминированно выводит UUID из исходного Telegram ID перед записью
+в эту таблицу. Вызывающий код обязан по-прежнему передавать исходный целочисленный Telegram ID; он не должен
+выводить или сохранять `uuid5(NAMESPACE_OID, f"telegram_user_{telegram_id}")` за пределами репозитория
+истории сообщений.
 
-Book memory/vector metadata should use the raw Telegram ID string when it needs an external user
-identifier. New schema work should prefer either raw `telegram_id` for external references or
-`users.id` for relational references, not additional derived identifiers.
+Метаданные книжной памяти/векторов должны использовать строку с исходным Telegram ID, когда нужен внешний
+идентификатор пользователя. Новые изменения схемы должны предпочитать либо исходный `telegram_id` для внешних
+ссылок, либо `users.id` для реляционных ссылок, а не дополнительные производные идентификаторы.

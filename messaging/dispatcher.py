@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional
 import redis
 import redis.asyncio as redis_async
 from telegram import Bot
-from telegram.error import Forbidden, BadRequest
+from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter, TimedOut
 
 from settings import settings as app_settings
 
@@ -630,17 +630,64 @@ class MessageDispatcher:
                     route_key=self._routing_key(user_id, message.get("bot_id"))
                 )
 
-            except (Forbidden, BadRequest) as e:
+            # NOTE on ordering: in python-telegram-bot ``BadRequest`` and
+            # ``TimedOut`` are both subclasses of ``NetworkError``, so the
+            # deterministic ``BadRequest`` handler must precede the transient
+            # ``(TimedOut, NetworkError)`` handler, otherwise a 4xx would be
+            # retried. ``RetryAfter`` and ``Forbidden`` are independent.
+            except RetryAfter as e:
+                # Telegram flood control. This is backpressure, not a delivery
+                # failure: wait out the window it asks for, then requeue the part
+                # without spending a retry so genuine failures still hit max_retries.
+                delay = int(getattr(e, "retry_after", 0)) + 1
+                logger.warning(
+                    "Flood control while sending to user %s; retrying after %ss", user_id, delay
+                )
+                await asyncio.sleep(delay)
+                await self._requeue_without_retry(message)
+                return True
+
+            except BadRequest as e:
+                # A 4xx from Telegram is deterministic; retrying cannot help.
                 error_msg = str(e).lower()
-                if isinstance(e, Forbidden) or "chat not found" in error_msg or "user is deactivated" in error_msg or "bot was blocked" in error_msg:
-                    logger.warning("Permanent error sending message to user %s: %s. Disabling proactive messaging.", user_id, e)
+                if "chat not found" in error_msg or "user is deactivated" in error_msg or "bot was blocked" in error_msg:
+                    logger.warning(
+                        "Permanent delivery error for user %s (%s); disabling proactive messaging", user_id, e
+                    )
                     try:
                         await self._disable_proactive_messaging_for_user(user_id, bot_id=message.get("bot_id"))
                     except Exception as disable_error:
                         logger.error("Failed to disable proactive messaging for user %s: %s", user_id, disable_error)
-                    return True # Return True to pretend it was processed so it is NOT retried
+                else:
+                    logger.warning(
+                        "Non-retryable error sending message part %d/%d for user %s: %s; dropping message",
+                        part_index + 1, total_parts, user_id, e,
+                    )
+                return True
 
-                logger.error("Error sending message part %d/%d for user %s: %s", part_index + 1, total_parts, user_id, e)
+            except Forbidden as e:
+                # The user blocked the bot or the chat is gone. Deterministic: do
+                # not retry. Drop the message and stop proactive outreach.
+                logger.warning(
+                    "User %s is unreachable (%s); dropping message and disabling proactive messaging",
+                    user_id, e,
+                )
+                try:
+                    await self._disable_proactive_messaging_for_user(user_id, bot_id=message.get("bot_id"))
+                except Exception as disable_error:
+                    logger.error("Failed to disable proactive messaging for user %s: %s", user_id, disable_error)
+                return True
+
+            except (TimedOut, NetworkError) as e:
+                # Transient network failure. Back off with a bounded exponential
+                # delay before the normal retry path requeues and increments the
+                # retry count. The per-user task isolates this sleep from other users.
+                backoff = min(2 ** retry_count, 30)
+                logger.warning(
+                    "Transient network error (%s) sending to user %s; backing off %ss before retry",
+                    type(e).__name__, user_id, backoff,
+                )
+                await asyncio.sleep(backoff)
                 return False
 
             logger.info("Successfully processed message part %d/%d for user %s", part_index + 1, total_parts, user_id)
@@ -649,6 +696,22 @@ class MessageDispatcher:
         except Exception as e:
             logger.error("Error processing message: %s", e)
             return False
+
+    async def _requeue_without_retry(self, message: Dict[str, Any]) -> None:
+        """Requeue a message and reactivate its route without spending a retry.
+
+        Used for Telegram flood control (RetryAfter): the send did not fail, we
+        were merely asked to slow down, so the retry budget must not be consumed.
+        Token-bearing fields are stripped for the same reason as handle_failed_message.
+        """
+        user_id = message["user_id"]
+        bot_id = message.get("bot_id")
+        safe_message = {key: value for key, value in message.items() if key not in {"bot_token", "token"}}
+        message_json = json.dumps(safe_message, ensure_ascii=False)
+        await _await_redis(self.requeue_script(
+            keys=[self._queue_key(user_id, bot_id), "dispatcher:active_users"],
+            args=[self._routing_key(user_id, bot_id), message_json],
+        ))
 
     async def handle_failed_message(self, message: Dict[str, Any]):
         """

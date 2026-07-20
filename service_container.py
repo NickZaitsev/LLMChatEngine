@@ -10,7 +10,7 @@ from core.abstractions import EmbeddingModel
 from core.bot_config import BotConfig
 from memory.embedding_factory import build_embedding_model
 from messaging.token_resolver import BotTokenResolver
-from message_manager import MessageDispatcher, MessageQueueManager, TypingIndicatorManager
+from messaging import MessageDispatcher, MessageQueueManager, TypingIndicatorManager
 from prompt.assembler import PromptAssembler
 from settings import AppSettings, build_settings
 from storage import Storage, create_storage

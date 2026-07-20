@@ -16,14 +16,14 @@ from service_container import ServiceContainer
 from settings import settings as app_settings
 from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
-from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response
+from messaging import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response
 from buffer_manager import BufferManager
 from features import BotFeature, has_feature
 
-# Set up logging
+# Set up logging (level configurable via LOG_LEVEL, validated in AppSettings)
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=getattr(logging, app_settings.LOG_LEVEL, logging.INFO)
 )
 logger = logging.getLogger(__name__)
 

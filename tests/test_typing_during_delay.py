@@ -8,7 +8,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from unittest.mock import AsyncMock, MagicMock
-from message_manager import send_ai_response, TypingIndicatorManager
+from messaging import send_ai_response, TypingIndicatorManager
 
 
 async def test_typing_during_delay():

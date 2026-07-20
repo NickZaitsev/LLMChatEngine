@@ -6,7 +6,7 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, patch
 import random
-from message_manager import send_ai_response
+from messaging import send_ai_response
 
 
 class TestSendAIResponseDelay:

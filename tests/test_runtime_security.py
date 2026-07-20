@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 from core.utils import mask_url
-from message_manager import MessageDispatcher, MessageQueueManager
+from messaging import MessageDispatcher, MessageQueueManager
 from service_container import ServiceContainer
 
 
@@ -24,7 +24,7 @@ def test_mask_url_redacts_passwords_and_sensitive_query_values():
 def test_queue_initialization_logs_do_not_expose_redis_credentials(caplog):
     redis_client = SimpleNamespace(register_script=lambda source: AsyncMock())
     secret_url = "redis://alice:redis-password@redis:6379/0"
-    with patch("message_manager.redis_async.from_url", return_value=redis_client):
+    with patch("messaging.queue.redis_async.from_url", return_value=redis_client):
         MessageQueueManager(secret_url)
         MessageDispatcher(secret_url)
     assert "redis-password" not in caplog.text
@@ -58,7 +58,7 @@ async def test_dispatcher_close_closes_each_telegram_client_and_redis_once():
     redis_client = SimpleNamespace(register_script=lambda source: AsyncMock(), aclose=AsyncMock())
     bot_a = SimpleNamespace(shutdown=AsyncMock())
     bot_b = SimpleNamespace(shutdown=AsyncMock())
-    with patch("message_manager.redis_async.from_url", return_value=redis_client):
+    with patch("messaging.queue.redis_async.from_url", return_value=redis_client):
         dispatcher = MessageDispatcher("redis://redis:6379/0")
     dispatcher._bot_cache["a"] = ("token-a", bot_a)
     dispatcher._bot_cache["b"] = ("token-b", bot_b)
@@ -78,7 +78,42 @@ def test_compose_keeps_datastores_internal_and_waits_for_health():
     assert "ports" not in services["redis"]
     assert "healthcheck" in services["postgres"]
     assert "healthcheck" in services["redis"]
-    for name in ("llm-chat-engine", "celery-worker", "celery-beat", "celery-memory"):
+
+    # Every service that reads or writes the database waits both for a healthy
+    # Postgres and for the one-shot migration to finish, so tables always exist.
+    for name in ("llm-chat-engine", "celery-worker", "celery-memory"):
         dependencies = services[name]["depends_on"]
         assert dependencies["postgres"]["condition"] == "service_healthy"
         assert dependencies["redis"]["condition"] == "service_healthy"
+        assert dependencies["migrate"]["condition"] == "service_completed_successfully"
+
+    # The scheduler only pushes envelopes to Redis; it must not depend on the DB.
+    assert set(services["celery-beat"]["depends_on"]) == {"redis"}
+
+
+def test_compose_scopes_secrets_per_service():
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
+    services = compose["services"]
+
+    def env_keys(name):
+        env = services[name].get("environment", {})
+        if isinstance(env, list):
+            return {item.split("=", 1)[0] for item in env}
+        return set(env)
+
+    # The scheduler and the migration one-shot must not receive delivery secrets.
+    for name in ("celery-beat", "migrate"):
+        keys = env_keys(name)
+        assert "TOKEN_ENCRYPTION_KEY" not in keys
+        assert "ADMIN_BOT_TOKEN" not in keys
+        assert "TELEGRAM_TOKEN" not in keys
+
+    # Only the bot handles admin/Telegram credentials; workers never see them.
+    for name in ("celery-worker", "celery-memory"):
+        keys = env_keys(name)
+        assert "ADMIN_BOT_TOKEN" not in keys
+        assert "TELEGRAM_TOKEN" not in keys
+
+    # No service uses the whole-file env_file dump.
+    for name, service in services.items():
+        assert "env_file" not in service, f"{name} must not mount the whole .env"

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from message_manager import MessageDispatcher, MessageQueueManager
+from messaging import MessageDispatcher, MessageQueueManager
 from bot_manager import BotManager
 
 
@@ -25,7 +25,7 @@ class ScriptRedis:
 @pytest.mark.asyncio
 async def test_enqueue_atomically_publishes_all_parts_without_tokens():
     redis_client = ScriptRedis()
-    with patch("message_manager.redis_async.from_url", return_value=redis_client):
+    with patch("messaging.queue.redis_async.from_url", return_value=redis_client):
         manager = MessageQueueManager("redis://user:secret@redis:6379/0")
     manager._split_message = Mock(return_value=["first", "second"])
 
@@ -49,7 +49,7 @@ async def test_enqueue_atomically_publishes_all_parts_without_tokens():
 @pytest.mark.asyncio
 async def test_atomic_enqueue_failure_does_not_fall_back_to_partial_writes():
     redis_client = ScriptRedis()
-    with patch("message_manager.redis_async.from_url", return_value=redis_client):
+    with patch("messaging.queue.redis_async.from_url", return_value=redis_client):
         manager = MessageQueueManager("redis://redis:6379/0")
     manager.enqueue_script.side_effect = RuntimeError("publication failed")
 
@@ -61,7 +61,7 @@ async def test_atomic_enqueue_failure_does_not_fall_back_to_partial_writes():
 async def test_empty_queue_cleanup_uses_atomic_remove_script():
     redis_client = ScriptRedis()
     redis_client.blpop = AsyncMock(return_value=None)
-    with patch("message_manager.redis_async.from_url", return_value=redis_client):
+    with patch("messaging.queue.redis_async.from_url", return_value=redis_client):
         dispatcher = MessageDispatcher("redis://redis:6379/0", token_resolver=AsyncMock())
     dispatcher.running = True
     dispatcher._renew_lock_periodically = AsyncMock()
@@ -81,7 +81,7 @@ async def test_dispatcher_resolves_by_bot_id_once_and_reuses_client_for_parts():
     first_bot = SimpleNamespace(send_message=AsyncMock(), shutdown=AsyncMock())
 
     with (
-        patch("message_manager.redis_async.from_url", return_value=redis_client),
+        patch("messaging.queue.redis_async.from_url", return_value=redis_client),
         patch("messaging.dispatcher.Bot", return_value=first_bot) as bot_class,
         patch("messaging.dispatcher.send_ai_response", new=AsyncMock()),
     ):
@@ -106,7 +106,7 @@ async def test_dispatcher_invalidation_closes_id_cached_client():
     resolver = SimpleNamespace(resolve=AsyncMock(return_value="old-token"), invalidate=AsyncMock())
     bot = SimpleNamespace(shutdown=AsyncMock())
     with (
-        patch("message_manager.redis_async.from_url", return_value=redis_client),
+        patch("messaging.queue.redis_async.from_url", return_value=redis_client),
         patch("messaging.dispatcher.Bot", return_value=bot),
         patch("messaging.dispatcher.send_ai_response", new=AsyncMock()),
     ):
@@ -141,7 +141,7 @@ async def test_unknown_bot_id_fails_without_using_legacy_token(caplog):
     redis_client = ScriptRedis()
     resolver = SimpleNamespace(resolve=AsyncMock(side_effect=LookupError("unknown bot")))
     with (
-        patch("message_manager.redis_async.from_url", return_value=redis_client),
+        patch("messaging.queue.redis_async.from_url", return_value=redis_client),
         patch("messaging.dispatcher.Bot") as bot_class,
         caplog.at_level(logging.WARNING),
     ):
@@ -175,7 +175,7 @@ async def test_legacy_token_fallback_is_read_only_and_warning_is_token_free(capl
         "bot_token": "legacy-secret",
     }
     with (
-        patch("message_manager.redis_async.from_url", return_value=redis_client),
+        patch("messaging.queue.redis_async.from_url", return_value=redis_client),
         patch("messaging.dispatcher.Bot", return_value=legacy_bot),
         patch("messaging.dispatcher.send_ai_response", new=AsyncMock()),
         caplog.at_level(logging.WARNING),
@@ -193,7 +193,7 @@ async def test_legacy_token_fallback_is_read_only_and_warning_is_token_free(capl
 @pytest.mark.asyncio
 async def test_failed_message_requeue_reactivates_route_atomically():
     redis_client = ScriptRedis()
-    with patch("message_manager.redis_async.from_url", return_value=redis_client):
+    with patch("messaging.queue.redis_async.from_url", return_value=redis_client):
         dispatcher = MessageDispatcher("redis://redis:6379/0", token_resolver=AsyncMock())
 
     await dispatcher.handle_failed_message(

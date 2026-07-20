@@ -14,7 +14,7 @@ import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 
 from buffer_manager import BufferManager
-from message_manager import TypingIndicatorManager
+from messaging import TypingIndicatorManager
 
 
 class MockBot:

@@ -16,10 +16,12 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Set up logging
+# Set up logging. Resolve the level from the environment before importing the
+# heavy application modules so their module-level loggers honour it too.
+_log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").strip().upper(), logging.INFO)
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=_log_level
 )
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,7 @@ This test simulates the scenario described in the issue:
 import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
-from message_manager import MessageQueueManager, MessageDispatcher, send_ai_response
+from messaging import MessageQueueManager, MessageDispatcher, send_ai_response
 
 
 async def test_message_splitting_and_ordering():
@@ -25,9 +25,9 @@ async def test_message_splitting_and_ordering():
     mock_redis.scan.return_value = (0, [])
     
     # Mock the from_url method to return our mock
-    import message_manager
-    original_from_url = message_manager.redis_async.from_url
-    message_manager.redis_async.from_url = MagicMock(return_value=mock_redis)
+    from messaging import queue as messaging_queue
+    original_from_url = messaging_queue.redis_async.from_url
+    messaging_queue.redis_async.from_url = MagicMock(return_value=mock_redis)
     
     try:
         # Create MessageQueueManager instance
@@ -92,7 +92,7 @@ async def test_message_splitting_and_ordering():
         
     finally:
         # Restore original from_url method
-        message_manager.redis_async.from_url = original_from_url
+        messaging_queue.redis_async.from_url = original_from_url
 
 
 def test_split_message_logic():
@@ -103,9 +103,9 @@ def test_split_message_logic():
     mock_redis = MagicMock()
     mock_redis.ping.return_value = True
     
-    import message_manager
-    original_from_url = message_manager.redis_async.from_url
-    message_manager.redis_async.from_url = MagicMock(return_value=mock_redis)
+    from messaging import queue as messaging_queue
+    original_from_url = messaging_queue.redis_async.from_url
+    messaging_queue.redis_async.from_url = MagicMock(return_value=mock_redis)
     
     try:
         queue_manager = MessageQueueManager("redis://test:6379/0")
@@ -130,7 +130,7 @@ def test_split_message_logic():
         print("PASS: Message splitting logic test passed!")
         
     finally:
-        message_manager.redis_async.from_url = original_from_url
+        messaging_queue.redis_async.from_url = original_from_url
 
 
 async def main():
