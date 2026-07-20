@@ -8,7 +8,7 @@ session management, and repository initialization.
 
 import logging
 from typing import Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncEngine
@@ -57,12 +57,15 @@ class Storage:
     session_maker: async_sessionmaker
     use_pgvector: bool
     user_settings: Optional[PostgresUserBotSettingsRepo] = None
+    _closed: bool = field(default=False, init=False, repr=False)
 
     async def close(self):
         """Close the database connection pool"""
-        if self.engine:
-            await self.engine.dispose()
-            logger.info("Database connection pool closed")
+        if self._closed:
+            return
+        self._closed = True
+        await self.engine.dispose()
+        logger.info("Database connection pool closed")
 
     async def health_check(self) -> bool:
         """
@@ -117,7 +120,7 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
         raise ValueError("Database URL cannot be empty")
 
     if not db_url.startswith(('postgresql+asyncpg://', 'postgresql+psycopg://', 'sqlite+aiosqlite://')):
-        logger.warning(f"Database URL should use async driver (asyncpg/psycopg/aiosqlite): {db_url}")
+        logger.warning("Database URL should use an async driver: %s", mask_db_url(db_url))
 
     # Check pgvector availability
     if use_pgvector and not PGVECTOR_AVAILABLE:

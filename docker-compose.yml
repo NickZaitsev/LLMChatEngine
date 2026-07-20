@@ -13,6 +13,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - backup_network
     dns:
@@ -34,8 +36,6 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./init-pgvector.sql:/docker-entrypoint-initdb.d/init-pgvector.sql
       - backups:/backups
-    ports:
-      - "5432:5432"
     networks:
       - backup_network
     healthcheck:
@@ -62,13 +62,16 @@ services:
     image: redis:alpine
     container_name: llm-chat-engine-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
     networks:
       - backup_network
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 3
 
   celery-worker:
     build: .
@@ -82,8 +85,10 @@ services:
       - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/ai_bot
       - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     volumes:
       - .:/app
       - celery_worker_state:/var/lib/celery/worker_state
@@ -105,8 +110,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/ai_bot
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     volumes:
       - .:/app
       - celery_beat_schedule:/var/lib/celery/beat_schedule
@@ -129,8 +136,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql+asyncpg://ai_bot:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/ai_bot
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     volumes:
       - .:/app
       - book_files:/app/book_files

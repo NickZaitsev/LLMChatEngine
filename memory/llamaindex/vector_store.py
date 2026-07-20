@@ -62,6 +62,14 @@ class PgVectorStore(VectorStoreAbstraction):
             embed_dim=embed_dim,
         )
         self._engine: AsyncEngine = create_async_engine(_to_async_db_url(db_url))
+        self._closed = False
+
+    async def close(self) -> None:
+        """Dispose the auxiliary SQLAlchemy engine exactly once."""
+        if self._closed:
+            return
+        self._closed = True
+        await self._engine.dispose()
 
     async def upsert(self, nodes: List[Any]) -> None:
         """

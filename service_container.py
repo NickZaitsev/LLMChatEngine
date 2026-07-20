@@ -41,11 +41,13 @@ class ServiceContainer:
         self.typing_manager: Optional[TypingIndicatorManager] = None
         self.message_dispatcher: Optional[MessageDispatcher] = None
         self._initialized = False
+        self._closed = False
 
     async def initialize(self) -> "ServiceContainer":
         """Initialize shared infrastructure exactly once."""
         if self._initialized:
             return self
+        self._closed = False
 
         db_settings = self.settings.db
         if not db_settings.url:
@@ -163,10 +165,19 @@ class ServiceContainer:
 
     async def close(self) -> None:
         """Release process-owned resources."""
+        if self._closed:
+            return
+        self._closed = True
         if self.message_dispatcher:
-            await self.message_dispatcher.stop_dispatching()
+            await self.message_dispatcher.close()
+        if self.message_queue_manager:
+            await self.message_queue_manager.close()
         if self.typing_manager:
             await self.typing_manager.cleanup()
+        if self.memory_vector_store:
+            await self.memory_vector_store.close()
+        if self.book_vector_store:
+            await self.book_vector_store.close()
         if self.storage:
             await self.storage.close()
         self._initialized = False

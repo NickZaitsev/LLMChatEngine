@@ -30,6 +30,7 @@ from config import (
     PROACTIVE_MESSAGING_RESTART_DELAY_MAX,
     TELEGRAM_TOKEN
 )
+from core.utils import mask_url
 
 # Import AppContext for shared services
 from app_context import get_app_context, AppContext
@@ -72,7 +73,7 @@ class ProactiveMessagingService:
         # Log configuration
         logger.info(f"Proactive Messaging Service Configuration:")
         logger.info(f"  Enabled: {self.enabled}")
-        logger.info(f"  Redis URL: {self.redis_url}")
+        logger.info("  Redis URL: %s", mask_url(self.redis_url))
         logger.info(f"  Quiet Hours Enabled: {self.quiet_hours_enabled}")
         logger.info(f"  Quiet Hours: {self.quiet_hours_start} - {self.quiet_hours_end}")
         logger.info(f"  Max Consecutive Outreaches: {self.max_consecutive_outreaches}")

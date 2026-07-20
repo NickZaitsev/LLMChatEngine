@@ -232,6 +232,7 @@ class MessageQueueManager:
         """
         try:
             self.redis_client = redis_async.from_url(redis_url)
+            self._closed = False
             self.enqueue_script = self.redis_client.register_script("""
             local queue_key = KEYS[1]
             local active_routes_key = KEYS[2]
@@ -246,6 +247,13 @@ class MessageQueueManager:
         except Exception as e:
             logger.error("Failed to initialize MessageQueueManager: %s", e)
             raise
+
+    async def close(self) -> None:
+        """Close the owned Redis client exactly once."""
+        if self._closed:
+            return
+        self._closed = True
+        await self.redis_client.aclose()
 
     @staticmethod
     def _normalize_bot_key(bot_id: str = None) -> str:
@@ -405,6 +413,7 @@ class MessageDispatcher:
         """
         try:
             self.redis_client = redis_async.from_url(redis_url)
+            self._closed = False
             logger.info("MessageDispatcher initialized")
 
             self.max_retries = max_retries
@@ -776,6 +785,19 @@ class MessageDispatcher:
         logger.info("Stopping message dispatcher")
         self.running = False
 
+    async def close(self) -> None:
+        """Stop dispatching and release Telegram and Redis clients exactly once."""
+        if self._closed:
+            return
+        self._closed = True
+        await self.stop_dispatching()
+        await self.typing_manager.cleanup()
+        cached_bots = [cached[1] for cached in self._bot_cache.values()]
+        self._bot_cache.clear()
+        for bot in cached_bots:
+            await self._close_bot(bot)
+        await self.redis_client.aclose()
+
     async def process_user_queue(self, user_id: int, bot_id: str = None):
         """
         Process messages from a user's queue.
@@ -900,7 +922,7 @@ class MessageDispatcher:
             required_fields = ["user_id", "chat_id", "text", "message_type"]
             for field in required_fields:
                 if field not in message:
-                    logger.error("Missing required field '%s' in message: %s", field, message)
+                    logger.error("Missing required field '%s' in queued message", field)
                     return False
 
             user_id = message["user_id"]
@@ -921,7 +943,7 @@ class MessageDispatcher:
                 return False
 
             if not isinstance(text, str) or not text:
-                logger.error("Invalid text in message: %s", text)
+                logger.error("Invalid text in queued message")
                 return False
 
             if message_type not in ["regular", "proactive"]:
@@ -1079,7 +1101,7 @@ async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'Typing
                 await asyncio.sleep(delay)
 
         try:
-            logger.info("Sending message to chat %s: '%s...'", chat_id, part_text[:50])
+            logger.debug("Sending message to chat %s (%d characters)", chat_id, len(part_text))
             await bot.send_message(chat_id=chat_id, text=part_text)
             logger.info("Successfully sent message to chat %s", chat_id)
         except Exception as e:
