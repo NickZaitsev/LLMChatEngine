@@ -4,12 +4,12 @@ import asyncio
 import logging
 import random
 import traceback
-from typing import Optional, Hashable
-
-from settings import settings as app_settings
+from typing import Optional
+from collections.abc import Hashable
 
 from messaging.formatting import _split_ai_response
 from messaging.typing import TypingIndicatorManager
+from settings import settings as app_settings
 
 MIN_TYPING_SPEED = app_settings.typing.min_speed
 MAX_TYPING_SPEED = app_settings.typing.max_speed
@@ -20,7 +20,7 @@ RANDOM_OFFSET_MAX = app_settings.typing.random_offset_max
 logger = logging.getLogger(__name__)
 
 
-async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'TypingIndicatorManager' = None, is_first_message: bool = True, route_key: Optional[Hashable] = None):
+async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'TypingIndicatorManager' = None, is_first_message: bool = True, route_key: Hashable | None = None):
     """
     Send an AI response, splitting long or multi-paragraph text into safe Telegram messages.
 
@@ -72,8 +72,8 @@ async def generate_ai_response(
     conversation_id: str = None,
     role: str = "user",
     show_typing: bool = True,
-    route_key: Optional[Hashable] = None
-) -> Optional[str]:
+    route_key: Hashable | None = None
+) -> str | None:
     """
     Generate AI response with typing indicator management.
 
@@ -115,14 +115,14 @@ async def generate_ai_response(
                 return None
             logger.info("AI response received for chat %s (%d chars)", chat_id, len(ai_response))
             return ai_response
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("AI request timeout for chat %s", chat_id)
             return None
         except Exception as e:
             logger.error("AI request failed for chat %s: %s", chat_id, e)
             return None
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("AI request timeout for chat %s", chat_id)
         return None
 

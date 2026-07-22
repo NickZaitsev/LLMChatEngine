@@ -7,9 +7,21 @@ Includes optional pgvector support for semantic memory search.
 
 import uuid
 from datetime import datetime
-from typing import Dict, Any, List, Optional
-from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, func, Index, JSON, Boolean
-from sqlalchemy.dialects.postgresql import UUID, JSON
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import expression
@@ -52,7 +64,7 @@ class User(Base):
         nullable=False,
         doc="Unique username for the user"
     )
-    extra_data: Mapped[Dict[str, Any]] = mapped_column(
+    extra_data: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         nullable=False,
         default=dict,
@@ -60,17 +72,17 @@ class User(Base):
     )
     
     # Relationships
-    personas: Mapped[List["Persona"]] = relationship(
+    personas: Mapped[list["Persona"]] = relationship(
         "Persona", 
         back_populates="user",
         cascade="all, delete-orphan"
     )
-    conversations: Mapped[List["Conversation"]] = relationship(
+    conversations: Mapped[list["Conversation"]] = relationship(
         "Conversation", 
         back_populates="user",
         cascade="all, delete-orphan"
     )
-    bot_settings: Mapped[List["UserBotSettings"]] = relationship(
+    bot_settings: Mapped[list["UserBotSettings"]] = relationship(
         "UserBotSettings",
         back_populates="user",
         cascade="all, delete-orphan"
@@ -124,13 +136,13 @@ class Bot(Base):
         default=True,
         doc="Whether the bot is currently running"
     )
-    feature_flags: Mapped[Dict[str, Any]] = mapped_column(
+    feature_flags: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         nullable=False,
         default=dict,
         doc="JSON dict of enabled features (proactive_messaging, memory, voice, etc.)"
     )
-    llm_config: Mapped[Dict[str, Any]] = mapped_column(
+    llm_config: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         nullable=False,
         default=dict,
@@ -151,17 +163,17 @@ class Bot(Base):
     )
     
     # Relationships
-    conversations: Mapped[List["Conversation"]] = relationship(
+    conversations: Mapped[list["Conversation"]] = relationship(
         "Conversation", 
         back_populates="bot",
         cascade="all, delete-orphan"
     )
-    user_settings: Mapped[List["UserBotSettings"]] = relationship(
+    user_settings: Mapped[list["UserBotSettings"]] = relationship(
         "UserBotSettings",
         back_populates="bot",
         cascade="all, delete-orphan"
     )
-    books: Mapped[List["Book"]] = relationship(
+    books: Mapped[list["Book"]] = relationship(
         "Book",
         back_populates="bot",
         cascade="all, delete-orphan"
@@ -194,7 +206,7 @@ class Book(Base):
         nullable=False,
         doc="Book title"
     )
-    author: Mapped[Optional[str]] = mapped_column(
+    author: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
         doc="Book author"
@@ -220,7 +232,7 @@ class Book(Base):
         default='pending',
         doc="Ingestion status"
     )
-    error: Mapped[Optional[str]] = mapped_column(
+    error: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
         doc="Last ingestion error shown to admins"
@@ -294,7 +306,7 @@ class UserBotSettings(Base):
         nullable=False,
         doc="Foreign key reference to the bot"
     )
-    settings: Mapped[Dict[str, Any]] = mapped_column(
+    settings: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         nullable=False,
         default=dict,
@@ -356,7 +368,7 @@ class Persona(Base):
         nullable=False,
         doc="Display name of the persona"
     )
-    config: Mapped[Dict[str, Any]] = mapped_column(
+    config: Mapped[dict[str, Any]] = mapped_column(
         JSON, 
         nullable=False, 
         default=dict,
@@ -365,7 +377,7 @@ class Persona(Base):
     
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="personas")
-    conversations: Mapped[List["Conversation"]] = relationship(
+    conversations: Mapped[list["Conversation"]] = relationship(
         "Conversation", 
         back_populates="persona",
         cascade="all, delete-orphan"
@@ -404,41 +416,41 @@ class Conversation(Base):
         nullable=False,
         doc="Foreign key reference to the user"
     )
-    persona_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    persona_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), 
         ForeignKey('personas.id', ondelete='SET NULL'), 
         nullable=True,
         doc="Optional foreign key reference to the persona"
     )
-    bot_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    bot_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), 
         ForeignKey('bots.id', ondelete='CASCADE'), 
         nullable=True,  # Nullable for migration compatibility
         doc="Foreign key reference to the bot"
     )
-    title: Mapped[Optional[str]] = mapped_column(
+    title: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
         doc="Optional title for the conversation"
     )
-    extra_data: Mapped[Dict[str, Any]] = mapped_column(
+    extra_data: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         nullable=False,
         default=dict,
         doc="Additional conversation data stored as JSON"
     )
-    summary: Mapped[Optional[str]] = mapped_column(
+    summary: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
         doc="The latest summary of the conversation"
     )
-    last_summarized_message_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    last_summarized_message_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey('messages.id', ondelete='SET NULL', use_alter=True, name='fk_conv_last_summarized_msg'),
         nullable=True,
         doc="ID of the last message included in the summary"
     )
-    last_memorized_message_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    last_memorized_message_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey('messages.id', ondelete='SET NULL', use_alter=True, name='fk_conv_last_memorized_msg'),
         nullable=True,
@@ -455,7 +467,7 @@ class Conversation(Base):
     user: Mapped["User"] = relationship("User", back_populates="conversations")
     persona: Mapped["Persona"] = relationship("Persona", back_populates="conversations")
     bot: Mapped[Optional["Bot"]] = relationship("Bot", back_populates="conversations")
-    messages: Mapped[List["Message"]] = relationship(
+    messages: Mapped[list["Message"]] = relationship(
         "Message",
         back_populates="conversation",
         cascade="all, delete-orphan",
@@ -512,7 +524,7 @@ class Message(Base):
         nullable=False,
         doc="The message content text"
     )
-    extra_data: Mapped[Dict[str, Any]] = mapped_column(
+    extra_data: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         nullable=False,
         default=dict,
@@ -589,7 +601,7 @@ class MessageLog(Base):
         default=func.now(),
         doc="Timestamp when the message was created"
     )
-    bot_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    bot_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey('bots.id', ondelete='CASCADE'),
         nullable=True,

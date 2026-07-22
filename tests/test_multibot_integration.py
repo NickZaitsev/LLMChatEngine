@@ -2,21 +2,23 @@
 Integration tests for multi-bot architecture.
 """
 import asyncio
-import pytest
 import uuid
-from unittest.mock import MagicMock, AsyncMock, patch
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+from llama_index.core.vector_stores import VectorStoreQuery
+
+from admin_bot import AdminBot
+from bot_manager import BotManager
+from features import DEFAULT_FEATURE_FLAGS, BotFeature
+from memory.llamaindex.vector_store import PgVectorStore
+from multibot_adapter import BotConfig, create_bot_with_config
 from storage.interfaces import Bot
 from storage.models import UserBotSettings
-from features import BotFeature, DEFAULT_FEATURE_FLAGS
-from multibot_adapter import create_bot_with_config, BotConfig
-from bot_manager import BotManager
-from admin_bot import AdminBot
-from memory.llamaindex.vector_store import PgVectorStore
-from llama_index.core.vector_stores import VectorStoreQuery
 from storage_conversation_manager import PostgresConversationManager
+
 
 @pytest.fixture
 def mock_bot_config():
@@ -40,8 +42,8 @@ def test_bot_model_creation():
         is_active=True,
         feature_flags={"feature": True},
         llm_config={"model": "gpt-4"},
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc)
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC)
     )
     assert bot.name == "TestBot"
     assert bot.is_active is True
@@ -54,8 +56,8 @@ def test_user_bot_settings_model_creation():
         user_id=uuid.uuid4(),
         bot_id=uuid.uuid4(),
         settings={"theme": "dark"},
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc)
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC)
     )
     assert settings.settings["theme"] == "dark"
 

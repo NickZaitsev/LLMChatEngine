@@ -1,8 +1,8 @@
 """Shared bot runtime configuration."""
 
+import uuid
 from dataclasses import dataclass
 from typing import Any, Dict
-import uuid
 
 
 @dataclass
@@ -14,5 +14,5 @@ class BotConfig:
     name: str
     personality: str
     is_active: bool
-    feature_flags: Dict[str, Any]
-    llm_config: Dict[str, Any]
+    feature_flags: dict[str, Any]
+    llm_config: dict[str, Any]

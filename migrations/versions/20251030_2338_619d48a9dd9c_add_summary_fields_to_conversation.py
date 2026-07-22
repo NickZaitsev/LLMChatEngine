@@ -5,10 +5,11 @@ Revises: 87cdcd5520f9
 Create Date: 2025-10-30 23:38:42.876728+00:00
 
 """
-from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 import pgvector
+import sqlalchemy as sa
+from alembic import op
+from sqlalchemy.dialects import postgresql
+
 from config import MEMORY_EMBED_DIM
 
 # revision identifiers, used by Alembic.

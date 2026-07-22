@@ -9,11 +9,12 @@ import logging
 import os
 import sys
 from typing import Optional
+
 # Add the project root to Python path
 sys.path.insert(0, '.')
 
-from storage import create_storage, Storage
-from storage.interfaces import Message, Conversation, User, Persona
+from storage import Storage, create_storage
+from storage.interfaces import Conversation, Message, Persona, User
 from storage_conversation_manager import PostgresConversationManager
 
 # Set up logging

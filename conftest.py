@@ -6,7 +6,6 @@ os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///tests/test_suite.db"
 
 import pytest
 
-
 pytest_plugins = ("pytest_asyncio",)
 
 

@@ -8,13 +8,13 @@ syntactically correct without needing to install the dependencies.
 import ast
 import os
 import sys
-from typing import List, Dict
+from typing import Dict, List
 
 
 def check_python_syntax(file_path: str) -> bool:
     """Check if a Python file has valid syntax."""
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, encoding='utf-8') as f:
             source = f.read()
         
         # Parse the AST to check syntax
@@ -28,10 +28,10 @@ def check_python_syntax(file_path: str) -> bool:
         return False
 
 
-def check_imports_structure(file_path: str) -> Dict:
+def check_imports_structure(file_path: str) -> dict:
     """Analyze imports and basic structure of a Python file."""
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, encoding='utf-8') as f:
             source = f.read()
         
         tree = ast.parse(source)
@@ -198,12 +198,12 @@ def verify_requirements():
         print("[ERROR] requirements.txt not found")
         return False
 
-    with open('requirements.txt', 'r') as f:
+    with open('requirements.txt') as f:
         runtime = f.read()
 
     dev = ''
     if os.path.exists('requirements-dev.txt'):
-        with open('requirements-dev.txt', 'r') as f:
+        with open('requirements-dev.txt') as f:
             dev = f.read()
 
     # Runtime-only dependencies must stay in requirements.txt.

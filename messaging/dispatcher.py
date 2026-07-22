@@ -5,19 +5,18 @@ import json
 import logging
 import uuid
 from collections import OrderedDict
-from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from datetime import datetime, timezone, UTC
+from typing import Any, Dict, Optional
 
 import redis
 import redis.asyncio as redis_async
 from telegram import Bot
 from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter, TimedOut
 
-from settings import settings as app_settings
-
 from messaging.queue import _await_redis
 from messaging.sending import send_ai_response
 from messaging.typing import TypingIndicatorManager
+from settings import settings as app_settings
 
 MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL = app_settings.queue.lock_refresh_interval
 MESSAGE_QUEUE_DISPATCHER_INTERVAL = app_settings.queue.dispatcher_interval
@@ -54,7 +53,7 @@ class MessageDispatcher:
             # Telegram bots are created lazily and cached by token. This avoids
             # building an HTTP connection pool per message part.
             self.bot = None
-            self._bot_cache: "OrderedDict[str, tuple[str, Bot]]" = OrderedDict()
+            self._bot_cache: OrderedDict[str, tuple[str, Bot]] = OrderedDict()
             self.token_resolver = token_resolver
             self.typing_manager = TypingIndicatorManager()
 
@@ -203,7 +202,7 @@ class MessageDispatcher:
         return f"dispatcher:processing:{cls._routing_key(user_id, bot_id)}"
 
     @staticmethod
-    def _parse_routing_key(raw_routing_key) -> tuple[int, Optional[str]]:
+    def _parse_routing_key(raw_routing_key) -> tuple[int, str | None]:
         routing_key = raw_routing_key.decode('utf-8') if isinstance(raw_routing_key, bytes) else raw_routing_key
         routing_parts = routing_key.split(":", 1)
         user_id = int(routing_parts[0])
@@ -548,7 +547,7 @@ class MessageDispatcher:
             if lock_lost_event:
                 lock_lost_event.set()
 
-    async def process_message(self, message: Dict[str, Any]) -> bool:
+    async def process_message(self, message: dict[str, Any]) -> bool:
         """
         Process a single message part.
 
@@ -697,7 +696,7 @@ class MessageDispatcher:
             logger.error("Error processing message: %s", e)
             return False
 
-    async def _requeue_without_retry(self, message: Dict[str, Any]) -> None:
+    async def _requeue_without_retry(self, message: dict[str, Any]) -> None:
         """Requeue a message and reactivate its route without spending a retry.
 
         Used for Telegram flood control (RetryAfter): the send did not fail, we
@@ -713,7 +712,7 @@ class MessageDispatcher:
             args=[self._routing_key(user_id, bot_id), message_json],
         ))
 
-    async def handle_failed_message(self, message: Dict[str, Any]):
+    async def handle_failed_message(self, message: dict[str, Any]):
         """
         Handle a failed message.
 
@@ -754,7 +753,7 @@ class MessageDispatcher:
                 state = json.loads(state_json)
                 state['is_active'] = False
                 state['last_error'] = "Permanent failure (Chat not found / Forbidden)"
-                state['error_time'] = datetime.now(timezone.utc).isoformat()
+                state['error_time'] = datetime.now(UTC).isoformat()
                 await _await_redis(self.redis_client.set(state_key, json.dumps(state, default=str)))
                 logger.info("Proactive messaging disabled for user %s bot %s in Redis", user_id, bot_id)
             else:
@@ -764,7 +763,7 @@ class MessageDispatcher:
                     'user_id': user_id,
                     'bot_id': bot_id,
                     'last_error': "Permanent failure (Chat not found / Forbidden)",
-                    'error_time': datetime.now(timezone.utc).isoformat()
+                    'error_time': datetime.now(UTC).isoformat()
                 }
                 await _await_redis(self.redis_client.set(state_key, json.dumps(state, default=str)))
                 logger.info("Created inactive state for user %s bot %s in Redis", user_id, bot_id)

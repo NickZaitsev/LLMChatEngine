@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from bot import TelegramChatBot
-from features import BotFeature, DEFAULT_FEATURE_FLAGS, has_feature, get_enabled_features
+from features import DEFAULT_FEATURE_FLAGS, BotFeature, get_enabled_features, has_feature
 
 
 @pytest.fixture

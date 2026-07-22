@@ -4,11 +4,12 @@ Token encryption utilities for securely storing bot tokens.
 Uses Fernet symmetric encryption with a key from environment variables.
 """
 
-import os
 import base64
 import hashlib
-from cryptography.fernet import Fernet
 import logging
+import os
+
+from cryptography.fernet import Fernet
 
 logger = logging.getLogger(__name__)
 

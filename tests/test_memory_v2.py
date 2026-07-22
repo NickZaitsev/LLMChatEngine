@@ -2,9 +2,11 @@
 Integration tests for the LlamaIndex-based memory system (v2 — direct embedding).
 """
 
-import pytest
 from datetime import datetime
 from uuid import uuid4
+
+import pytest
+
 from memory.adaptive_chunker import ConversationChunk
 from memory.manager import LlamaIndexMemoryManager
 

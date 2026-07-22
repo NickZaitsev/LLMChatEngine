@@ -1,11 +1,13 @@
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
 
 from messaging import MessageDispatcher
+
 
 async def test_locking_mechanism():
     """Test the locking mechanism to ensure no parallel processing"""

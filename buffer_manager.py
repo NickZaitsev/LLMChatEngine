@@ -1,11 +1,13 @@
 """User message buffering utilities for combining rapid chat messages."""
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Callable, Any, Hashable
+from typing import Any, Dict, List, Optional
+from collections.abc import Callable, Hashable
+
 from settings import settings
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,7 @@ class UserBuffer:
     
     def __init__(self, user_id: int):
         self.user_id = user_id
-        self.messages: List[MessageBufferEntry] = []
+        self.messages: list[MessageBufferEntry] = []
         self.last_activity = time.time()
         self._lock = asyncio.Lock()
     
@@ -67,7 +69,7 @@ class UserBuffer:
             self.last_activity = time.time()
             logger.debug(f"Cleared buffer for user {self.user_id}")
     
-    async def get_messages(self) -> List[MessageBufferEntry]:
+    async def get_messages(self) -> list[MessageBufferEntry]:
         """Get all messages in the buffer"""
         async with self._lock:
             return self.messages.copy()
@@ -107,13 +109,13 @@ class BufferManager:
     """Coordinates all user buffers and manages dispatch logic"""
     
     def __init__(self):
-        self.user_buffers: Dict[int, UserBuffer] = {}
+        self.user_buffers: dict[int, UserBuffer] = {}
         self._lock = asyncio.Lock()
-        self.dispatch_callbacks: Dict[int, asyncio.Task] = {}
-        self.typing_indicators: Dict[int, asyncio.Task] = {}  # Track typing indicator tasks
+        self.dispatch_callbacks: dict[int, asyncio.Task] = {}
+        self.typing_indicators: dict[int, asyncio.Task] = {}  # Track typing indicator tasks
         self.typing_manager = None # Will be set by the bot
-        self.bot_instances: Dict[int, Any] = {}  # Map user_id to bot instance
-        self.chat_ids: Dict[int, int] = {}  # Map user_id to chat_id
+        self.bot_instances: dict[int, Any] = {}  # Map user_id to bot instance
+        self.chat_ids: dict[int, int] = {}  # Map user_id to chat_id
 
     @staticmethod
     def _route_key(user_key: Hashable) -> Hashable:
@@ -254,7 +256,7 @@ class BufferManager:
         task = asyncio.create_task(_dispatch_with_timeout())
         self.dispatch_callbacks[user_id] = task
     
-    async def dispatch_buffer(self, user_id: int) -> Optional[str]:
+    async def dispatch_buffer(self, user_id: int) -> str | None:
         """Dispatch the buffer for a user and return concatenated message"""
         async with self._lock:
             if user_id not in self.user_buffers:

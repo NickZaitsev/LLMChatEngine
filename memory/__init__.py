@@ -7,8 +7,8 @@ This package provides:
 - Semantic retrieval with neighbor expansion
 """
 
-from .manager import LlamaIndexMemoryManager
 from .adaptive_chunker import AdaptiveChunker, ConversationChunk
+from .manager import LlamaIndexMemoryManager
 
 __all__ = [
     'LlamaIndexMemoryManager',

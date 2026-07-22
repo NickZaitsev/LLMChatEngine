@@ -1,7 +1,9 @@
 import asyncio
 import logging
-from storage import create_storage
+
 from sqlalchemy import text
+
+from storage import create_storage
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)

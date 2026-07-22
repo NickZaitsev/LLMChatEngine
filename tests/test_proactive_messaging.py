@@ -1,17 +1,19 @@
 import asyncio
-import pytest
 import json
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from config import PROACTIVE_MESSAGING_QUIET_HOURS_END, PROACTIVE_MESSAGING_QUIET_HOURS_START
 from proactive_messaging import (
+    CADENCE_LEVELS,
+    PROACTIVE_MESSAGING_CADENCES,
     ProactiveMessagingService,
     manage_proactive_messages_async,
     send_proactive_message_async,
-    CADENCE_LEVELS,
-    PROACTIVE_MESSAGING_CADENCES,
 )
-from config import PROACTIVE_MESSAGING_QUIET_HOURS_START, PROACTIVE_MESSAGING_QUIET_HOURS_END
+
 
 @pytest.fixture
 def mock_redis_client():
@@ -57,7 +59,7 @@ async def test_manage_proactive_messages_schedules_due_user(mock_apply_async, pr
     }
     
     mock_redis_client.get.return_value = ProactiveMessagingService._serialize_state(initial_state)
-    mock_redis_client.keys.return_value = [f"proactive_messaging:user:{user_id}:{bot_id}".encode('utf-8')]
+    mock_redis_client.keys.return_value = [f"proactive_messaging:user:{user_id}:{bot_id}".encode()]
 
     mock_task = MagicMock()
     mock_task.id = 'new_test_task_id'
@@ -98,7 +100,7 @@ async def test_manage_proactive_messages_skips_scheduled_user(mock_apply_async, 
     }
     
     mock_redis_client.get.return_value = ProactiveMessagingService._serialize_state(initial_state)
-    mock_redis_client.keys.return_value = [f"proactive_messaging:user:{user_id}:{bot_id}".encode('utf-8')]
+    mock_redis_client.keys.return_value = [f"proactive_messaging:user:{user_id}:{bot_id}".encode()]
 
     mock_celery_task = MagicMock()
     mock_celery_task.request.id = "test_beat_task"
@@ -125,7 +127,7 @@ async def test_manage_proactive_messages_reschedules_stale_task(mock_apply_async
     }
 
     mock_redis_client.get.return_value = ProactiveMessagingService._serialize_state(initial_state)
-    mock_redis_client.keys.return_value = [f"proactive_messaging:user:{user_id}:{bot_id}".encode("utf-8")]
+    mock_redis_client.keys.return_value = [f"proactive_messaging:user:{user_id}:{bot_id}".encode()]
 
     mock_task = MagicMock()
     mock_task.id = "replacement-task"

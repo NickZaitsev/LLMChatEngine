@@ -9,8 +9,8 @@ from ai_handler import AIHandler
 from core.abstractions import EmbeddingModel
 from core.bot_config import BotConfig
 from memory.embedding_factory import build_embedding_model
-from messaging.token_resolver import BotTokenResolver
 from messaging import MessageDispatcher, MessageQueueManager, TypingIndicatorManager
+from messaging.token_resolver import BotTokenResolver
 from prompt.assembler import PromptAssembler
 from settings import AppSettings, build_settings
 from storage import Storage, create_storage
@@ -30,20 +30,20 @@ class ServiceContainer:
 
     def __init__(self, settings: AppSettings | None = None) -> None:
         self.settings = settings or build_settings()
-        self.storage: Optional[Storage] = None
-        self.conversation_manager: Optional[PostgresConversationManager] = None
-        self.embedding_model: Optional[EmbeddingModel] = None
-        self.memory_vector_store: Optional["PgVectorStore"] = None
-        self.memory_manager: Optional["LlamaIndexMemoryManager"] = None
-        self.book_vector_store: Optional["BookVectorStore"] = None
-        self.book_knowledge_manager: Optional["BookKnowledgeManager"] = None
-        self.message_queue_manager: Optional[MessageQueueManager] = None
-        self.typing_manager: Optional[TypingIndicatorManager] = None
-        self.message_dispatcher: Optional[MessageDispatcher] = None
+        self.storage: Storage | None = None
+        self.conversation_manager: PostgresConversationManager | None = None
+        self.embedding_model: EmbeddingModel | None = None
+        self.memory_vector_store: PgVectorStore | None = None
+        self.memory_manager: LlamaIndexMemoryManager | None = None
+        self.book_vector_store: BookVectorStore | None = None
+        self.book_knowledge_manager: BookKnowledgeManager | None = None
+        self.message_queue_manager: MessageQueueManager | None = None
+        self.typing_manager: TypingIndicatorManager | None = None
+        self.message_dispatcher: MessageDispatcher | None = None
         self._initialized = False
         self._closed = False
 
-    async def initialize(self) -> "ServiceContainer":
+    async def initialize(self) -> ServiceContainer:
         """Initialize shared infrastructure exactly once."""
         if self._initialized:
             return self

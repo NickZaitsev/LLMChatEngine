@@ -8,13 +8,14 @@ Includes:
 """
 
 import logging
-from celery import Celery
 
 import redis
-from app_context import get_app_context
-from settings import SUMMARIZATION_PROMPT, settings
+from celery import Celery
+
 import celeryconfig
+from app_context import get_app_context
 from core.celery_loop import run_coroutine
+from settings import SUMMARIZATION_PROMPT, settings
 
 # Initialize Celery
 celery_app = Celery('memory_tasks')

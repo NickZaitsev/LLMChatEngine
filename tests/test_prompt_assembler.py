@@ -6,23 +6,24 @@ and various edge cases of the prompt assembly system.
 """
 
 import json
-import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from types import SimpleNamespace
+from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4, UUID
-from typing import List, Dict, Any
+from uuid import UUID, uuid4
 
+import pytest
 from llama_index.core.schema import TextNode
-from storage.interfaces import Message
-from prompt.assembler import PromptAssembler, TokenCounter, Tokenizer
+
 import config
+from prompt.assembler import PromptAssembler, TokenCounter, Tokenizer
+from storage.interfaces import Message
 
 
 class MockTokenizer:
     """Mock tokenizer for testing"""
     
-    def encode(self, text: str) -> List[int]:
+    def encode(self, text: str) -> list[int]:
         # Simple mock: return list with length based on character count
         return list(range(len(text) // 4 + 1))
     
@@ -71,7 +72,7 @@ def sample_messages():
             content="Hello, how are you?",
             extra_data={},
             token_count=6,
-            created_at=datetime.now(timezone.utc)
+            created_at=datetime.now(UTC)
         ),
         Message(
             id=uuid4(),
@@ -80,7 +81,7 @@ def sample_messages():
             content="I'm doing great! How can I help you today?",
             extra_data={},
             token_count=12,
-            created_at=datetime.now(timezone.utc)
+            created_at=datetime.now(UTC)
         ),
         Message(
             id=uuid4(),
@@ -89,7 +90,7 @@ def sample_messages():
             content="Tell me about the weather",
             extra_data={},
             token_count=6,
-            created_at=datetime.now(timezone.utc)
+            created_at=datetime.now(UTC)
         )
     ]
 
@@ -296,7 +297,7 @@ class TestPromptAssembler:
             content=long_content,
             extra_data={},
             token_count=250,
-            created_at=datetime.now(timezone.utc)
+            created_at=datetime.now(UTC)
         )
         
         # Setup mocks

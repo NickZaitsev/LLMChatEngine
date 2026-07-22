@@ -3,12 +3,14 @@ Simple test to verify that typing indicator works during delay.
 """
 
 import asyncio
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from unittest.mock import AsyncMock, MagicMock
-from messaging import send_ai_response, TypingIndicatorManager
+
+from messaging import TypingIndicatorManager, send_ai_response
 
 
 async def test_typing_during_delay():

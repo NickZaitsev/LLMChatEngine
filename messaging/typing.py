@@ -2,7 +2,8 @@
 
 import asyncio
 import logging
-from typing import Dict, Set, Optional, Hashable
+from typing import Dict, Optional, Set
+from collections.abc import Hashable
 
 from telegram import Bot
 
@@ -13,15 +14,15 @@ class TypingIndicatorManager:
     """Manages typing indicators for concurrent conversations"""
 
     def __init__(self):
-        self._active_typing_tasks: Dict[Hashable, asyncio.Task] = {}
-        self._typing_locks: Dict[Hashable, asyncio.Lock] = {}
-        self._typing_lock_refs: Dict[Hashable, int] = {}
-        self._typing_chat_ids: Dict[Hashable, int] = {}
+        self._active_typing_tasks: dict[Hashable, asyncio.Task] = {}
+        self._typing_locks: dict[Hashable, asyncio.Lock] = {}
+        self._typing_lock_refs: dict[Hashable, int] = {}
+        self._typing_chat_ids: dict[Hashable, int] = {}
         self._state_lock = asyncio.Lock()
         self.typing_interval = 3.0  # Send typing action every 3 seconds
 
     @staticmethod
-    def _typing_key(chat_id: int, route_key: Optional[Hashable] = None) -> Hashable:
+    def _typing_key(chat_id: int, route_key: Hashable | None = None) -> Hashable:
         """Build a typing key that can isolate concurrent bot routes in one chat."""
         return route_key if route_key is not None else chat_id
 
@@ -51,7 +52,7 @@ class TypingIndicatorManager:
         ):
             self._typing_locks.pop(typing_key, None)
 
-    async def start_typing(self, bot: Bot, chat_id: int, route_key: Optional[Hashable] = None) -> None:
+    async def start_typing(self, bot: Bot, chat_id: int, route_key: Hashable | None = None) -> None:
         """Start typing indicator for a specific chat"""
         typing_key = self._typing_key(chat_id, route_key)
         route_lock = None
@@ -77,7 +78,7 @@ class TypingIndicatorManager:
             if route_lock is not None:
                 await self._release_typing_lock(typing_key)
 
-    async def stop_typing(self, chat_id: int, route_key: Optional[Hashable] = None) -> None:
+    async def stop_typing(self, chat_id: int, route_key: Hashable | None = None) -> None:
         """Stop typing indicator for a specific chat"""
         typing_key = self._typing_key(chat_id, route_key)
         route_lock = None
@@ -137,7 +138,7 @@ class TypingIndicatorManager:
         except Exception as e:
             logger.error("Unexpected error in typing loop for chat %s route %s: %s", chat_id, typing_key, e)
 
-    def is_typing_active(self, chat_id: int, route_key: Optional[Hashable] = None) -> bool:
+    def is_typing_active(self, chat_id: int, route_key: Hashable | None = None) -> bool:
         """Check if typing is currently active for a chat"""
         if route_key is None:
             return any(
@@ -151,7 +152,7 @@ class TypingIndicatorManager:
             not self._active_typing_tasks[typing_key].done()
         )
 
-    def get_active_typing_chats(self) -> Set[int]:
+    def get_active_typing_chats(self) -> set[int]:
         """Get set of chat IDs with active typing indicators"""
         return {
             self._typing_chat_ids[typing_key]

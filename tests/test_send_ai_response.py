@@ -4,10 +4,12 @@ Tests for the send_ai_response function in ai_handler.py
 This module tests the message splitting functionality for various message lengths and formats.
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock
 import textwrap
-from messaging import send_ai_response, TypingIndicatorManager, clean_ai_response
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from messaging import TypingIndicatorManager, clean_ai_response, send_ai_response
 
 
 def simulate_send_ai_response(text):

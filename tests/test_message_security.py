@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from messaging import MessageDispatcher, MessageQueueManager
 from bot_manager import BotManager
+from messaging import MessageDispatcher, MessageQueueManager
 
 
 class ScriptRedis:

@@ -1,10 +1,12 @@
-import pytest
 import asyncio
 import json
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 import redis
 
 from messaging import MessageDispatcher
+
 
 class TestMessageDispatcher:
     """Test cases for MessageDispatcher class."""

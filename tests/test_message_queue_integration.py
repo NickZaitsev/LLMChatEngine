@@ -1,12 +1,14 @@
-import pytest
 import json
 from types import SimpleNamespace
-from unittest.mock import patch, AsyncMock
+from unittest.mock import AsyncMock, patch
+
+import pytest
 import redis
 
-from messaging import MessageQueueManager
 from bot import TelegramChatBot
+from messaging import MessageQueueManager
 from proactive_messaging import ProactiveMessagingService
+
 
 class TestMessageQueueIntegration:
     """Integration tests for MessageQueueManager with bot and proactive messaging systems."""

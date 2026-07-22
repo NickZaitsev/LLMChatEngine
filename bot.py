@@ -7,18 +7,30 @@ import time
 import traceback
 from typing import Optional
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
-from core.utils import mask_db_url
+from ai_handler import AIHandler
+from buffer_manager import BufferManager
 from core.bot_config import BotConfig
+from core.utils import mask_db_url
+from features import BotFeature, has_feature
+from messaging import (
+    TypingIndicatorManager,
+    clean_ai_response,
+    generate_ai_response,
+    send_ai_response,
+)
 from service_container import ServiceContainer
 from settings import settings as app_settings
 from storage_conversation_manager import PostgresConversationManager
-from ai_handler import AIHandler
-from messaging import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response
-from buffer_manager import BufferManager
-from features import BotFeature, has_feature
 
 # Set up logging (level configurable via LOG_LEVEL, validated in AppSettings)
 logging.basicConfig(
@@ -52,8 +64,8 @@ class TelegramChatBot:
 
     def __init__(
         self,
-        bot_config: Optional[BotConfig] = None,
-        service_container: Optional[ServiceContainer] = None,
+        bot_config: BotConfig | None = None,
+        service_container: ServiceContainer | None = None,
     ):
         self.service_container = service_container or ServiceContainer()
         self._owns_service_container = service_container is None
@@ -695,7 +707,13 @@ I'm designed to be flexible and adapt to your preferences."""
                 )
                 # Try to dispatch via Celery
                 try:
-                    from memory.tasks import extract_memories, acquire_task_lock, memory_lock_key, release_task_lock, MEMORY_LOCK_TTL
+                    from memory.tasks import (
+                        MEMORY_LOCK_TTL,
+                        acquire_task_lock,
+                        extract_memories,
+                        memory_lock_key,
+                        release_task_lock,
+                    )
 
                     lock_key = memory_lock_key(conversation_id)
                     if acquire_task_lock(lock_key, MEMORY_LOCK_TTL):
@@ -957,7 +975,7 @@ I'm designed to be flexible and adapt to your preferences."""
             except Exception as e:
                 logger.error("Error during service container cleanup: %s", e)
 
-    def build_application(self, token_override: Optional[str] = None) -> Application:
+    def build_application(self, token_override: str | None = None) -> Application:
         """Build and register the Telegram application handlers."""
         token = token_override or self.bot_token
         app = (

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 from xml.etree import ElementTree
 
 

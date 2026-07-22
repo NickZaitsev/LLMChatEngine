@@ -7,17 +7,19 @@ and proper token budgeting.
 """
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Any, Optional, Mapping, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from collections.abc import Mapping
 
 from core.tokens import TokenCounter, Tokenizer
 from features import BotFeature, has_feature
 from settings import AppSettings, build_settings
 from storage.interfaces import (
-    MessageRepo,
     ConversationRepo,
-    UserRepo,
+    MessageRepo,
     UserBotSettingsRepo,
+    UserRepo,
 )
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -42,11 +44,11 @@ class PromptAssembler:
         memory_manager: "LlamaIndexMemoryManager",
         conversation_repo: ConversationRepo,
         user_repo: UserRepo,
-        user_settings_repo: Optional[UserBotSettingsRepo] = None,
+        user_settings_repo: UserBotSettingsRepo | None = None,
         book_knowledge_manager: Optional["BookKnowledgeManager"] = None,
-        tokenizer: Optional[Tokenizer] = None,
+        tokenizer: Tokenizer | None = None,
         config: Mapping[str, Any] = None,
-        app_settings: Optional[AppSettings] = None,
+        app_settings: AppSettings | None = None,
     ):
         """
         Initialize PromptAssembler.
@@ -110,8 +112,8 @@ class PromptAssembler:
         conversation_id: str,
         reply_token_budget: int = None,
         history_budget: int = None,
-        user_query: Optional[str] = None
-    ) -> List[Dict[str, str]]:
+        user_query: str | None = None
+    ) -> list[dict[str, str]]:
         """
         Build a chat prompt for LLM request.
 
@@ -161,7 +163,7 @@ class PromptAssembler:
 
         return personality_to_use
 
-    def _build_system_sections(self, personality: str, conversation) -> tuple[List[Dict[str, str]], int]:
+    def _build_system_sections(self, personality: str, conversation) -> tuple[list[dict[str, str]], int]:
         """Build system prompt and summary sections."""
         messages = []
         system_tokens = 0
@@ -180,7 +182,7 @@ class PromptAssembler:
 
         return messages, system_tokens
 
-    async def _resolve_memory_query(self, conversation_id: str, conversation, user_query: Optional[str]) -> Optional[str]:
+    async def _resolve_memory_query(self, conversation_id: str, conversation, user_query: str | None) -> str | None:
         """Resolve the best query to use for memory retrieval."""
         if user_query:
             logger.debug("Using provided user_query for memory query")
@@ -201,9 +203,9 @@ class PromptAssembler:
         self,
         conversation_id: str,
         conversation,
-        user_query: Optional[str],
+        user_query: str | None,
         memory_budget: int,
-    ) -> tuple[Optional[Dict[str, str]], int]:
+    ) -> tuple[dict[str, str] | None, int]:
         """Build the semantic memory section, isolated from history assembly."""
         try:
             if not self.memory_manager:
@@ -279,9 +281,9 @@ class PromptAssembler:
         self,
         conversation_id: str,
         conversation,
-        user_query: Optional[str],
+        user_query: str | None,
         book_budget: int,
-    ) -> tuple[Optional[Dict[str, str]], int]:
+    ) -> tuple[dict[str, str] | None, int]:
         """Build the book knowledge section, isolated from history assembly."""
         try:
             if not self.book_rag_enabled:
@@ -338,7 +340,7 @@ class PromptAssembler:
         conversation_id: str,
         conversation,
         remaining_history_budget: int,
-    ) -> tuple[List[Dict[str, str]], int, List[str]]:
+    ) -> tuple[list[dict[str, str]], int, list[str]]:
         """Build conversation history section within the remaining budget."""
         messages = []
         history_tokens = 0
@@ -374,8 +376,8 @@ class PromptAssembler:
         conversation_id: str,
         reply_token_budget: int = None,
         history_budget: int = None,
-        user_query: Optional[str] = None
-    ) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
+        user_query: str | None = None
+    ) -> tuple[list[dict[str, str]], dict[str, Any]]:
         """
         Build a chat prompt with detailed metadata.
 

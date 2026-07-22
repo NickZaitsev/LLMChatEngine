@@ -6,8 +6,8 @@ This script tests the LMStudioManager functionality and integration with the bot
 
 import asyncio
 import logging
-import sys
 import os
+import sys
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -58,9 +58,13 @@ async def test_config_loading():
     
     try:
         from config import (
-            PROVIDER, LMSTUDIO_MODEL, LMSTUDIO_BASE_URL,
-            LMSTUDIO_AUTO_LOAD, LMSTUDIO_MAX_LOAD_WAIT,
-            LMSTUDIO_SERVER_TIMEOUT, LMSTUDIO_STARTUP_CHECK
+            LMSTUDIO_AUTO_LOAD,
+            LMSTUDIO_BASE_URL,
+            LMSTUDIO_MAX_LOAD_WAIT,
+            LMSTUDIO_MODEL,
+            LMSTUDIO_SERVER_TIMEOUT,
+            LMSTUDIO_STARTUP_CHECK,
+            PROVIDER,
         )
         
         print("[+] Configuration loaded successfully")
@@ -131,8 +135,8 @@ async def test_model_loading():
     print("\n[*] Testing model loading functionality...")
     
     try:
-        from lmstudio_manager import LMStudioManager
         from config import LMSTUDIO_MODEL
+        from lmstudio_manager import LMStudioManager
         
         manager = LMStudioManager()
         

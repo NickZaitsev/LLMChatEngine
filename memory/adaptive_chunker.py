@@ -9,8 +9,8 @@ No LLM calls — pure local computation.
 import logging
 import math
 from dataclasses import dataclass
-from typing import List
 from datetime import datetime
+from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class ConversationChunk:
     """A chunk of conversation ready for embedding."""
     text: str                   # Formatted text block ("user: ...\nassistant: ...")
-    message_ids: List[str]      # All source message IDs (for provenance)
+    message_ids: list[str]      # All source message IDs (for provenance)
     token_count: int            # Estimated total tokens
     chunk_index: int            # Position in the batch (0, 1, 2, ...)
     first_timestamp: datetime   # Timestamp of the earliest message
@@ -62,7 +62,7 @@ class AdaptiveChunker:
     # Public API
     # ------------------------------------------------------------------
 
-    def create_chunks(self, messages: list) -> List[ConversationChunk]:
+    def create_chunks(self, messages: list) -> list[ConversationChunk]:
         """
         Create adaptive chunks from a list of messages.
 
@@ -120,12 +120,12 @@ class AdaptiveChunker:
                 i += 1
         return turns
 
-    def _group_turns(self, turns: list) -> List[ConversationChunk]:
+    def _group_turns(self, turns: list) -> list[ConversationChunk]:
         """
         Group turns into chunks respecting both max_messages and
         target_tokens limits.
         """
-        chunks: List[ConversationChunk] = []
+        chunks: list[ConversationChunk] = []
         chunk_index = 0
         i = 0
 
@@ -178,8 +178,8 @@ class AdaptiveChunker:
     @staticmethod
     def _build_chunk(turns: list, index: int) -> ConversationChunk:
         """Assemble a ConversationChunk from a list of (user, assistant) turns."""
-        lines: List[str] = []
-        message_ids: List[str] = []
+        lines: list[str] = []
+        message_ids: list[str] = []
         total_tokens = 0
 
         for user_msg, assistant_msg in turns:

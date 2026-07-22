@@ -9,10 +9,11 @@ No LLM-based fact extraction — conversation chunks are embedded as-is.
 """
 
 import logging
-from typing import List, Any, Optional
+from typing import Any, List, Optional
 
 from llama_index.core.schema import TextNode
-from core.abstractions import VectorStore, EmbeddingModel
+
+from core.abstractions import EmbeddingModel, VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class LlamaIndexMemoryManager:
         user_id: str,
         chunks: list,
         conversation_id: str,
-        bot_id: Optional[str] = None,
+        bot_id: str | None = None,
     ) -> int:
         """
         Batch-embed and store conversation chunks.
@@ -83,7 +84,7 @@ class LlamaIndexMemoryManager:
             return 0
 
         # 2. Build TextNodes with metadata
-        nodes: List[TextNode] = []
+        nodes: list[TextNode] = []
         for chunk, embedding in zip(chunks, embeddings):
             if not embedding:
                 logger.warning(
@@ -127,7 +128,7 @@ class LlamaIndexMemoryManager:
         user_id: str,
         query: str,
         top_k: int,
-        bot_id: Optional[str] = None,
+        bot_id: str | None = None,
     ) -> str:
         """
         Get memory context for a query by searching the vector store,
@@ -190,13 +191,13 @@ class LlamaIndexMemoryManager:
             logger.error("Error in get_context: %s", e, exc_info=True)
             return ""
 
-    async def _expand_and_merge(self, nodes: List[Any], user_id: str) -> str:
+    async def _expand_and_merge(self, nodes: list[Any], user_id: str) -> str:
         """
         For each matched node, fetch its neighboring chunks and merge
         everything into a deduplicated, timestamp-ordered result.
         """
         seen_texts: set = set()
-        all_results: List[dict] = []  # [{"text": ..., "timestamp": ...}]
+        all_results: list[dict] = []  # [{"text": ..., "timestamp": ...}]
 
         for node in nodes:
             conv_id = node.metadata.get("conversation_id")
@@ -243,7 +244,7 @@ class LlamaIndexMemoryManager:
     # Maintenance
     # ------------------------------------------------------------------
 
-    async def clear_memories(self, user_id: str, bot_id: Optional[str] = None) -> None:
+    async def clear_memories(self, user_id: str, bot_id: str | None = None) -> None:
         """
         Clear all memories for a user.
 

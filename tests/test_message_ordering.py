@@ -8,7 +8,8 @@ This test simulates the scenario described in the issue:
 import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
-from messaging import MessageQueueManager, MessageDispatcher, send_ai_response
+
+from messaging import MessageDispatcher, MessageQueueManager, send_ai_response
 
 
 async def test_message_splitting_and_ordering():

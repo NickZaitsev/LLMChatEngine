@@ -2,7 +2,6 @@
 
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-
 _SENSITIVE_QUERY_KEYS = {
     "access_token", "api_key", "apikey", "auth", "key", "password",
     "secret", "signature", "token",

@@ -1,11 +1,13 @@
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
 from unittest.mock import Mock, patch
 
-from messaging import MessageQueueManager, MessageDispatcher
+from messaging import MessageDispatcher, MessageQueueManager
+
 
 async def test_basic_integration():
     """Test basic integration between MessageQueueManager and MessageDispatcher with mocked Redis"""

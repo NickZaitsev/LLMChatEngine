@@ -1,11 +1,12 @@
 """LM Studio API helper for model discovery, status checks, and loading."""
 
 import asyncio
-import logging
-import requests
 import json
-from typing import Optional, Dict, List
+import logging
+from typing import Dict, List, Optional
 from urllib.parse import urljoin
+
+import requests
 
 from settings import settings
 
@@ -43,7 +44,7 @@ class LMStudioManager:
             logger.debug("LM Studio server not responding: %s", e)
             return False
     
-    async def get_available_models(self) -> List[Dict]:
+    async def get_available_models(self) -> list[dict]:
         """Get list of available models from LM Studio"""
         try:
             loop = asyncio.get_running_loop()
@@ -65,7 +66,7 @@ class LMStudioManager:
             logger.error("Error getting available models: %s", e)
             return []
     
-    async def get_loaded_model(self) -> Optional[str]:
+    async def get_loaded_model(self) -> str | None:
         """Get the 
          name"""
         models = await self.get_available_models()
@@ -163,7 +164,7 @@ class LMStudioManager:
             logger.error("Error unloading model: %s", e)
             return False
     
-    async def get_model_info(self) -> Dict:
+    async def get_model_info(self) -> dict:
         """Get information about the LM Studio server and loaded models"""
         try:
             server_running = await self.is_server_running()

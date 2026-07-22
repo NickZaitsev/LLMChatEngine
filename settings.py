@@ -9,7 +9,6 @@ from typing import Any
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 DEFAULT_BOT_NAME = "Bot"
 DEFAULT_PROVIDER = "azure"
 DEFAULT_LMSTUDIO_MODEL = "deepseek/DeepSeek-V3-0324"
@@ -322,7 +321,7 @@ class AppSettings(BaseSettings):
         return value
 
     @model_validator(mode="after")
-    def _validate_settings(self) -> "AppSettings":
+    def _validate_settings(self) -> AppSettings:
         if self.RESERVED_TOKENS >= self.MAX_CONTEXT_TOKENS:
             raise ValueError("RESERVED_TOKENS must be less than MAX_CONTEXT_TOKENS")
         if self.BOOK_CHUNK_OVERLAP_TOKENS >= self.BOOK_CHUNK_TARGET_TOKENS:

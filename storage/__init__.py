@@ -7,25 +7,26 @@ session management, and repository initialization.
 """
 
 import logging
-from typing import Optional
 from dataclasses import dataclass, field
+from typing import Optional
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncEngine
-from sqlalchemy.pool import NullPool, QueuePool, StaticPool
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool, QueuePool, StaticPool
 
 from core.utils import mask_db_url
-from .models import Base, PGVECTOR_AVAILABLE
+
+from .models import PGVECTOR_AVAILABLE, Base
 from .repos import (
-    PostgresMessageRepo,
-    PostgresMessageHistoryRepo,
-    PostgresConversationRepo,
-    PostgresUserRepo,
-    PostgresPersonaRepo,
-    PostgresBotRepo,
     PostgresBookRepo,
+    PostgresBotRepo,
+    PostgresConversationRepo,
+    PostgresMessageHistoryRepo,
+    PostgresMessageRepo,
+    PostgresPersonaRepo,
     PostgresUserBotSettingsRepo,
+    PostgresUserRepo,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ class Storage:
     engine: AsyncEngine
     session_maker: async_sessionmaker
     use_pgvector: bool
-    user_settings: Optional[PostgresUserBotSettingsRepo] = None
+    user_settings: PostgresUserBotSettingsRepo | None = None
     _closed: bool = field(default=False, init=False, repr=False)
 
     async def close(self):

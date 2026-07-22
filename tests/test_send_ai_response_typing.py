@@ -2,9 +2,11 @@
 Tests for the typing indicator functionality in the send_ai_response function.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from messaging import send_ai_response, generate_ai_response
+
+import pytest
+
+from messaging import generate_ai_response, send_ai_response
 
 
 class TestSendAIResponseTyping:

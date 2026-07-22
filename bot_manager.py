@@ -8,15 +8,15 @@ of multiple user bot instances in a single process.
 import asyncio
 import logging
 import uuid
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 
 from telegram.ext import Application
 
 from core.bot_config import BotConfig
-from token_encryption import decrypt_token
 from features import BotFeature, has_feature
 from service_container import ServiceContainer
 from settings import build_settings
+from token_encryption import decrypt_token
 
 logger = logging.getLogger(__name__)
 
@@ -40,18 +40,18 @@ class BotManager:
             db_url: PostgreSQL database URL
         """
         self.db_url = db_url
-        self.bots: Dict[uuid.UUID, Any] = {}  # bot_id -> AIGirlfriendBot instance
-        self.applications: Dict[uuid.UUID, Application] = {}  # bot_id -> Application
-        self.bot_configs: Dict[uuid.UUID, BotConfig] = {}  # bot_id -> BotConfig
+        self.bots: dict[uuid.UUID, Any] = {}  # bot_id -> AIGirlfriendBot instance
+        self.applications: dict[uuid.UUID, Application] = {}  # bot_id -> Application
+        self.bot_configs: dict[uuid.UUID, BotConfig] = {}  # bot_id -> BotConfig
         self.storage = None
         self.service_container = ServiceContainer(
             build_settings().model_copy(update={"DATABASE_URL": db_url})
         )
         self._running = False
-        self._tasks: Dict[uuid.UUID, asyncio.Task] = {}
-        self._stop_events: Dict[uuid.UUID, asyncio.Event] = {}
+        self._tasks: dict[uuid.UUID, asyncio.Task] = {}
+        self._stop_events: dict[uuid.UUID, asyncio.Event] = {}
         self.shared_dispatcher = None
-        self._shared_dispatcher_task: Optional[asyncio.Task] = None
+        self._shared_dispatcher_task: asyncio.Task | None = None
         self._dispatcher_watchdog_event = asyncio.Event()
 
     async def _init_storage(self):
@@ -153,7 +153,7 @@ class BotManager:
             raise ValueError(f"Bot {bot_id} is not active")
 
         # Create bot instance using adapter
-        from multibot_adapter import create_bot_with_config, build_application_for_bot
+        from multibot_adapter import build_application_for_bot, create_bot_with_config
 
         bot_instance = create_bot_with_config(config, service_container=self.service_container)
         self.bots[bot_id] = bot_instance

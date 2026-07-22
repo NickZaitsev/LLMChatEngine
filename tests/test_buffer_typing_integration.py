@@ -3,8 +3,8 @@ Test script to verify the typing indicator integration with the buffer manager w
 """
 import asyncio
 import logging
-import sys
 import os
+import sys
 
 # Add the parent directory to the path so we can import our modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))

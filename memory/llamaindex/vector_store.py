@@ -9,16 +9,16 @@ for upserting, querying, and clearing vector data.
 
 import asyncio
 import logging
-from typing import List, Any, Optional
+from typing import Any, List, Optional
 
-from llama_index.vector_stores.postgres import PGVectorStore
 from llama_index.core.vector_stores import (
-    VectorStoreQuery,
-    MetadataFilters,
     ExactMatchFilter,
+    MetadataFilters,
+    VectorStoreQuery,
 )
-from sqlalchemy.engine.url import make_url
+from llama_index.vector_stores.postgres import PGVectorStore
 from sqlalchemy import text as sql_text
+from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from core.abstractions import VectorStore as VectorStoreAbstraction
@@ -71,7 +71,7 @@ class PgVectorStore(VectorStoreAbstraction):
         self._closed = True
         await self._engine.dispose()
 
-    async def upsert(self, nodes: List[Any]) -> None:
+    async def upsert(self, nodes: list[Any]) -> None:
         """
         Upsert nodes into the vector store.
 
@@ -81,8 +81,8 @@ class PgVectorStore(VectorStoreAbstraction):
         await asyncio.to_thread(self._store.add, nodes)
 
     async def query(
-        self, query_embedding: List[float], top_k: int, user_id: str, bot_id: Optional[str] = None
-    ) -> List[Any]:
+        self, query_embedding: list[float], top_k: int, user_id: str, bot_id: str | None = None
+    ) -> list[Any]:
         """
         Query the vector store for similar nodes.
 
@@ -124,7 +124,7 @@ class PgVectorStore(VectorStoreAbstraction):
             logger.error(f"Error in vector store query: {e}", exc_info=True)
             raise
 
-    async def clear(self, user_id: str, bot_id: Optional[str] = None) -> None:
+    async def clear(self, user_id: str, bot_id: str | None = None) -> None:
         """
         Clear all nodes for a specific user (and optionally bot) from the vector store.
 
@@ -156,12 +156,12 @@ class PgVectorStore(VectorStoreAbstraction):
 
     async def find_similar(
         self,
-        query_embedding: List[float],
+        query_embedding: list[float],
         user_id: str,
         threshold: float = 0.85,
         top_k: int = 3,
-        bot_id: Optional[str] = None,
-    ) -> List[dict]:
+        bot_id: str | None = None,
+    ) -> list[dict]:
         """
         Find existing vectors that are similar to the query above a threshold.
         Used for deduplication before upserting new facts.
@@ -191,7 +191,7 @@ class PgVectorStore(VectorStoreAbstraction):
 
             result = await asyncio.to_thread(self._store.query, query_obj)
 
-            similar: List[dict] = []
+            similar: list[dict] = []
             if result.nodes and result.similarities:
                 for node, score in zip(result.nodes, result.similarities):
                     if score is not None and score >= threshold:
@@ -213,7 +213,7 @@ class PgVectorStore(VectorStoreAbstraction):
         chunk_index: int,
         user_id: str,
         radius: int = 1,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """
         Fetch chunks adjacent to a given chunk_index in the same conversation.
 

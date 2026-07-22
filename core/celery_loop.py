@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Coroutine
+from typing import Any
+from collections.abc import Coroutine
 
 from celery.signals import worker_process_init, worker_process_shutdown
 

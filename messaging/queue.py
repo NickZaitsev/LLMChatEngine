@@ -3,7 +3,7 @@
 import inspect
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 
 import redis
 import redis.asyncio as redis_async
@@ -120,7 +120,7 @@ class MessageQueueManager:
                     "user_id": user_id,
                     "chat_id": chat_id,
                     "text": part_text,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                     "message_type": message_type,
                     "retry_count": 0,
                     "part_index": i,

@@ -3,9 +3,11 @@ Tests for the delay functionality in the send_ai_response function.
 """
 
 import asyncio
-import pytest
-from unittest.mock import AsyncMock, patch
 import random
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
 from messaging import send_ai_response
 
 

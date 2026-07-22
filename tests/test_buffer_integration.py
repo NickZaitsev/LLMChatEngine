@@ -8,10 +8,11 @@ This module tests the complete buffering flow including:
 - Edge cases like empty messages, very long messages, etc.
 """
 
-import pytest
-import pytest_asyncio
 import asyncio
 from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+import pytest_asyncio
 
 from buffer_manager import BufferManager
 from messaging import TypingIndicatorManager
@@ -77,7 +78,7 @@ class TestBufferIntegration:
         # Wait for dispatch
         try:
             await asyncio.wait_for(dispatch_called.wait(), timeout=5.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pytest.fail("Dispatch function was not called within timeout")
         
         # Verify dispatch was called with correct user ID
@@ -219,7 +220,7 @@ class TestBufferIntegration:
         # Should dispatch almost immediately
         try:
             await asyncio.wait_for(dispatch_called.wait(), timeout=0.5)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # This is expected since the immediate dispatch logic is in should_dispatch_immediately
             # but our test setup doesn't fully replicate that flow
             pass
@@ -240,7 +241,7 @@ class TestBufferIntegration:
         # Should dispatch almost immediately
         try:
             await asyncio.wait_for(dispatch_called_2.wait(), timeout=0.5)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # This is expected for the same reason as above
             pass
 
@@ -337,7 +338,7 @@ class TestBufferIntegration:
         # Wait for second dispatch
         try:
             await asyncio.wait_for(second_dispatch_called.wait(), timeout=5.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pytest.fail("Second dispatch function was not called within timeout")
         
         # First dispatch should not have been called

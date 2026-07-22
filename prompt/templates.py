@@ -7,9 +7,7 @@ for formatting memory snippets and other prompt components.
 
 import json
 from datetime import datetime
-from typing import Dict, Any, Optional
-
-
+from typing import Any, Dict, Optional
 
 # Persona template for different AI personalities
 PERSONA_TEMPLATE = """PERSONA: {name}
@@ -90,7 +88,7 @@ def format_memory_snippet_from_record(memory_record: Any) -> str:
     return f"MEMORY [{short_id} | {date_str} | {memory_type}]: {summary}"
 
 
-def create_persona_system_message(persona_config: Dict[str, Any]) -> str:
+def create_persona_system_message(persona_config: dict[str, Any]) -> str:
     """
     Create a system message from persona configuration.
     
@@ -115,7 +113,7 @@ def create_persona_system_message(persona_config: Dict[str, Any]) -> str:
     )
 
 
-def create_user_profile_message(profile_text: str) -> Dict[str, str]:
+def create_user_profile_message(profile_text: str) -> dict[str, str]:
     """
     Create a user profile message for system context.
     
@@ -131,7 +129,7 @@ def create_user_profile_message(profile_text: str) -> Dict[str, str]:
     }
 
 
-def create_memory_context_message(memory_snippets: list[str]) -> Dict[str, str]:
+def create_memory_context_message(memory_snippets: list[str]) -> dict[str, str]:
     """
     Create a memory context message from formatted memory snippets.
     
@@ -226,7 +224,7 @@ DEFAULT_PERSONA_CONFIGS = {
 }
 
 
-def get_default_persona_config(persona_type: str = "companion_partner") -> Dict[str, Any]:
+def get_default_persona_config(persona_type: str = "companion_partner") -> dict[str, Any]:
     """
     Get a default persona configuration by type.
     
