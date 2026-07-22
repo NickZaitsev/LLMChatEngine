@@ -28,7 +28,9 @@ class VectorStore(ABC):
         pass
 
     @abstractmethod
-    async def query(self, query_embedding: list[float], top_k: int, user_id: str) -> list[Any]:
+    async def query(
+        self, query_embedding: list[float], top_k: int, user_id: str, bot_id: str | None = None
+    ) -> list[Any]:
         """
         Query the vector store for similar nodes.
 
@@ -36,19 +38,32 @@ class VectorStore(ABC):
             query_embedding: The query embedding.
             top_k: The number of top results to return.
             user_id: The ID of the user to filter memories for.
+            bot_id: Optional ID of the bot to filter memories for.
 
         Returns:
             A list of similar nodes.
         """
         pass
 
+    async def fetch_neighbors(
+        self, conversation_id: str, chunk_index: int, user_id: str, radius: int = 1
+    ) -> list[dict]:
+        """
+        Fetch chunks adjacent to a given chunk in the same conversation.
+
+        Implementations that do not support neighbor expansion return an
+        empty list (the default).
+        """
+        return []
+
     @abstractmethod
-    async def clear(self, user_id: str) -> None:
+    async def clear(self, user_id: str, bot_id: str | None = None) -> None:
         """
         Clear all nodes for a specific user from the vector store.
 
         Args:
             user_id: The ID of the user whose data should be cleared.
+            bot_id: Optional ID of the bot to scope the clearing.
         """
         pass
 
@@ -68,6 +83,12 @@ class KnowledgeStore(Protocol):
         min_score: float | None = None,
     ) -> list[Any]:
         """Query similar knowledge nodes scoped to a bot."""
+        ...
+
+    async def fetch_neighbors(
+        self, book_id: str, chunk_index: int, radius: int = 1
+    ) -> list[dict]:
+        """Fetch chunks adjacent to a given chunk in the same book."""
         ...
 
     async def delete_book(self, book_id: str) -> None:

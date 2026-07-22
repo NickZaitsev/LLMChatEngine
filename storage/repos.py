@@ -7,10 +7,11 @@ using SQLAlchemy 2.x async ORM with PostgreSQL backend.
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, cast
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
 from sqlalchemy import and_, delete, desc, func, or_, select, text
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import joinedload, selectinload
@@ -82,7 +83,7 @@ class PostgresMessageRepo:
         conversation_id: str,
         role: str,
         content: str,
-        extra_data: dict[str, Any] = None,
+        extra_data: dict[str, Any] | None = None,
         token_count: int = 0
     ) -> Message:
         """
@@ -139,7 +140,8 @@ class PostgresMessageRepo:
 
             except IntegrityError as e:
                 await session.rollback()
-                raise IntegrityError(f"Failed to create message: {e}") from e
+                logger.error("Failed to create message: %s", e)
+                raise
 
     async def fetch_recent_messages(self, conversation_id: str, token_budget: int) -> list[Message]:
         """
@@ -300,7 +302,7 @@ class PostgresMessageRepo:
             result = await session.execute(stmt)
             await session.commit()
 
-            deleted_count = result.rowcount
+            deleted_count = cast(CursorResult, result).rowcount
             # Reduced logging - let the caller handle detailed logging
             # logger.info("Deleted %d messages for conversation %s", deleted_count, conversation_id)
             return deleted_count
@@ -598,7 +600,8 @@ class PostgresConversationRepo:
 
             except IntegrityError as e:
                 await session.rollback()
-                raise IntegrityError(f"Failed to create conversation: {e}") from e
+                logger.error("Failed to create conversation: %s", e)
+                raise
 
     async def get_conversation(self, conversation_id: str) -> Conversation | None:
         """
@@ -765,7 +768,7 @@ class PostgresUserRepo:
         """
         self.session_maker = session_maker
 
-    async def create_user(self, username: str, extra_data: dict[str, Any] = None) -> User:
+    async def create_user(self, username: str, extra_data: dict[str, Any] | None = None) -> User:
         """
         Create a new user.
 
@@ -801,7 +804,8 @@ class PostgresUserRepo:
 
             except IntegrityError as e:
                 await session.rollback()
-                raise IntegrityError(f"Username '{username}' already exists") from e
+                logger.error("Username '%s' already exists: %s", username, e)
+                raise
 
     async def get_user(self, user_id: str) -> User | None:
         """
@@ -876,7 +880,7 @@ class PostgresPersonaRepo:
         self,
         user_id: str,
         name: str,
-        config: dict[str, Any] = None
+        config: dict[str, Any] | None = None
     ) -> Persona:
         """
         Create a new persona.
@@ -918,7 +922,8 @@ class PostgresPersonaRepo:
 
             except IntegrityError as e:
                 await session.rollback()
-                raise IntegrityError(f"Failed to create persona: {e}") from e
+                logger.error("Failed to create persona: %s", e)
+                raise
 
     async def get_persona(self, persona_id: str) -> Persona | None:
         """

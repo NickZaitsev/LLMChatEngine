@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import warnings
-from typing import Any
+from typing import Any, TypedDict
 
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -90,12 +90,18 @@ class MemorySettings(BaseModel):
     retrieval_expand_neighbors: int
 
 
+class CadenceDict(TypedDict):
+    name: str
+    interval: int
+    jitter: int
+
+
 class CadenceSettings(BaseModel):
     name: str
     interval: int
     jitter: int
 
-    def as_dict(self) -> dict[str, int | str]:
+    def as_dict(self) -> CadenceDict:
         return {"name": self.name, "interval": self.interval, "jitter": self.jitter}
 
 

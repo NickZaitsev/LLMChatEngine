@@ -307,6 +307,7 @@ async def test_send_proactive_message_uses_bot_scoped_ai_runtime(proactive_servi
     app_context.typing_manager = MagicMock()
 
     with patch("proactive_messaging.get_app_context", AsyncMock(return_value=app_context)), \
+         patch("proactive_messaging.TELEGRAM_TOKEN", "test-token"), \
          patch("proactive_messaging.generate_ai_response", AsyncMock(return_value="Hello there")), \
          patch("proactive_messaging.clean_ai_response", return_value="Hello there"), \
          patch("proactive_messaging.Bot"):
@@ -341,6 +342,7 @@ async def test_send_proactive_message_does_not_advance_state_on_failure(proactiv
     app_context.conversation_manager.get_formatted_conversation_async = AsyncMock(return_value=[])
 
     with patch("proactive_messaging.get_app_context", AsyncMock(return_value=app_context)), \
+         patch("proactive_messaging.TELEGRAM_TOKEN", "test-token"), \
          patch("proactive_messaging.generate_ai_response", AsyncMock(side_effect=RuntimeError("llm failed"))), \
          patch("proactive_messaging.Bot"):
         with pytest.raises(RuntimeError):

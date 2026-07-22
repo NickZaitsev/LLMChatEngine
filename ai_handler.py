@@ -71,7 +71,7 @@ logger = logging.getLogger(__name__)
 class ModelClient:
     """Abstracts interaction with different LLM providers"""
     
-    def __init__(self, provider="azure", llm_config: dict = None):
+    def __init__(self, provider="azure", llm_config: dict | None = None):
         if not OPENAI_AVAILABLE:
             raise ImportError("OpenAI package not available. Install with: pip install openai")
         
@@ -86,7 +86,7 @@ class ModelClient:
             if not all([azure_endpoint, azure_api_key, azure_model]):
                 raise ValueError("Azure provider requires AZURE_ENDPOINT, AZURE_API_KEY, and AZURE_MODEL to be set in .env")
             
-            self.client = AzureOpenAI(
+            self.client: Any = AzureOpenAI(
                 azure_endpoint=azure_endpoint,
                 api_key=azure_api_key,
                 api_version="2024-06-01",
@@ -290,7 +290,7 @@ class AIHandler:
         messages = [{"role": "user", "content": prompt}]
         return await self._make_ai_request(messages)
 
-    async def generate_response(self, user_message: str, conversation_history: list[dict], conversation_id: str = None, role: str = "user") -> str | None:
+    async def generate_response(self, user_message: str, conversation_history: list[dict], conversation_id: str | None = None, role: str = "user") -> str | None:
         """Generate a response.
 
         Returns None when generation fails after retry handling; callers decide
@@ -387,7 +387,7 @@ class AIHandler:
 
                     # Trigger summarization if needed
                     try:
-                        if MEMORY_ENABLED and self.prompt_assembler:
+                        if MEMORY_ENABLED and self.prompt_assembler and conversation_id:
                             from memory.tasks import (
                                 SUMMARY_LOCK_TTL,
                                 acquire_task_lock,
@@ -530,8 +530,8 @@ class AIHandler:
             "request_timeout": self.request_timeout
         }
     
-    def update_retry_config(self, max_retries: int = None, base_delay: float = None, 
-                           max_delay: float = None, request_timeout: float = None) -> None:
+    def update_retry_config(self, max_retries: int | None = None, base_delay: float | None = None,
+                           max_delay: float | None = None, request_timeout: float | None = None) -> None:
         """Update retry configuration"""
         if max_retries is not None:
             self.max_retries = max_retries
@@ -564,7 +564,7 @@ class AIHandler:
             "retry_config": self.get_retry_config()
         }
     
-    def generate_greeting(self, user_name: str = None) -> str:
+    def generate_greeting(self, user_name: str | None = None) -> str:
         """Generate a personalized greeting"""
         if user_name:
             greetings = [

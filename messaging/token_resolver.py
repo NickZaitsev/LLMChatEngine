@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict
 from collections.abc import Callable
-from typing import Protocol
+from typing import Any, Protocol
 
 from token_encryption import decrypt_token
 
 
 class BotRepository(Protocol):
-    async def get_bot(self, bot_id: str): ...
+    async def get_bot(self, bot_id: str) -> Any: ...
 
 
 class BotTokenResolver:

@@ -123,7 +123,7 @@ class TypingIndicatorManager:
         try:
             while True:
                 try:
-                    await bot.send_chat_action(chat_id=chat_id, action="typing")
+                    await bot.send_chat_action(chat_id=chat_id, action="typing")  # pyright: ignore[reportCallIssue]
                     logger.debug("Sent typing action to chat %s route %s", chat_id, typing_key)
                 except Exception as e:
                     logger.warning("Failed to send typing action to chat %s route %s: %s", chat_id, typing_key, e)

@@ -118,10 +118,13 @@ async def run_async_migrations() -> None:
     and associate a connection with the context.
     """
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = get_database_url()
+    db_url = get_database_url()
+    if not db_url:
+        raise RuntimeError("Database URL is not configured for migrations")
+    configuration["sqlalchemy.url"] = db_url
 
     connectable = create_async_engine(
-        configuration["sqlalchemy.url"],
+        db_url,
         poolclass=pool.NullPool,
         future=True,
     )

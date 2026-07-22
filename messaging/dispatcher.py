@@ -182,23 +182,23 @@ class MessageDispatcher:
             await self._close_bot(cached[1])
 
     @staticmethod
-    def _normalize_bot_key(bot_id: str = None) -> str:
+    def _normalize_bot_key(bot_id: str | None = None) -> str:
         return bot_id or "default"
 
     @classmethod
-    def _routing_key(cls, user_id: int, bot_id: str = None) -> str:
+    def _routing_key(cls, user_id: int, bot_id: str | None = None) -> str:
         return f"{user_id}:{cls._normalize_bot_key(bot_id)}"
 
     @classmethod
-    def _queue_key(cls, user_id: int, bot_id: str = None) -> str:
+    def _queue_key(cls, user_id: int, bot_id: str | None = None) -> str:
         return f"queue:{cls._routing_key(user_id, bot_id)}"
 
     @classmethod
-    def _dlq_key(cls, user_id: int, bot_id: str = None) -> str:
+    def _dlq_key(cls, user_id: int, bot_id: str | None = None) -> str:
         return f"dlq:{cls._routing_key(user_id, bot_id)}"
 
     @classmethod
-    def _lock_key(cls, user_id: int, bot_id: str = None) -> str:
+    def _lock_key(cls, user_id: int, bot_id: str | None = None) -> str:
         return f"dispatcher:processing:{cls._routing_key(user_id, bot_id)}"
 
     @staticmethod
@@ -238,7 +238,7 @@ class MessageDispatcher:
         if tasks:
             await asyncio.gather(*tasks)
 
-    async def acquire_lock(self, user_id: int, bot_id: str = None) -> bool:
+    async def acquire_lock(self, user_id: int, bot_id: str | None = None) -> bool:
         """
         Acquire a distributed lock for a user queue.
 
@@ -266,7 +266,7 @@ class MessageDispatcher:
             logger.error("Error acquiring lock for user %s: %s", user_id, e)
             return False
 
-    async def release_lock(self, user_id: int, bot_id: str = None) -> bool:
+    async def release_lock(self, user_id: int, bot_id: str | None = None) -> bool:
         """
         Release a distributed lock for a user queue.
 
@@ -294,7 +294,7 @@ class MessageDispatcher:
             logger.error("Error releasing lock for user %s: %s", user_id, e)
             return False
 
-    async def renew_lock(self, user_id: int, bot_id: str = None) -> bool:
+    async def renew_lock(self, user_id: int, bot_id: str | None = None) -> bool:
         """
         Renew a distributed lock for a user queue.
 
@@ -438,7 +438,7 @@ class MessageDispatcher:
             await self._close_bot(bot)
         await self.redis_client.aclose()
 
-    async def process_user_queue(self, user_id: int, bot_id: str = None):
+    async def process_user_queue(self, user_id: int, bot_id: str | None = None):
         """
         Process messages from a user's queue.
 
@@ -522,7 +522,7 @@ class MessageDispatcher:
             except asyncio.CancelledError:
                 pass
 
-    async def _renew_lock_periodically(self, user_id: int, bot_id: str = None, lock_lost_event: asyncio.Event = None):
+    async def _renew_lock_periodically(self, user_id: int, bot_id: str | None = None, lock_lost_event: asyncio.Event | None = None):
         """
         Periodically renew the lock for a user queue.
 
@@ -744,7 +744,7 @@ class MessageDispatcher:
         except Exception as e:
             logger.error("Error handling failed message for user %s: %s", message.get("user_id", "unknown"), e)
 
-    async def _disable_proactive_messaging_for_user(self, user_id: int, bot_id: str = None):
+    async def _disable_proactive_messaging_for_user(self, user_id: int, bot_id: str | None = None):
         """Disable proactive messaging for a user due to permanent error (blocked/chat not found)."""
         try:
             state_key = f"proactive_messaging:user:{user_id}:{bot_id or 'default'}"

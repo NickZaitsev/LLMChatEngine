@@ -13,6 +13,7 @@ from typing import Any, List, Optional
 
 from llama_index.core.vector_stores import (
     ExactMatchFilter,
+    MetadataFilter,
     MetadataFilters,
     VectorStoreQuery,
 )
@@ -99,7 +100,7 @@ class PgVectorStore(VectorStoreAbstraction):
             f"==> PGVectorStore querying with user_id='{user_id}', bot_id='{bot_id}', top_k={top_k}"
         )
         try:
-            filters_list = [ExactMatchFilter(key="user_id", value=str(user_id))]
+            filters_list: list[MetadataFilter | MetadataFilters] = [ExactMatchFilter(key="user_id", value=str(user_id))]
             if bot_id:
                 filters_list.append(ExactMatchFilter(key="bot_id", value=str(bot_id)))
 
@@ -113,13 +114,14 @@ class PgVectorStore(VectorStoreAbstraction):
             )
 
             result = await asyncio.to_thread(self._store.query, query_obj)
-            logger.info(f"<== PGVectorStore query returned {len(result.nodes)} nodes")
+            nodes = result.nodes or []
+            logger.info(f"<== PGVectorStore query returned {len(nodes)} nodes")
 
-            for i, node in enumerate(result.nodes):
+            for i, node in enumerate(nodes):
                 score = result.similarities[i] if result.similarities and i < len(result.similarities) else "N/A"
                 logger.debug(f"  Node {i+1} [Score: {score}]: {node.get_content()[:100]}... Metadata: {node.metadata}")
 
-            return result.nodes
+            return list(nodes)
         except Exception as e:
             logger.error(f"Error in vector store query: {e}", exc_info=True)
             raise
@@ -177,7 +179,7 @@ class PgVectorStore(VectorStoreAbstraction):
             List of dicts with 'text', 'score', and 'node_id' for matches above threshold.
         """
         try:
-            filters_list = [ExactMatchFilter(key="user_id", value=str(user_id))]
+            filters_list: list[MetadataFilter | MetadataFilters] = [ExactMatchFilter(key="user_id", value=str(user_id))]
             if bot_id:
                 filters_list.append(ExactMatchFilter(key="bot_id", value=str(bot_id)))
 

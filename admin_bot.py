@@ -84,7 +84,7 @@ class AdminBot:
         )
         self.application: Application | None = None
         self.storage = None
-        self._pending_bot_data: dict[int, dict[str, Any]] = {}  # user_id -> pending data
+        self._pending_bot_data: dict[tuple[int, int], dict[str, Any]] = {}  # (user_id, chat_id) -> pending data
 
         # Reference to bot manager for hot-reload
         self.bot_manager = None
@@ -577,7 +577,7 @@ Use these commands to manage your bot fleet."""
         await self._init_storage()
 
         args = context.args
-        if len(args) < 2:
+        if not args or len(args) < 2:
             features_list = "\n".join([f"  • {f.value}" for f in BotFeature])
             await update.message.reply_text(
                 f"Usage: /togglefeature <bot_id> <feature>\n\n"
@@ -931,7 +931,7 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _parse_book_meta(text: str, default_title: str) -> tuple[str, str | None]:
+def _parse_book_meta(text: str | None, default_title: str) -> tuple[str, str | None]:
     value = (text or "").strip()
     if not value:
         return default_title, None

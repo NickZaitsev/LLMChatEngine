@@ -20,7 +20,7 @@ RANDOM_OFFSET_MAX = app_settings.typing.random_offset_max
 logger = logging.getLogger(__name__)
 
 
-async def send_ai_response(chat_id: int, text: str, bot, typing_manager: 'TypingIndicatorManager' = None, is_first_message: bool = True, route_key: Hashable | None = None):
+async def send_ai_response(chat_id: int, text: str, bot, typing_manager: TypingIndicatorManager | None = None, is_first_message: bool = True, route_key: Hashable | None = None):
     """
     Send an AI response, splitting long or multi-paragraph text into safe Telegram messages.
 
@@ -69,7 +69,7 @@ async def generate_ai_response(
     chat_id: int,
     additional_prompt: str,
     conversation_history: list,
-    conversation_id: str = None,
+    conversation_id: str | None = None,
     role: str = "user",
     show_typing: bool = True,
     route_key: Hashable | None = None

@@ -41,13 +41,13 @@ class PromptAssembler:
     def __init__(
         self,
         message_repo: MessageRepo,
-        memory_manager: "LlamaIndexMemoryManager",
+        memory_manager: Optional["LlamaIndexMemoryManager"],
         conversation_repo: ConversationRepo,
         user_repo: UserRepo,
         user_settings_repo: UserBotSettingsRepo | None = None,
         book_knowledge_manager: Optional["BookKnowledgeManager"] = None,
         tokenizer: Tokenizer | None = None,
-        config: Mapping[str, Any] = None,
+        config: Mapping[str, Any] | None = None,
         app_settings: AppSettings | None = None,
     ):
         """
@@ -89,11 +89,11 @@ class PromptAssembler:
             "include_system_template",
             prompt_settings.include_system_template,
         )
-        self.default_reply_token_budget = self.config.get(
+        self.default_reply_token_budget = int(self.config.get(
             "reply_token_budget",
             prompt_settings.reply_token_budget,
-        )
-        self.default_history_budget = self.config.get("history_budget", prompt_settings.history_budget)
+        ))
+        self.default_history_budget = int(self.config.get("history_budget", prompt_settings.history_budget))
         self.default_personality = self.config.get("bot_personality", bot_settings.personality)
         self.book_rag_enabled = self.config.get("book_rag_enabled", book_settings.rag_enabled)
         self.book_rag_top_k = self.config.get("book_rag_top_k", book_settings.rag_top_k)
@@ -102,7 +102,7 @@ class PromptAssembler:
             "book_rag_token_budget_ratio",
             book_settings.rag_token_budget_ratio,
         )
-        self.personality = None  # Dynamic personality for multi-bot support
+        self.personality: str | None = None  # Dynamic personality for multi-bot support
         self.feature_flags = {}
 
         logger.info(f"PromptAssembler initialized with max_memory_items={self.max_memory_items}")
@@ -110,8 +110,8 @@ class PromptAssembler:
     async def build_prompt(
         self,
         conversation_id: str,
-        reply_token_budget: int = None,
-        history_budget: int = None,
+        reply_token_budget: int | None = None,
+        history_budget: int | None = None,
         user_query: str | None = None
     ) -> list[dict[str, str]]:
         """
@@ -374,8 +374,8 @@ class PromptAssembler:
     async def build_prompt_and_metadata(
         self,
         conversation_id: str,
-        reply_token_budget: int = None,
-        history_budget: int = None,
+        reply_token_budget: int | None = None,
+        history_budget: int | None = None,
         user_query: str | None = None
     ) -> tuple[list[dict[str, str]], dict[str, Any]]:
         """

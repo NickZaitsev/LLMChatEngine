@@ -8,7 +8,7 @@ session management, and repository initialization.
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy import text
@@ -132,7 +132,7 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
 
     try:
         # Create async engine with appropriate connection pooling
-        engine_kwargs = {
+        engine_kwargs: dict[str, Any] = {
             "echo": False,  # Set to True for SQL debugging
             "future": True,
         }

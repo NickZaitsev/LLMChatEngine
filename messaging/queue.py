@@ -54,15 +54,15 @@ class MessageQueueManager:
         await self.redis_client.aclose()
 
     @staticmethod
-    def _normalize_bot_key(bot_id: str = None) -> str:
+    def _normalize_bot_key(bot_id: str | None = None) -> str:
         return bot_id or "default"
 
     @classmethod
-    def _routing_key(cls, user_id: int, bot_id: str = None) -> str:
+    def _routing_key(cls, user_id: int, bot_id: str | None = None) -> str:
         return f"{user_id}:{cls._normalize_bot_key(bot_id)}"
 
     @classmethod
-    def _queue_key(cls, user_id: int, bot_id: str = None) -> str:
+    def _queue_key(cls, user_id: int, bot_id: str | None = None) -> str:
         return f"queue:{cls._routing_key(user_id, bot_id)}"
 
     def _split_message(self, text: str) -> list:
@@ -77,7 +77,7 @@ class MessageQueueManager:
         """
         return _split_ai_response(text)
 
-    async def enqueue_message(self, user_id: int, chat_id: int, text: str, message_type: str = "regular", bot_id: str = None):
+    async def enqueue_message(self, user_id: int, chat_id: int, text: str, message_type: str = "regular", bot_id: str | None = None):
         """
         Enqueue a message for a user in their Redis list. If the message needs to be split,
         split it first and enqueue each part as a separate message to maintain order.
@@ -149,7 +149,7 @@ class MessageQueueManager:
             logger.error("Unexpected error when enqueuing message for user %s: %s", user_id, e)
             raise
 
-    async def get_queue_size(self, user_id: int, bot_id: str = None) -> int:
+    async def get_queue_size(self, user_id: int, bot_id: str | None = None) -> int:
         """
         Get the size of a user's queue.
 
@@ -176,7 +176,7 @@ class MessageQueueManager:
             logger.error("Unexpected error when getting queue size for user %s: %s", user_id, e)
             raise
 
-    async def is_queue_empty(self, user_id: int, bot_id: str = None) -> bool:
+    async def is_queue_empty(self, user_id: int, bot_id: str | None = None) -> bool:
         """
         Check if a user's queue is empty.
 

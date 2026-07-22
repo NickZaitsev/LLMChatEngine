@@ -662,6 +662,8 @@ I'm designed to be flexible and adapt to your preferences."""
         """Handle incoming text messages with buffering mechanism"""
         user = update.effective_user
         user_id = user.id
+        if update.message is None or update.message.text is None:
+            return
         user_message = update.message.text
         chat_id = update.effective_chat.id
 
@@ -824,12 +826,13 @@ I'm designed to be flexible and adapt to your preferences."""
         """Handle errors in the bot application"""
         logger.error("Exception while handling an update: %s", context.error)
 
-        logger.error("Full traceback:")
-        for line in traceback.format_exception(type(context.error), context.error, context.error.__traceback__):
-            logger.error("  %s", line.rstrip())
+        if context.error is not None:
+            logger.error("Full traceback:")
+            for line in traceback.format_exception(type(context.error), context.error, context.error.__traceback__):
+                logger.error("  %s", line.rstrip())
 
         # Stop any active typing indicators for this chat
-        if update and hasattr(update, 'effective_chat') and update.effective_chat:
+        if isinstance(update, Update) and update.effective_chat:
             try:
                 chat_id = update.effective_chat.id
                 route_key = self._buffer_route_key(update.effective_user.id) if update.effective_user else None
@@ -838,7 +841,7 @@ I'm designed to be flexible and adapt to your preferences."""
             except Exception as typing_error:
                 logger.error("Failed to stop typing indicator on error: %s", typing_error)
 
-        if update and hasattr(update, 'message') and update.message:
+        if isinstance(update, Update) and update.message:
             logger.error("Failed to send response after exception: %s", context.error)
 
         # if update and hasattr(update, 'message') and update.message:
@@ -978,6 +981,8 @@ I'm designed to be flexible and adapt to your preferences."""
     def build_application(self, token_override: str | None = None) -> Application:
         """Build and register the Telegram application handlers."""
         token = token_override or self.bot_token
+        if not token:
+            raise ValueError("Bot token is not configured")
         app = (
             Application.builder()
             .token(token)

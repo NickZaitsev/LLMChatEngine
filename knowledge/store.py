@@ -68,7 +68,7 @@ class BookVectorStore:
 
         nodes_with_scores: list[NodeWithScore] = []
         similarities = result.similarities or []
-        for index, node in enumerate(result.nodes):
+        for index, node in enumerate(result.nodes or []):
             score = similarities[index] if index < len(similarities) else None
             if min_score is not None and (score is None or score < min_score):
                 continue

@@ -293,7 +293,7 @@ class ProactiveMessagingService:
             logger.error(f"Invalid time format: {time_str}")
             return 0, 0
 
-    def is_within_quiet_hours(self, check_time: datetime = None) -> bool:
+    def is_within_quiet_hours(self, check_time: datetime | None = None) -> bool:
         """
         Check if the given time is within quiet hours.
 
@@ -552,6 +552,10 @@ async def send_proactive_message_async(task, user_id: int, bot_id: str | None = 
         except Exception as e:
             logger.error(f"Failed to retrieve bot token for user {user_id}: {e}")
             # Fallback to default token
+
+    if not bot_token:
+        logger.error("No Telegram token available to send proactive message to user %s", user_id)
+        return
 
     success = False
     try:

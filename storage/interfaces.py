@@ -134,6 +134,10 @@ class MessageRepo(Protocol):
         """Delete messages for a conversation and return the count."""
         ...
 
+    async def get_last_user_message(self, conversation_id: str) -> Message | None:
+        """Return the most recent user message in a conversation, if any."""
+        ...
+
     async def count_active_messages(self, conversation_id: str, last_summarized_message_id: UUID | None) -> int:
         """Count messages not covered by the latest summary."""
         ...

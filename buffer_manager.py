@@ -22,7 +22,7 @@ INDICATE_TYPING_DURING_DELAY = settings.typing.indicate_during_delay
 @dataclass
 class MessageBufferEntry:
     """Data class to store individual messages with timestamps"""
-    user_id: int
+    user_id: Hashable
     message: str
     timestamp: float
     word_count: int
@@ -31,7 +31,7 @@ class MessageBufferEntry:
 class UserBuffer:
     """Manages per-user message buffers"""
     
-    def __init__(self, user_id: int):
+    def __init__(self, user_id: Hashable):
         self.user_id = user_id
         self.messages: list[MessageBufferEntry] = []
         self.last_activity = time.time()
@@ -109,13 +109,13 @@ class BufferManager:
     """Coordinates all user buffers and manages dispatch logic"""
     
     def __init__(self):
-        self.user_buffers: dict[int, UserBuffer] = {}
+        self.user_buffers: dict[Hashable, UserBuffer] = {}
         self._lock = asyncio.Lock()
-        self.dispatch_callbacks: dict[int, asyncio.Task] = {}
-        self.typing_indicators: dict[int, asyncio.Task] = {}  # Track typing indicator tasks
+        self.dispatch_callbacks: dict[Hashable, asyncio.Task] = {}
+        self.typing_indicators: dict[Hashable, asyncio.Task] = {}  # Track typing indicator tasks
         self.typing_manager = None # Will be set by the bot
-        self.bot_instances: dict[int, Any] = {}  # Map user_id to bot instance
-        self.chat_ids: dict[int, int] = {}  # Map user_id to chat_id
+        self.bot_instances: dict[Hashable, Any] = {}  # Map route key to bot instance
+        self.chat_ids: dict[Hashable, int] = {}  # Map route key to chat_id
 
     @staticmethod
     def _route_key(user_key: Hashable) -> Hashable:
@@ -192,7 +192,7 @@ class BufferManager:
         
         return self.user_buffers[route_key]
     
-    async def add_message(self, user_id: int, message: str) -> None:
+    async def add_message(self, user_id: Hashable, message: str) -> None:
         """Add a message to a user's buffer"""
         buffer = self.get_user_buffer(user_id)
         await buffer.add_message(message)
@@ -202,7 +202,7 @@ class BufferManager:
         if buffer_size == 1:
             await self._start_typing_indicator(user_id)
     
-    async def get_adaptive_timeout(self, user_id: int) -> float:
+    async def get_adaptive_timeout(self, user_id: Hashable) -> float:
         """Calculate adaptive timeout based on message content and buffer size"""
         buffer = self.get_user_buffer(user_id)
         
@@ -217,7 +217,7 @@ class BufferManager:
         # Default to short message timeout
         return BUFFER_SHORT_MESSAGE_TIMEOUT
     
-    async def schedule_dispatch(self, user_id: int, dispatch_func: Callable) -> None:
+    async def schedule_dispatch(self, user_id: Hashable, dispatch_func: Callable) -> None:
         """Schedule a dispatch callback based on adaptive timeout"""
         # Cancel any existing dispatch task for this user
         if user_id in self.dispatch_callbacks:
@@ -256,7 +256,7 @@ class BufferManager:
         task = asyncio.create_task(_dispatch_with_timeout())
         self.dispatch_callbacks[user_id] = task
     
-    async def dispatch_buffer(self, user_id: int) -> str | None:
+    async def dispatch_buffer(self, user_id: Hashable) -> str | None:
         """Dispatch the buffer for a user and return concatenated message"""
         async with self._lock:
             if user_id not in self.user_buffers:
