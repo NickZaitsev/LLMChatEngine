@@ -1,0 +1,16 @@
+{
+  "exclude": [
+    "tests",
+    "migrations/versions",
+    "**/__pycache__",
+    "**/.venv",
+    ".venv"
+  ],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic",
+  "reportOptionalMemberAccess": "none",
+  "reportOptionalSubscript": "none",
+  "reportOptionalCall": "none",
+  "reportOptionalIterable": "none",
+  "reportFunctionMemberAccess": "none"
+}
