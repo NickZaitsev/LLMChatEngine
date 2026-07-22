@@ -218,8 +218,8 @@ class PostgresConversationManager:
 
             # Remove from cache to clear any cached data
             cache_key = (user_id, bot_id)
-            if cache_key in self._conversation_cache:
-                del self._conversation_cache[cache_key]
+            if cache_key in self._conversation_id_cache:
+                del self._conversation_id_cache[cache_key]
 
             logger.info("Cleared conversation for user %d", user_id)
 
