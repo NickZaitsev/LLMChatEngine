@@ -7,17 +7,19 @@ and proper token budgeting.
 """
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Any, Optional, Mapping, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from collections.abc import Mapping
 
 from core.tokens import TokenCounter, Tokenizer
 from features import BotFeature, has_feature
 from settings import AppSettings, build_settings
 from storage.interfaces import (
-    MessageRepo,
     ConversationRepo,
-    UserRepo,
+    MessageRepo,
     UserBotSettingsRepo,
+    UserRepo,
 )
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -39,14 +41,14 @@ class PromptAssembler:
     def __init__(
         self,
         message_repo: MessageRepo,
-        memory_manager: "LlamaIndexMemoryManager",
+        memory_manager: Optional["LlamaIndexMemoryManager"],
         conversation_repo: ConversationRepo,
         user_repo: UserRepo,
-        user_settings_repo: Optional[UserBotSettingsRepo] = None,
+        user_settings_repo: UserBotSettingsRepo | None = None,
         book_knowledge_manager: Optional["BookKnowledgeManager"] = None,
-        tokenizer: Optional[Tokenizer] = None,
-        config: Mapping[str, Any] = None,
-        app_settings: Optional[AppSettings] = None,
+        tokenizer: Tokenizer | None = None,
+        config: Mapping[str, Any] | None = None,
+        app_settings: AppSettings | None = None,
     ):
         """
         Initialize PromptAssembler.
@@ -87,11 +89,11 @@ class PromptAssembler:
             "include_system_template",
             prompt_settings.include_system_template,
         )
-        self.default_reply_token_budget = self.config.get(
+        self.default_reply_token_budget = int(self.config.get(
             "reply_token_budget",
             prompt_settings.reply_token_budget,
-        )
-        self.default_history_budget = self.config.get("history_budget", prompt_settings.history_budget)
+        ))
+        self.default_history_budget = int(self.config.get("history_budget", prompt_settings.history_budget))
         self.default_personality = self.config.get("bot_personality", bot_settings.personality)
         self.book_rag_enabled = self.config.get("book_rag_enabled", book_settings.rag_enabled)
         self.book_rag_top_k = self.config.get("book_rag_top_k", book_settings.rag_top_k)
@@ -100,7 +102,7 @@ class PromptAssembler:
             "book_rag_token_budget_ratio",
             book_settings.rag_token_budget_ratio,
         )
-        self.personality = None  # Dynamic personality for multi-bot support
+        self.personality: str | None = None  # Dynamic personality for multi-bot support
         self.feature_flags = {}
 
         logger.info(f"PromptAssembler initialized with max_memory_items={self.max_memory_items}")
@@ -108,10 +110,10 @@ class PromptAssembler:
     async def build_prompt(
         self,
         conversation_id: str,
-        reply_token_budget: int = None,
-        history_budget: int = None,
-        user_query: Optional[str] = None
-    ) -> List[Dict[str, str]]:
+        reply_token_budget: int | None = None,
+        history_budget: int | None = None,
+        user_query: str | None = None
+    ) -> list[dict[str, str]]:
         """
         Build a chat prompt for LLM request.
 
@@ -161,7 +163,7 @@ class PromptAssembler:
 
         return personality_to_use
 
-    def _build_system_sections(self, personality: str, conversation) -> tuple[List[Dict[str, str]], int]:
+    def _build_system_sections(self, personality: str, conversation) -> tuple[list[dict[str, str]], int]:
         """Build system prompt and summary sections."""
         messages = []
         system_tokens = 0
@@ -180,7 +182,7 @@ class PromptAssembler:
 
         return messages, system_tokens
 
-    async def _resolve_memory_query(self, conversation_id: str, conversation, user_query: Optional[str]) -> Optional[str]:
+    async def _resolve_memory_query(self, conversation_id: str, conversation, user_query: str | None) -> str | None:
         """Resolve the best query to use for memory retrieval."""
         if user_query:
             logger.debug("Using provided user_query for memory query")
@@ -201,9 +203,9 @@ class PromptAssembler:
         self,
         conversation_id: str,
         conversation,
-        user_query: Optional[str],
+        user_query: str | None,
         memory_budget: int,
-    ) -> tuple[Optional[Dict[str, str]], int]:
+    ) -> tuple[dict[str, str] | None, int]:
         """Build the semantic memory section, isolated from history assembly."""
         try:
             if not self.memory_manager:
@@ -279,9 +281,9 @@ class PromptAssembler:
         self,
         conversation_id: str,
         conversation,
-        user_query: Optional[str],
+        user_query: str | None,
         book_budget: int,
-    ) -> tuple[Optional[Dict[str, str]], int]:
+    ) -> tuple[dict[str, str] | None, int]:
         """Build the book knowledge section, isolated from history assembly."""
         try:
             if not self.book_rag_enabled:
@@ -338,7 +340,7 @@ class PromptAssembler:
         conversation_id: str,
         conversation,
         remaining_history_budget: int,
-    ) -> tuple[List[Dict[str, str]], int, List[str]]:
+    ) -> tuple[list[dict[str, str]], int, list[str]]:
         """Build conversation history section within the remaining budget."""
         messages = []
         history_tokens = 0
@@ -372,10 +374,10 @@ class PromptAssembler:
     async def build_prompt_and_metadata(
         self,
         conversation_id: str,
-        reply_token_budget: int = None,
-        history_budget: int = None,
-        user_query: Optional[str] = None
-    ) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
+        reply_token_budget: int | None = None,
+        history_budget: int | None = None,
+        user_query: str | None = None
+    ) -> tuple[list[dict[str, str]], dict[str, Any]]:
         """
         Build a chat prompt with detailed metadata.
 

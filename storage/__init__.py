@@ -7,25 +7,26 @@ session management, and repository initialization.
 """
 
 import logging
-from typing import Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any, Optional
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncEngine
-from sqlalchemy.pool import NullPool, QueuePool, StaticPool
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool, QueuePool, StaticPool
 
 from core.utils import mask_db_url
-from .models import Base, PGVECTOR_AVAILABLE
+
+from .models import PGVECTOR_AVAILABLE, Base
 from .repos import (
-    PostgresMessageRepo,
-    PostgresMessageHistoryRepo,
-    PostgresConversationRepo,
-    PostgresUserRepo,
-    PostgresPersonaRepo,
-    PostgresBotRepo,
     PostgresBookRepo,
+    PostgresBotRepo,
+    PostgresConversationRepo,
+    PostgresMessageHistoryRepo,
+    PostgresMessageRepo,
+    PostgresPersonaRepo,
     PostgresUserBotSettingsRepo,
+    PostgresUserRepo,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,13 +57,16 @@ class Storage:
     engine: AsyncEngine
     session_maker: async_sessionmaker
     use_pgvector: bool
-    user_settings: Optional[PostgresUserBotSettingsRepo] = None
+    user_settings: PostgresUserBotSettingsRepo | None = None
+    _closed: bool = field(default=False, init=False, repr=False)
 
     async def close(self):
         """Close the database connection pool"""
-        if self.engine:
-            await self.engine.dispose()
-            logger.info("Database connection pool closed")
+        if self._closed:
+            return
+        self._closed = True
+        await self.engine.dispose()
+        logger.info("Database connection pool closed")
 
     async def health_check(self) -> bool:
         """
@@ -117,7 +121,7 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
         raise ValueError("Database URL cannot be empty")
 
     if not db_url.startswith(('postgresql+asyncpg://', 'postgresql+psycopg://', 'sqlite+aiosqlite://')):
-        logger.warning(f"Database URL should use async driver (asyncpg/psycopg/aiosqlite): {db_url}")
+        logger.warning("Database URL should use an async driver: %s", mask_db_url(db_url))
 
     # Check pgvector availability
     if use_pgvector and not PGVECTOR_AVAILABLE:
@@ -128,7 +132,7 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
 
     try:
         # Create async engine with appropriate connection pooling
-        engine_kwargs = {
+        engine_kwargs: dict[str, Any] = {
             "echo": False,  # Set to True for SQL debugging
             "future": True,
         }
@@ -204,7 +208,8 @@ async def create_storage(db_url: str, use_pgvector: bool = True) -> Storage:
 
     except Exception as e:
         logger.error(f"Failed to create storage: {e}")
-        # Clean up engine if it was created
+        # Clean up engine if it was created. Best-effort: the original error is
+        # re-raised below regardless of whether disposal succeeds.
         if 'engine' in locals():
             try:
                 await engine.dispose()

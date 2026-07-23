@@ -3,9 +3,11 @@ LlamaIndex embedding model implementations.
 """
 import logging
 from typing import List
+
 from llama_index.embeddings.openai import OpenAIEmbedding
+
 from core.abstractions import EmbeddingModel as EmbeddingModelAbstraction
-import config
+from settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +28,11 @@ class LMStudioEmbeddingModel(EmbeddingModelAbstraction):
         logger.info(f"Loading local LMStudio model {model_name}...")
         self._model = OpenAIEmbedding(
             api_key="whatever-is-in-lmstudio",
-            api_base=config.LMSTUDIO_BASE_URL.rstrip("/"),
+            api_base=settings.llm.lmstudio_base_url.rstrip("/"),
             model_name=model_name,
         )
 
-        if config.LMSTUDIO_AUTO_LOAD:
+        if settings.llm.lmstudio_auto_load:
             self._warm_up()
 
     def _warm_up(self):
@@ -46,7 +48,7 @@ class LMStudioEmbeddingModel(EmbeddingModelAbstraction):
         except Exception as e:
             logger.error(f"Failed to warm up embedding model: {e}", exc_info=True)
 
-    async def get_embedding(self, text: str) -> List[float]:
+    async def get_embedding(self, text: str) -> list[float]:
         """
         Get the embedding for a single piece of text.
         """
@@ -57,7 +59,7 @@ class LMStudioEmbeddingModel(EmbeddingModelAbstraction):
             logger.error(f"Failed to get embedding: {e}", exc_info=True)
             return []
 
-    async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    async def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """
         Get the embeddings for a list of texts.
         """

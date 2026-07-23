@@ -17,8 +17,11 @@ def build_embedding_model(settings: AppSettings | None = None) -> EmbeddingModel
     if memory_settings.embedding_provider == "gemini":
         from memory.llamaindex.gemini import GeminiEmbeddingModel
 
-        logger.info("Using Gemini embedding model: %s", llm_settings.gemini_embedding_model)
-        return GeminiEmbeddingModel(model_name=llm_settings.gemini_embedding_model)
+        gemini_model_name = llm_settings.gemini_embedding_model
+        if not gemini_model_name:
+            raise ValueError("gemini_embedding_model must be configured for the Gemini embedding provider")
+        logger.info("Using Gemini embedding model: %s", gemini_model_name)
+        return GeminiEmbeddingModel(model_name=gemini_model_name)
 
     if memory_settings.embedding_provider == "lmstudio":
         from memory.llamaindex.embedding import LMStudioEmbeddingModel

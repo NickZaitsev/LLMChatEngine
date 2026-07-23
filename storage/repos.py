@@ -7,29 +7,55 @@ using SQLAlchemy 2.x async ORM with PostgreSQL backend.
 
 import logging
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Union
+from typing import Any, Dict, List, Optional, Union, cast
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
-from core.tokens import TokenCounter
-from sqlalchemy import select, func, desc, and_, or_, text, delete
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from sqlalchemy.orm import selectinload, joinedload
+from sqlalchemy import and_, delete, desc, func, or_, select, text
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, NoResultFound
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import joinedload, selectinload
+
+from core.tokens import TokenCounter
 
 from .interfaces import (
-    Message, Conversation, User, Persona, Bot, Book, MessageLog,
-    MessageRepo, ConversationRepo, UserRepo, PersonaRepo, MessageHistoryRepo,
-    UserBotSettings
+    Book,
+    Bot,
+    Conversation,
+    ConversationRepo,
+    Message,
+    MessageHistoryRepo,
+    MessageLog,
+    MessageRepo,
+    Persona,
+    PersonaRepo,
+    User,
+    UserBotSettings,
+    UserRepo,
+)
+from .models import (
+    Book as BookModel,
+)
+from .models import (
+    Bot as BotModel,
+)
+from .models import (
+    Conversation as ConversationModel,
 )
 from .models import (
     Message as MessageModel,
-    Conversation as ConversationModel,
-    User as UserModel,
-    Persona as PersonaModel,
-    Bot as BotModel,
-    Book as BookModel,
-    UserBotSettings as UserBotSettingsModel,
+)
+from .models import (
     MessageLog as MessageLogModel,
+)
+from .models import (
+    Persona as PersonaModel,
+)
+from .models import (
+    User as UserModel,
+)
+from .models import (
+    UserBotSettings as UserBotSettingsModel,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,7 +83,7 @@ class PostgresMessageRepo:
         conversation_id: str,
         role: str,
         content: str,
-        extra_data: Dict[str, Any] = None,
+        extra_data: dict[str, Any] | None = None,
         token_count: int = 0
     ) -> Message:
         """
@@ -114,9 +140,10 @@ class PostgresMessageRepo:
 
             except IntegrityError as e:
                 await session.rollback()
-                raise IntegrityError(f"Failed to create message: {e}") from e
+                logger.error("Failed to create message: %s", e)
+                raise
 
-    async def fetch_recent_messages(self, conversation_id: str, token_budget: int) -> List[Message]:
+    async def fetch_recent_messages(self, conversation_id: str, token_budget: int) -> list[Message]:
         """
         Fetch recent messages within a token budget.
 
@@ -168,7 +195,7 @@ class PostgresMessageRepo:
                 for m in selected_messages
             ]
 
-    async def fetch_messages_since(self, conversation_id: str, since_ts: datetime) -> List[Message]:
+    async def fetch_messages_since(self, conversation_id: str, since_ts: datetime) -> list[Message]:
         """
         Fetch messages created after a specific timestamp.
 
@@ -213,7 +240,7 @@ class PostgresMessageRepo:
         conversation_id: str,
         limit: int = 100,
         offset: int = 0
-    ) -> List[Message]:
+    ) -> list[Message]:
         """
         List messages for a conversation with pagination.
 
@@ -275,12 +302,12 @@ class PostgresMessageRepo:
             result = await session.execute(stmt)
             await session.commit()
 
-            deleted_count = result.rowcount
+            deleted_count = cast(CursorResult, result).rowcount
             # Reduced logging - let the caller handle detailed logging
             # logger.info("Deleted %d messages for conversation %s", deleted_count, conversation_id)
             return deleted_count
 
-    async def get_last_user_message(self, conversation_id: str) -> Optional[Message]:
+    async def get_last_user_message(self, conversation_id: str) -> Message | None:
         """
         Get the last user message for a conversation.
 
@@ -331,7 +358,7 @@ class PostgresMessageRepo:
         """
         return self.token_estimator.estimate_tokens(text)
 
-    async def count_active_messages(self, conversation_id: str, last_summarized_message_id: Optional[UUID]) -> int:
+    async def count_active_messages(self, conversation_id: str, last_summarized_message_id: UUID | None) -> int:
         """
         Count active (unsummarized) messages in a conversation.
         """
@@ -353,7 +380,7 @@ class PostgresMessageRepo:
             result = await session.execute(stmt)
             return result.scalar_one()
 
-    async def fetch_active_messages(self, conversation_id: str, token_budget: int, last_summarized_message_id: Optional[UUID]) -> List[Message]:
+    async def fetch_active_messages(self, conversation_id: str, token_budget: int, last_summarized_message_id: UUID | None) -> list[Message]:
         """
         Fetch recent active (unsummarized) messages within a token budget.
         """
@@ -399,7 +426,7 @@ class PostgresMessageRepo:
                 ) for m in selected_messages
             ]
 
-    async def get_messages_for_summary(self, conversation_id: str, last_summarized_message_id: Optional[UUID]) -> List[Message]:
+    async def get_messages_for_summary(self, conversation_id: str, last_summarized_message_id: UUID | None) -> list[Message]:
         """
         Fetch all active messages to be summarized.
         """
@@ -459,7 +486,7 @@ class PostgresMessageHistoryRepo:
             return user_id
         return uuid5(NAMESPACE_OID, f"telegram_user_{user_id}")
 
-    async def save_message(self, user_id: int | UUID, role: str, content: str, bot_id: Optional[UUID] = None) -> MessageLog:
+    async def save_message(self, user_id: int | UUID, role: str, content: str, bot_id: UUID | None = None) -> MessageLog:
         """
         Save a message to messages_log.
 
@@ -517,10 +544,10 @@ class PostgresConversationRepo:
     async def create_conversation(
         self,
         user_id: str,
-        persona_id: Optional[str] = None,
-        bot_id: Optional[str] = None,
-        title: Optional[str] = None,
-        extra_data: Optional[Dict[str, Any]] = None
+        persona_id: str | None = None,
+        bot_id: str | None = None,
+        title: str | None = None,
+        extra_data: dict[str, Any] | None = None
     ) -> Conversation:
         """
         Create a new conversation.
@@ -573,9 +600,10 @@ class PostgresConversationRepo:
 
             except IntegrityError as e:
                 await session.rollback()
-                raise IntegrityError(f"Failed to create conversation: {e}") from e
+                logger.error("Failed to create conversation: %s", e)
+                raise
 
-    async def get_conversation(self, conversation_id: str) -> Optional[Conversation]:
+    async def get_conversation(self, conversation_id: str) -> Conversation | None:
         """
         Get a conversation by ID.
 
@@ -614,7 +642,7 @@ class PostgresConversationRepo:
                 last_memorized_message_id=getattr(conversation, 'last_memorized_message_id', None)
             )
 
-    async def list_conversations(self, user_id: str, bot_id: Optional[str] = None) -> List[Conversation]:
+    async def list_conversations(self, user_id: str, bot_id: str | None = None) -> list[Conversation]:
         """
         List all conversations for a user.
 
@@ -678,12 +706,12 @@ class PostgresConversationRepo:
     async def update_conversation(
         self,
         conversation_id: str,
-        title: Optional[str] = None,
-        extra_data: Optional[Dict[str, Any]] = None,
-        summary: Optional[str] = None,
-        last_summarized_message_id: Optional[UUID] = None,
-        last_memorized_message_id: Optional[UUID] = None
-    ) -> Optional[Conversation]:
+        title: str | None = None,
+        extra_data: dict[str, Any] | None = None,
+        summary: str | None = None,
+        last_summarized_message_id: UUID | None = None,
+        last_memorized_message_id: UUID | None = None
+    ) -> Conversation | None:
         """
         Update an existing conversation.
         """
@@ -740,7 +768,7 @@ class PostgresUserRepo:
         """
         self.session_maker = session_maker
 
-    async def create_user(self, username: str, extra_data: Dict[str, Any] = None) -> User:
+    async def create_user(self, username: str, extra_data: dict[str, Any] | None = None) -> User:
         """
         Create a new user.
 
@@ -776,9 +804,10 @@ class PostgresUserRepo:
 
             except IntegrityError as e:
                 await session.rollback()
-                raise IntegrityError(f"Username '{username}' already exists") from e
+                logger.error("Username '%s' already exists: %s", username, e)
+                raise
 
-    async def get_user(self, user_id: str) -> Optional[User]:
+    async def get_user(self, user_id: str) -> User | None:
         """
         Get a user by ID.
 
@@ -807,7 +836,7 @@ class PostgresUserRepo:
                 extra_data=user.extra_data
             )
 
-    async def get_user_by_username(self, username: str) -> Optional[User]:
+    async def get_user_by_username(self, username: str) -> User | None:
         """
         Get a user by username.
 
@@ -851,7 +880,7 @@ class PostgresPersonaRepo:
         self,
         user_id: str,
         name: str,
-        config: Dict[str, Any] = None
+        config: dict[str, Any] | None = None
     ) -> Persona:
         """
         Create a new persona.
@@ -893,9 +922,10 @@ class PostgresPersonaRepo:
 
             except IntegrityError as e:
                 await session.rollback()
-                raise IntegrityError(f"Failed to create persona: {e}") from e
+                logger.error("Failed to create persona: %s", e)
+                raise
 
-    async def get_persona(self, persona_id: str) -> Optional[Persona]:
+    async def get_persona(self, persona_id: str) -> Persona | None:
         """
         Get a persona by ID.
 
@@ -925,7 +955,7 @@ class PostgresPersonaRepo:
                 config=persona.config
             )
 
-    async def list_personas(self, user_id: str) -> List[Persona]:
+    async def list_personas(self, user_id: str) -> list[Persona]:
         """
         List all personas for a user.
 
@@ -981,8 +1011,8 @@ class PostgresBotRepo:
         token_encrypted: str,
         name: str,
         personality: str,
-        feature_flags: Optional[Dict[str, Any]] = None,
-        llm_config: Optional[Dict[str, Any]] = None,
+        feature_flags: dict[str, Any] | None = None,
+        llm_config: dict[str, Any] | None = None,
     ) -> Bot:
         async with self.session_maker() as session:
             bot = BotModel(
@@ -998,14 +1028,14 @@ class PostgresBotRepo:
             await session.refresh(bot)
             return self._to_dto(bot)
 
-    async def get_bot(self, bot_id: str) -> Optional[Bot]:
+    async def get_bot(self, bot_id: str) -> Bot | None:
         bot_uuid = UUID(str(bot_id))
         async with self.session_maker() as session:
             result = await session.execute(select(BotModel).where(BotModel.id == bot_uuid))
             bot = result.scalar_one_or_none()
             return self._to_dto(bot) if bot else None
 
-    async def list_bots(self, is_active: Optional[bool] = None) -> List[Bot]:
+    async def list_bots(self, is_active: bool | None = None) -> list[Bot]:
         async with self.session_maker() as session:
             stmt = select(BotModel).order_by(desc(BotModel.created_at))
             if is_active is not None:
@@ -1016,12 +1046,12 @@ class PostgresBotRepo:
     async def update_bot(
         self,
         bot_id: str,
-        name: Optional[str] = None,
-        personality: Optional[str] = None,
-        is_active: Optional[bool] = None,
-        feature_flags: Optional[Dict[str, Any]] = None,
-        llm_config: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Bot]:
+        name: str | None = None,
+        personality: str | None = None,
+        is_active: bool | None = None,
+        feature_flags: dict[str, Any] | None = None,
+        llm_config: dict[str, Any] | None = None,
+    ) -> Bot | None:
         bot_uuid = UUID(str(bot_id))
         async with self.session_maker() as session:
             result = await session.execute(select(BotModel).where(BotModel.id == bot_uuid))
@@ -1044,16 +1074,16 @@ class PostgresBotRepo:
             await session.refresh(bot)
             return self._to_dto(bot)
 
-    async def update_personality(self, bot_id: str, personality: str) -> Optional[Bot]:
+    async def update_personality(self, bot_id: str, personality: str) -> Bot | None:
         return await self.update_bot(bot_id, personality=personality)
 
-    async def update_flags(self, bot_id: str, feature_flags: Dict[str, Any]) -> Optional[Bot]:
+    async def update_flags(self, bot_id: str, feature_flags: dict[str, Any]) -> Bot | None:
         return await self.update_bot(bot_id, feature_flags=feature_flags)
 
-    async def set_active(self, bot_id: str, is_active: bool) -> Optional[Bot]:
+    async def set_active(self, bot_id: str, is_active: bool) -> Bot | None:
         return await self.update_bot(bot_id, is_active=is_active)
 
-    async def get_personality_and_flags(self, bot_id: str) -> Optional[tuple[str, Dict[str, Any]]]:
+    async def get_personality_and_flags(self, bot_id: str) -> tuple[str, dict[str, Any]] | None:
         bot = await self.get_bot(bot_id)
         if not bot:
             return None
@@ -1092,7 +1122,7 @@ class PostgresBookRepo:
         self,
         bot_id: str,
         title: str,
-        author: Optional[str],
+        author: str | None,
         source_filename: str,
         file_format: str,
         file_hash: str,
@@ -1114,14 +1144,14 @@ class PostgresBookRepo:
             await session.refresh(book)
             return self._to_dto(book)
 
-    async def get_book(self, book_id: str) -> Optional[Book]:
+    async def get_book(self, book_id: str) -> Book | None:
         book_uuid = UUID(str(book_id))
         async with self.session_maker() as session:
             result = await session.execute(select(BookModel).where(BookModel.id == book_uuid))
             book = result.scalar_one_or_none()
             return self._to_dto(book) if book else None
 
-    async def list_books(self, bot_id: str) -> List[Book]:
+    async def list_books(self, bot_id: str) -> list[Book]:
         bot_uuid = UUID(str(bot_id))
         async with self.session_maker() as session:
             result = await session.execute(
@@ -1135,10 +1165,10 @@ class PostgresBookRepo:
         self,
         book_id: str,
         status: str,
-        error: Optional[str] = None,
-        chunk_count: Optional[int] = None,
-        char_count: Optional[int] = None,
-    ) -> Optional[Book]:
+        error: str | None = None,
+        chunk_count: int | None = None,
+        char_count: int | None = None,
+    ) -> Book | None:
         book_uuid = UUID(str(book_id))
         async with self.session_maker() as session:
             result = await session.execute(select(BookModel).where(BookModel.id == book_uuid))
@@ -1161,8 +1191,8 @@ class PostgresBookRepo:
         self,
         book_id: str,
         title: str,
-        author: Optional[str],
-    ) -> Optional[Book]:
+        author: str | None,
+    ) -> Book | None:
         book_uuid = UUID(str(book_id))
         async with self.session_maker() as session:
             result = await session.execute(select(BookModel).where(BookModel.id == book_uuid))
@@ -1188,7 +1218,7 @@ class PostgresBookRepo:
             await session.commit()
             return True
 
-    async def find_by_hash(self, bot_id: str, file_hash: str) -> Optional[Book]:
+    async def find_by_hash(self, bot_id: str, file_hash: str) -> Book | None:
         bot_uuid = UUID(str(bot_id))
         async with self.session_maker() as session:
             result = await session.execute(
@@ -1239,7 +1269,7 @@ class PostgresUserBotSettingsRepo:
                 updated_at=model.updated_at,
             )
 
-    async def get_settings(self, user_id: str, bot_id: str) -> Optional[UserBotSettings]:
+    async def get_settings(self, user_id: str, bot_id: str) -> UserBotSettings | None:
         """Fetch settings for a user and bot pair."""
         try:
             user_uuid = UUID(user_id)
@@ -1269,7 +1299,7 @@ class PostgresUserBotSettingsRepo:
                 updated_at=model.updated_at,
             )
 
-    async def update_settings(self, user_id: str, bot_id: str, settings: Dict[str, Any]) -> UserBotSettings:
+    async def update_settings(self, user_id: str, bot_id: str, settings: dict[str, Any]) -> UserBotSettings:
         """Merge and persist settings for a user and bot pair."""
         try:
             user_uuid = UUID(user_id)

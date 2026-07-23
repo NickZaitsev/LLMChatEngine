@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class Tokenizer(Protocol):
     """Protocol for tokenizer implementations."""
 
-    def encode(self, text: str) -> List[int]:
+    def encode(self, text: str) -> list[int]:
         """Encode text to tokens."""
         ...
 
@@ -22,7 +22,7 @@ class Tokenizer(Protocol):
 class TokenCounter:
     """Count tokens with tiktoken when available and a stable fallback."""
 
-    def __init__(self, tokenizer: Optional[Tokenizer] = None, auto_tiktoken: bool = True):
+    def __init__(self, tokenizer: Tokenizer | None = None, auto_tiktoken: bool = True):
         self.tokenizer = tokenizer
 
         if not tokenizer and auto_tiktoken:
@@ -35,7 +35,7 @@ class TokenCounter:
                     def __init__(self, encoding):
                         self._encoding = encoding
 
-                    def encode(self, text: str) -> List[int]:
+                    def encode(self, text: str) -> list[int]:
                         return self._encoding.encode(text)
 
                     def count_tokens(self, text: str) -> int:

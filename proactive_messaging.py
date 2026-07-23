@@ -5,42 +5,43 @@ This module handles the scheduling and sending of proactive messages to users
 based on configurable intervals, jitter, quiet hours, and cadence escalation.
 """
 
+import inspect
+import json
 import logging
 import random
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any
+from datetime import datetime, timedelta, timezone, UTC
+from typing import Any, Dict, Optional
+
+import redis.asyncio as redis_async
 from celery import Celery
 from celery.schedules import crontab
-import redis.asyncio as redis_async
-import json
-import inspect
 from telegram import Bot
 
-from config import (
-    PROACTIVE_MESSAGING_ENABLED,
-    PROACTIVE_MESSAGING_REDIS_URL,
-    PROACTIVE_MESSAGING_CADENCES,
-    PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED,
-    PROACTIVE_MESSAGING_QUIET_HOURS_START,
-    PROACTIVE_MESSAGING_QUIET_HOURS_END,
-    PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES,
-    PROACTIVE_MESSAGING_PROMPT,
-    PROACTIVE_MESSAGING_RESTART_DELAY_MAX,
-    TELEGRAM_TOKEN
-)
+from core.utils import mask_url
+from settings import settings
+
+_proactive_settings = settings.proactive
+PROACTIVE_MESSAGING_ENABLED = _proactive_settings.enabled
+PROACTIVE_MESSAGING_REDIS_URL = _proactive_settings.redis_url
+PROACTIVE_MESSAGING_CADENCES = [cadence.as_dict() for cadence in _proactive_settings.cadences]
+PROACTIVE_MESSAGING_QUIET_HOURS_ENABLED = _proactive_settings.quiet_hours_enabled
+PROACTIVE_MESSAGING_QUIET_HOURS_START = _proactive_settings.quiet_hours_start
+PROACTIVE_MESSAGING_QUIET_HOURS_END = _proactive_settings.quiet_hours_end
+PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES = _proactive_settings.max_consecutive_outreaches
+PROACTIVE_MESSAGING_PROMPT = _proactive_settings.prompt
+PROACTIVE_MESSAGING_RESTART_DELAY_MAX = _proactive_settings.restart_delay_max
+TELEGRAM_TOKEN = settings.TELEGRAM_TOKEN
 
 # Import AppContext for shared services
-from app_context import get_app_context, AppContext
+# Import celery configuration
+import celeryconfig
+from app_context import AppContext, get_app_context
 from core.celery_loop import run_coroutine
 
 # Import message queue manager and related functions
-from message_manager import clean_ai_response, generate_ai_response
-
-
-# Import celery configuration
-import celeryconfig
+from messaging import clean_ai_response, generate_ai_response
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ class ProactiveMessagingService:
         # Log configuration
         logger.info(f"Proactive Messaging Service Configuration:")
         logger.info(f"  Enabled: {self.enabled}")
-        logger.info(f"  Redis URL: {self.redis_url}")
+        logger.info("  Redis URL: %s", mask_url(self.redis_url))
         logger.info(f"  Quiet Hours Enabled: {self.quiet_hours_enabled}")
         logger.info(f"  Quiet Hours: {self.quiet_hours_start} - {self.quiet_hours_end}")
         logger.info(f"  Max Consecutive Outreaches: {self.max_consecutive_outreaches}")
@@ -95,16 +96,16 @@ class ProactiveMessagingService:
 
     @staticmethod
     def _utc_now() -> datetime:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
     @staticmethod
     def _ensure_aware_utc(value: datetime) -> datetime:
         if value.tzinfo is None:
-            return value.astimezone(timezone.utc)
-        return value.astimezone(timezone.utc)
+            return value.astimezone(UTC)
+        return value.astimezone(UTC)
 
     @staticmethod
-    def _state_key(user_id: int, bot_id: Optional[Any] = None) -> str:
+    def _state_key(user_id: int, bot_id: Any | None = None) -> str:
         """Build a Redis key for a proactive messaging state entry."""
         bot_key = ProactiveMessagingService._normalize_bot_id(bot_id) or "default"
         return f"proactive_messaging:user:{user_id}:{bot_key}"
@@ -134,7 +135,7 @@ class ProactiveMessagingService:
                 state['scheduled_time'] = None
         return state
 
-    async def _get_user_state(self, user_id: int, bot_id: Optional[Any] = None) -> dict:
+    async def _get_user_state(self, user_id: int, bot_id: Any | None = None) -> dict:
         """
         Get user state from Redis.
 
@@ -151,7 +152,7 @@ class ProactiveMessagingService:
             logger.error(f"Error getting user state for user {user_id} and bot {bot_id} from Redis: {e}")
             return {}
 
-    async def _set_user_state(self, user_id: int, state: dict, bot_id: Optional[Any] = None):
+    async def _set_user_state(self, user_id: int, state: dict, bot_id: Any | None = None):
         """
         Set user state in Redis.
 
@@ -177,7 +178,7 @@ class ProactiveMessagingService:
             logger.error(f"Error setting user state for user {user_id} and bot {bot_id} in Redis: {e}")
 
     @staticmethod
-    def _normalize_bot_id(bot_id: Any) -> Optional[str]:
+    def _normalize_bot_id(bot_id: Any) -> str | None:
         """Normalize bot_id values before storing them in Redis state."""
         if not bot_id:
             return None
@@ -254,7 +255,7 @@ class ProactiveMessagingService:
             return False
         return self._ensure_aware_utc(scheduled_time) < self._utc_now()
 
-    def is_stale_scheduled_task(self, state: dict, now: Optional[datetime] = None) -> bool:
+    def is_stale_scheduled_task(self, state: dict, now: datetime | None = None) -> bool:
         """
         Determine whether a scheduled task marker is stale and should be cleared.
         """
@@ -292,7 +293,7 @@ class ProactiveMessagingService:
             logger.error(f"Invalid time format: {time_str}")
             return 0, 0
 
-    def is_within_quiet_hours(self, check_time: datetime = None) -> bool:
+    def is_within_quiet_hours(self, check_time: datetime | None = None) -> bool:
         """
         Check if the given time is within quiet hours.
 
@@ -392,7 +393,7 @@ class ProactiveMessagingService:
         logger.debug(f"Jitter calculation: {base_interval} + {jitter_amount} = {final_interval}")
         return final_interval
 
-    async def should_switch_to_long_term_mode(self, user_id: int, bot_id: Optional[Any] = None) -> bool:
+    async def should_switch_to_long_term_mode(self, user_id: int, bot_id: Any | None = None) -> bool:
         """
         Check if user should be switched to long-term mode.
 
@@ -406,7 +407,7 @@ class ProactiveMessagingService:
         consecutive_outreaches = user_state.get('consecutive_outreaches', 0)
         return consecutive_outreaches >= self.max_consecutive_outreaches
 
-    async def reset_cadence(self, user_id: int, bot_id: Optional[uuid.UUID] = None):
+    async def reset_cadence(self, user_id: int, bot_id: uuid.UUID | None = None):
         """
         Reset cadence to shortest interval for a user.
 
@@ -429,7 +430,7 @@ class ProactiveMessagingService:
 
         logger.info(f"Reset cadence for user {user_id} to {CADENCE_LEVELS[0]}")
 
-    async def update_user_reply_status(self, user_id: int, replied: bool = True, bot_id: Optional[uuid.UUID] = None):
+    async def update_user_reply_status(self, user_id: int, replied: bool = True, bot_id: uuid.UUID | None = None):
         """
         Update user reply status and reset cadence if they replied.
 
@@ -452,7 +453,7 @@ class ProactiveMessagingService:
             await self.reset_cadence(user_id, bot_id=bot_id)
             logger.info(f"User {user_id} replied. Cadence state has been reset.")
 
-    async def handle_user_message(self, user_id: int, bot_id: Optional[uuid.UUID] = None):
+    async def handle_user_message(self, user_id: int, bot_id: uuid.UUID | None = None):
         """
         Handle incoming user message - reset cadence state.
         The `manage_proactive_messages` task will handle rescheduling.
@@ -468,7 +469,7 @@ class ProactiveMessagingService:
 proactive_messaging_service = ProactiveMessagingService()
 
 @celery_app.task(bind=True)
-def send_proactive_message(self, user_id: int, bot_id: Optional[str] = None):
+def send_proactive_message(self, user_id: int, bot_id: str | None = None):
     """
     Celery task to send a proactive message to a user.
     This task is now lightweight and uses the shared AppContext.
@@ -499,7 +500,7 @@ def send_proactive_message(self, user_id: int, bot_id: Optional[str] = None):
     logger.info(f"Completed Celery task send_proactive_message [{task_id}] for user {user_id} bot {bot_id}")
 
 
-async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str] = None):
+async def send_proactive_message_async(task, user_id: int, bot_id: str | None = None):
     """
     Async implementation of the proactive message sending logic.
     """
@@ -552,6 +553,10 @@ async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str]
             logger.error(f"Failed to retrieve bot token for user {user_id}: {e}")
             # Fallback to default token
 
+    if not bot_token:
+        logger.error("No Telegram token available to send proactive message to user %s", user_id)
+        return
+
     success = False
     try:
         task_ai_handler, _ = await app_context.get_ai_runtime_for_bot(resolved_bot_id)
@@ -594,7 +599,6 @@ async def send_proactive_message_async(task, user_id: int, bot_id: Optional[str]
                     chat_id=user_id,
                     text=cleaned_response,
                     message_type="proactive",
-                    bot_token=bot_token,
                     bot_id=str(resolved_bot_id) if resolved_bot_id else None
                 )
                 success = True

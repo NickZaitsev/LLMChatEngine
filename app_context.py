@@ -32,13 +32,13 @@ class AppContext:
         self.conversation_manager = None
         self.memory_manager = None
         self.book_knowledge_manager = None
-        self.prompt_assembler: Optional[PromptAssembler] = None
-        self.ai_handler: Optional[AIHandler] = None
+        self.prompt_assembler: PromptAssembler | None = None
+        self.ai_handler: AIHandler | None = None
         self.message_queue_manager = None
         self.typing_manager = None
         self._initialized = True
 
-    async def initialize(self) -> "AppContext":
+    async def initialize(self) -> AppContext:
         """Initialize shared services through the composition root."""
         await self.container.initialize()
         self.conversation_manager = self.container.conversation_manager
@@ -53,8 +53,8 @@ class AppContext:
 
     async def get_ai_runtime_for_bot(
         self,
-        bot_id: Optional[uuid.UUID] = None,
-    ) -> Tuple[AIHandler, Optional[PromptAssembler]]:
+        bot_id: uuid.UUID | None = None,
+    ) -> tuple[AIHandler, PromptAssembler | None]:
         """Build a bot-scoped AI runtime for background tasks."""
         await self.initialize()
 

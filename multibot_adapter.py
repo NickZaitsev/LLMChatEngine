@@ -4,6 +4,7 @@ Multi-bot adapter for wrapping TelegramChatBot with custom configurations.
 This module provides a way to instantiate bots with custom configurations.
 """
 
+import logging
 from typing import Optional
 
 from telegram.ext import Application
@@ -11,14 +12,12 @@ from telegram.ext import Application
 from core.bot_config import BotConfig
 from service_container import ServiceContainer
 
-import logging
-
 logger = logging.getLogger(__name__)
 
 
 def create_bot_with_config(
-    bot_config: Optional[BotConfig] = None,
-    service_container: Optional[ServiceContainer] = None,
+    bot_config: BotConfig | None = None,
+    service_container: ServiceContainer | None = None,
 ):
     """
     Create a TelegramChatBot instance with custom configuration.

@@ -2,11 +2,12 @@
 Integration tests for the proactive messaging system with the main bot.
 """
 
-import pytest
-import uuid
-from unittest.mock import patch, MagicMock, AsyncMock
-import sys
 import os
+import sys
+import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 # Add the parent directory to the path to import bot and proactive_messaging
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))

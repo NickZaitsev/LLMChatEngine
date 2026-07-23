@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Iterable
+from typing import Any
+from collections.abc import Iterable
 
 from llama_index.core.schema import TextNode
 
-from config import BOOK_EMBED_BATCH_SIZE, BOOK_RAG_EXPAND_NEIGHBORS
 from core.abstractions import EmbeddingModel, KnowledgeStore
 from knowledge.chunker import chunk_text
+from settings import settings
+
+BOOK_EMBED_BATCH_SIZE = settings.books.embed_batch_size
+BOOK_RAG_EXPAND_NEIGHBORS = settings.books.rag_expand_neighbors
 
 logger = logging.getLogger(__name__)
 

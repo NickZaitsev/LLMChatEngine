@@ -8,11 +8,12 @@ This module tests the storage factory operations including:
 - Error handling for invalid configurations
 """
 
-import pytest
 import os
 from unittest.mock import patch
 
-from storage import create_storage, Storage
+import pytest
+
+from storage import Storage, create_storage
 from storage.models import PGVECTOR_AVAILABLE
 
 

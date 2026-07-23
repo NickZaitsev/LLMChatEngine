@@ -1,66 +1,66 @@
 # LLMChatEngine
 
-LLMChatEngine is a modular Telegram chat engine for building contextual LLM assistants with persistent storage, semantic memory, multi-bot management, and background task processing.
+LLMChatEngine — это модульный движок Telegram-чатов для создания контекстных LLM-ассистентов с постоянным хранилищем, семантической памятью, управлением несколькими ботами и фоновой обработкой задач.
 
-The project is structured as a production-style Python service rather than a single bot script: it uses async SQLAlchemy, PostgreSQL with pgvector, Redis-backed queues, Celery workers, Alembic migrations, Docker Compose, and deterministic CI tests.
+Проект построен как production-сервис на Python, а не как одиночный скрипт-бот: он использует асинхронный SQLAlchemy, PostgreSQL с pgvector, очереди на базе Redis, воркеры Celery, миграции Alembic, Docker Compose и детерминированные тесты в CI.
 
-## What This Demonstrates
+## Что демонстрирует проект
 
-- Multi-provider LLM integration for Azure OpenAI, LM Studio, and Gemini.
-- LlamaIndex-based semantic memory backed by PostgreSQL and pgvector.
-- Bot-scoped book knowledge bases for author/persona RAG.
-- Multi-bot Telegram runtime managed by a central admin bot.
-- Ordered message delivery through Redis queues and a message dispatcher.
-- Message buffering to combine rapid user input into coherent turns.
-- Proactive scheduled messaging with Celery Beat and worker queues.
-- Conversation summarization for long-running chats and context control.
-- Dockerized deployment with PostgreSQL, Redis, Celery workers, and backup service.
-- Async repository layer with focused tests for storage, memory, prompts, and message flow.
+- Интеграцию с несколькими LLM-провайдерами: Azure OpenAI, LM Studio и Gemini.
+- Семантическую память на базе LlamaIndex поверх PostgreSQL и pgvector.
+- Книжные базы знаний в рамках отдельного бота для RAG под автора/персону.
+- Многоботовый рантайм Telegram, управляемый центральным админ-ботом.
+- Упорядоченную доставку сообщений через очереди Redis и диспетчер сообщений.
+- Буферизацию сообщений для объединения быстрого ввода пользователя в связные реплики.
+- Проактивные сообщения по расписанию через Celery Beat и очереди воркеров.
+- Суммаризацию диалогов для длинных чатов и контроля контекста.
+- Развёртывание в Docker с PostgreSQL, Redis, воркерами Celery и сервисом резервного копирования.
+- Асинхронный слой репозиториев с точечными тестами для хранилища, памяти, промптов и потока сообщений.
 
-## Architecture
+## Архитектура
 
 ```text
-User Message
+Сообщение пользователя
   -> TelegramChatBot
   -> BufferManager
   -> StorageConversationManager
   -> AIHandler
   -> PromptAssembler
   -> MemoryManager / PostgreSQL + pgvector
-  -> LLM Provider
+  -> LLM-провайдер
   -> MessageQueueManager / Redis
   -> MessageDispatcher
   -> Telegram API
 ```
 
-The repository also includes an architecture diagram at [docs/architecture.png](docs/architecture.png) and a Mermaid source file at [docs/architecture.md](docs/architecture.md).
+В репозитории также есть диаграмма архитектуры [docs/architecture.png](docs/architecture.png) и исходный Mermaid-файл [docs/architecture.md](docs/architecture.md).
 
-User identity rules are documented in [docs/user-identity.md](docs/user-identity.md). Runtime code uses raw Telegram integer IDs at boundaries; internal UUIDs stay inside storage repositories and relational rows.
+Правила идентификации пользователя описаны в [docs/user-identity.md](docs/user-identity.md). Рантайм-код использует «сырые» целочисленные Telegram ID на границах; внутренние UUID остаются внутри репозиториев хранилища и реляционных строк.
 
-## Core Components
+## Основные компоненты
 
-- `bot.py`: Telegram-facing runtime and command handlers.
-- `ai_handler.py`: LLM provider orchestration, retries, and response generation.
-- `memory/manager.py`: LlamaIndex memory manager and semantic retrieval.
-- `knowledge/`: Book parsing, chunking, vector storage, ingestion tasks, and retrieval.
-- `prompt/assembler.py`: Prompt assembly with history, summaries, and memory budgeting.
-- `storage/`: SQLAlchemy models, repository interfaces, and persistence implementation.
-- `message_manager.py`: Redis queueing, ordered dispatch, typing indicators, and delivery retries.
-- `buffer_manager.py`: User message buffering and adaptive dispatch timing.
-- `proactive_messaging.py`: Celery-backed proactive messaging workflow.
-- `admin_bot.py` and `bot_manager.py`: Multi-bot administration and runtime management.
+- `bot.py`: рантайм и обработчики команд со стороны Telegram.
+- `ai_handler.py`: оркестрация LLM-провайдеров, ретраи и генерация ответов.
+- `memory/manager.py`: менеджер памяти на LlamaIndex и семантический поиск.
+- `knowledge/`: разбор книг, чанкинг, векторное хранилище, задачи ингеста и поиск.
+- `prompt/assembler.py`: сборка промпта с историей, суммаризациями и бюджетированием памяти.
+- `storage/`: модели SQLAlchemy, интерфейсы репозиториев и реализация персистентности.
+- `messaging/`: постановка в очередь Redis, упорядоченная диспетчеризация, индикаторы набора текста и ретраи доставки.
+- `buffer_manager.py`: буферизация сообщений пользователя и адаптивный тайминг отправки.
+- `proactive_messaging.py`: проактивная рассылка на базе Celery.
+- `admin_bot.py` и `bot_manager.py`: администрирование нескольких ботов и управление рантаймом.
 
-## Quick Start
+## Быстрый старт
 
-### Prerequisites
+### Требования
 
 - Python 3.11+
 - Docker Engine 20.10+
 - Docker Compose v2+
-- Telegram bot token
-- LLM provider credentials or a reachable LM Studio server
+- Токен Telegram-бота
+- Учётные данные LLM-провайдера или доступный сервер LM Studio
 
-### Configure
+### Настройка
 
 ```bash
 git clone https://github.com/NickZaitsev/LLMChatEngine.git
@@ -68,10 +68,9 @@ cd LLMChatEngine
 cp env_example.txt .env
 ```
 
-Edit `.env` with your database, Telegram, and provider settings:
+Отредактируйте `.env`, указав настройки базы данных, Telegram и провайдера:
 
 ```env
-DATABASE_URL=postgresql+asyncpg://ai_bot:your_secure_password@postgres:5432/ai_bot
 DB_PASSWORD=your_secure_password_here
 USE_PGVECTOR=true
 
@@ -84,36 +83,39 @@ LMSTUDIO_MODEL=your_model
 LMSTUDIO_BASE_URL=http://host-machine:1234/v1
 ```
 
-For Azure or Gemini, set `PROVIDER=azure` or `PROVIDER=gemini` and fill the matching keys from `env_example.txt`.
+Внутри Docker Compose строка подключения `DATABASE_URL` собирается автоматически из `DB_PASSWORD` и указывает на сервис `postgres`; отдельно её задавать не нужно. Для Azure или Gemini установите `PROVIDER=azure` или `PROVIDER=gemini` и заполните соответствующие ключи из `env_example.txt`.
 
-### Run
+### Запуск
 
 ```bash
-docker-compose up --build -d
-docker-compose logs -f llm-chat-engine
+docker compose up --build -d
+docker compose logs -f llm-chat-engine
 ```
 
-This starts:
+Стек запускает:
 
-- Main Telegram chat engine.
-- PostgreSQL with pgvector.
+- Основной движок Telegram-чата.
+- PostgreSQL с pgvector.
 - Redis.
-- Celery worker for proactive messaging.
-- Celery Beat scheduler.
-- Celery worker for memory tasks.
-- PostgreSQL backup service.
+- Одноразовый сервис миграций (`migrate`), выполняющий `alembic upgrade head` до старта остальных сервисов.
+- Воркер Celery для проактивных сообщений.
+- Планировщик Celery Beat.
+- Воркер Celery для задач памяти.
+- Сервис резервного копирования PostgreSQL.
 
-Stop the stack with:
+Остановить стек:
 
 ```bash
-docker-compose down
+docker compose down
 ```
 
-## Multi-Bot Setup
+> Тома и сеть Compose закреплены под именами с префиксом `llmchatengine_` (например, `llmchatengine_postgres_data`). Они совпадают с именами, которые Compose уже создавал по умолчанию, поэтому миграция данных при обновлении не требуется.
 
-1. Create an admin bot with [@BotFather](https://t.me/BotFather).
-2. Get your Telegram user ID from [@userinfobot](https://t.me/userinfobot).
-3. Generate a Fernet key:
+## Настройка нескольких ботов
+
+1. Создайте админ-бота через [@BotFather](https://t.me/BotFather).
+2. Узнайте свой Telegram user ID у [@userinfobot](https://t.me/userinfobot).
+3. Сгенерируйте ключ Fernet:
 
 ```python
 from cryptography.fernet import Fernet
@@ -121,7 +123,7 @@ from cryptography.fernet import Fernet
 print(Fernet.generate_key().decode())
 ```
 
-Add the values to `.env`:
+Добавьте значения в `.env`:
 
 ```env
 ADMIN_BOT_TOKEN=your_admin_bot_token_here
@@ -129,84 +131,104 @@ ADMIN_USER_IDS=123456789,987654321
 TOKEN_ENCRYPTION_KEY=your_generated_key_here
 ```
 
-Admin bot commands:
+Команды админ-бота:
 
-- `/addbot`: Add a managed Telegram bot with its own token, name, and personality prompt.
-- `/listbots`: Show managed bots and runtime status.
-- `/setprompt <bot_id>`: Update a bot personality prompt.
-- `/togglefeature <bot_id> <feature>`: Toggle features such as `VOICE_MESSAGES` or `MEMORY`.
-- `/addbook <bot_id>`: Upload a `.txt`, `.pdf`, `.epub`, or `.fb2` book for that bot.
-- `/listbooks <bot_id>`: Show ingestion status and chunk counts for a bot's books.
-- `/removebook <book_id>`: Remove a book and its vector chunks.
-- `/removebot <bot_id>`: Stop and remove a managed bot.
+- `/addbot`: добавить управляемого Telegram-бота с собственным токеном, именем и промптом персоны.
+- `/listbots`: показать управляемых ботов и их статус в рантайме.
+- `/setprompt <bot_id>`: обновить промпт персоны бота.
+- `/togglefeature <bot_id> <feature>`: включить/выключить функции, например `VOICE_MESSAGES` или `MEMORY`.
+- `/addbook <bot_id>`: загрузить книгу `.txt`, `.pdf`, `.epub` или `.fb2` для этого бота.
+- `/listbooks <bot_id>`: показать статус ингеста и число чанков книг бота.
+- `/removebook <book_id>`: удалить книгу и её векторные чанки.
+- `/removebot <bot_id>`: остановить и удалить управляемого бота.
 
-## Author Persona Books
+## Книги персон-авторов
 
-To ground a persona bot in an author's books:
+Чтобы «заземлить» бота-персону на книгах автора:
 
-1. Create the persona bot with `/addbot` and a strong author-style system prompt.
-2. Enable book retrieval with `/togglefeature <bot_id> book_knowledge`.
-3. Upload each book with `/addbook <bot_id>`.
-4. Check readiness with `/listbooks <bot_id>`.
+1. Создайте бота-персону через `/addbot` с сильным системным промптом в стиле автора.
+2. Включите книжный поиск: `/togglefeature <bot_id> book_knowledge`.
+3. Загрузите каждую книгу через `/addbook <bot_id>`.
+4. Проверьте готовность через `/listbooks <bot_id>`.
 
-Book files are stored under `BOOKS_STORAGE_DIR` until ingestion finishes. In Docker, that path is backed by the shared `book_files` volume so the admin bot and Celery memory worker can both access uploads.
+Файлы книг хранятся в `BOOKS_STORAGE_DIR` до завершения ингеста. В Docker этот путь смонтирован на общий том `book_files`, чтобы и админ-бот, и воркер памяти Celery имели доступ к загрузкам.
 
-## Development
+Полное руководство (пример промпта персоны, поддерживаемые форматы, статусы ингеста, диагностика, замечания об авторском праве и размерности эмбеддингов) — в [docs/persona-bots.md](docs/persona-bots.md).
 
-Create the pinned local environment:
+## Резервное копирование и восстановление
+
+Сервис `postgres-backup` ежедневно в 02:00 создаёт сжатый дамп в общий том `backups`, проверяет его целостность через `gzip -t` и обновляет файл-маркер `last_success`. Health-check контейнера считается здоровым, только если существует проверенный бэкап не старше 26 часов. Хранятся последние 14 дней дампов.
+
+Восстановление базы из дампа (замените имя файла на нужный):
+
+```bash
+gunzip -c backups/ai_bot_backup_YYYYMMDD_HHMMSS.sql.gz \
+  | docker compose exec -T postgres psql -U ai_bot -d ai_bot
+```
+
+> Важно: расширение pgvector устанавливается init-скриптом `init-pgvector.sql` только при первом запуске на пустом каталоге данных. При восстановлении в уже существующую базу убедитесь, что расширение создано (`CREATE EXTENSION IF NOT EXISTS vector;`) до заливки дампа, либо восстанавливайте в чистый том.
+
+## Разработка
+
+Создайте закреплённое локальное окружение:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements-lock.txt
+.\.venv\Scripts\python -m pip install -r requirements-lock.txt -r requirements-dev.txt
 ```
 
-Run the deterministic default test suite:
+`requirements.txt` содержит только рантайм-зависимости (в production-образ не попадают инструменты тестирования). Средства разработки (`pytest`, `ruff`, `mypy`, `black`, `pre-commit`) устанавливаются из `requirements-dev.txt`.
+
+Запуск детерминированного набора тестов по умолчанию:
 
 ```powershell
 .\.venv\Scripts\python -m pytest -q
 ```
 
-Run all collected tests, including external/manual/performance categories:
+Запуск всех собираемых тестов, включая категории external/manual/performance:
 
 ```powershell
 .\.venv\Scripts\python -m pytest -q -o addopts=
 ```
 
-Run only the non-default categories:
+Запуск только недефолтных категорий:
 
 ```powershell
 .\.venv\Scripts\python -m pytest -q -o addopts= -m "external or performance or manual"
 ```
 
-Run coverage for the deterministic suite:
+Покрытие для детерминированного набора:
 
 ```powershell
 .\.venv\Scripts\python -m pytest --cov=. --cov-report=term-missing
 ```
 
-Run code quality checks:
+Проверки качества кода:
 
 ```powershell
 .\.venv\Scripts\python -m ruff check .
+.\.venv\Scripts\python -m mypy messaging --ignore-missing-imports
 .\.venv\Scripts\pre-commit run --all-files
 ```
 
-## Test Strategy
+## Стратегия тестирования
 
-The default `pytest` command excludes tests marked as:
+Команда `pytest` по умолчанию исключает тесты с маркерами:
 
-- `external`: requires services such as LM Studio, Redis, PostgreSQL, or Telegram.
-- `performance`: benchmark or load-style checks.
-- `manual`: script-style verification checks.
+- `external`: требуют сервисов вроде LM Studio, Redis, PostgreSQL или Telegram.
+- `performance`: бенчмарки или нагрузочные проверки.
+- `manual`: проверки в стиле скриптов.
 
-This keeps CI deterministic while preserving deeper local verification commands for development and deployment validation.
+Это сохраняет детерминированность CI, оставляя более глубокие локальные команды для разработки и проверки развёртывания.
 
-## Security Notes
+## Замечания по безопасности
 
-- `.env` and local runtime state are ignored by Git.
-- Managed bot tokens are encrypted before storage with `TOKEN_ENCRYPTION_KEY`.
-- Do not commit local database files, Celery state, Redis state, embeddings dumps, or provider credentials.
+- `.env` и локальное состояние рантайма игнорируются Git.
+- Токены управляемых ботов шифруются перед сохранением ключом `TOKEN_ENCRYPTION_KEY`.
+- `TOKEN_ENCRYPTION_KEY` должен быть сгенерированным ключом Fernet, а не человекочитаемой парольной фразой.
+- Каждый контейнер получает только необходимые ему переменные окружения; секреты не выгружаются в контейнеры целым файлом `.env`.
+- Не коммитьте локальные файлы базы данных, состояние Celery, состояние Redis, дампы эмбеддингов и учётные данные провайдеров.
 
-## License
+## Лицензия
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE).
+Проект распространяется под лицензией MIT. См. [LICENSE](LICENSE).

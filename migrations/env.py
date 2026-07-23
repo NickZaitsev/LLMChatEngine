@@ -9,11 +9,10 @@ import asyncio
 import os
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
-
-from alembic import context
 
 # Import your models here
 from storage.models import Base
@@ -119,10 +118,13 @@ async def run_async_migrations() -> None:
     and associate a connection with the context.
     """
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = get_database_url()
+    db_url = get_database_url()
+    if not db_url:
+        raise RuntimeError("Database URL is not configured for migrations")
+    configuration["sqlalchemy.url"] = db_url
 
     connectable = create_async_engine(
-        configuration["sqlalchemy.url"],
+        db_url,
         poolclass=pool.NullPool,
         future=True,
     )

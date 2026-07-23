@@ -1,11 +1,13 @@
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
 
-from message_manager import MessageDispatcher
+from messaging import MessageDispatcher
+
 
 async def test_locking_mechanism():
     """Test the locking mechanism to ensure no parallel processing"""
@@ -14,7 +16,7 @@ async def test_locking_mechanism():
     
     try:
         mock_redis = Mock()
-        with patch('message_manager.redis_async.from_url', return_value=mock_redis):
+        with patch('messaging.queue.redis_async.from_url', return_value=mock_redis):
             
             # Mock Redis methods
             mock_redis.set.return_value = True
@@ -65,7 +67,7 @@ async def test_startup_processing():
     
     try:
         mock_redis = Mock()
-        with patch('message_manager.redis_async.from_url', return_value=mock_redis):
+        with patch('messaging.queue.redis_async.from_url', return_value=mock_redis):
             
             # Mock Redis methods
             # Mock scan to return some test keys

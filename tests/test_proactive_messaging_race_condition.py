@@ -1,10 +1,12 @@
 import asyncio
-import pytest
 import json
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from proactive_messaging import ProactiveMessagingService, manage_proactive_messages_async
+
 
 @pytest.fixture
 def mock_redis_client():

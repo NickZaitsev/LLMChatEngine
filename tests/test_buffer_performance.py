@@ -7,12 +7,13 @@ This module tests:
 - Memory usage with large numbers of buffered messages
 """
 
+import asyncio
+import gc
+import time
+from unittest.mock import AsyncMock, Mock
+
 import pytest
 import pytest_asyncio
-import asyncio
-import time
-import gc
-from unittest.mock import AsyncMock, Mock
 
 from buffer_manager import BufferManager, UserBuffer
 
@@ -149,7 +150,7 @@ class TestBufferPerformance:
         wait_tasks = [events[user_id].wait() for user_id in range(num_users)]
         try:
             await asyncio.wait_for(asyncio.gather(*wait_tasks), timeout=10.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pytest.fail("Not all dispatch functions were called within timeout")
         
         # Verify all dispatch functions were called exactly once

@@ -6,7 +6,7 @@ persona templates, and token budgeting for LLM requests.
 """
 
 from .assembler import PromptAssembler
-from .templates import format_memory_snippet, PERSONA_TEMPLATE
+from .templates import PERSONA_TEMPLATE, format_memory_snippet
 
 __all__ = [
     'PromptAssembler',

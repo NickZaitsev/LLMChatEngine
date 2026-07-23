@@ -1,11 +1,13 @@
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
 from unittest.mock import Mock, patch
 
-from message_manager import MessageQueueManager, MessageDispatcher
+from messaging import MessageDispatcher, MessageQueueManager
+
 
 async def test_basic_integration():
     """Test basic integration between MessageQueueManager and MessageDispatcher with mocked Redis"""
@@ -16,7 +18,7 @@ async def test_basic_integration():
     
     try:
         mock_redis = Mock()
-        with patch('message_manager.redis_async.from_url', return_value=mock_redis):
+        with patch('messaging.queue.redis_async.from_url', return_value=mock_redis):
             
             # Mock Redis methods
             mock_redis.rpush.return_value = 1
@@ -50,9 +52,10 @@ async def test_basic_integration():
             
             print("[PASS] Message enqueued successfully")
             
-            # Verify user was added to active users set
-            # We can't directly test this with our current mock setup, but we know rpush and sadd were called
-            mock_redis.sadd.assert_called_once_with("dispatcher:active_users", f"{user_id}:default")
+            queue_manager.enqueue_script.assert_called_once()
+            enqueue_call = queue_manager.enqueue_script.call_args.kwargs
+            assert enqueue_call["keys"] == [f"queue:{user_id}:default", "dispatcher:active_users"]
+            assert enqueue_call["args"][0] == f"{user_id}:default"
             
             print("[PASS] User added to active users set")
             

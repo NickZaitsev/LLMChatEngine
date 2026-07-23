@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 from xml.etree import ElementTree
 
 
@@ -76,7 +76,7 @@ def _extract_pdf(path: Path) -> str:
 def _extract_epub(path: Path) -> str:
     try:
         from bs4 import BeautifulSoup
-        from ebooklib import ITEM_DOCUMENT, epub
+        from ebooklib import ITEM_DOCUMENT, epub  # pyright: ignore[reportMissingImports]
     except ImportError as exc:
         raise BookParseError("EPUB parsing requires ebooklib and beautifulsoup4") from exc
 

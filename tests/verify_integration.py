@@ -181,8 +181,8 @@ async def verify_migration_system():
         # Check if alembic can be imported and configured
         import alembic
         from alembic.config import Config
-        from alembic.runtime.migration import MigrationContext
         from alembic.operations import Operations
+        from alembic.runtime.migration import MigrationContext
         
         # Test alembic configuration
         alembic_cfg = Config("alembic.ini")

@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 from telegram.ext import ConversationHandler
 
-from admin_bot import AdminBot, WAITING_BOOK_FILE, WAITING_BOOK_META
+from admin_bot import WAITING_BOOK_FILE, WAITING_BOOK_META, AdminBot
 
 
 class FakeTelegramFile:

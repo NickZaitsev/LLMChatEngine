@@ -5,10 +5,12 @@ Revises:
 Create Date: 2025-01-13 17:38:00.000000
 
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
+
 from config import MEMORY_EMBED_DIM
+
 # Try to import pgvector, but handle gracefully if not available
 try:
     from pgvector.sqlalchemy import Vector

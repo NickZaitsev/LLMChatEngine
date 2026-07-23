@@ -8,19 +8,23 @@ Includes:
 """
 
 import logging
-from celery import Celery
 
 import redis
-from app_context import get_app_context
-from config import MEMORY_CHUNK_MAX_MESSAGES, MEMORY_CHUNK_TARGET_TOKENS, SUMMARIZATION_PROMPT
+from celery import Celery
+
 import celeryconfig
+from app_context import get_app_context
 from core.celery_loop import run_coroutine
+from settings import SUMMARIZATION_PROMPT, settings
 
 # Initialize Celery
 celery_app = Celery('memory_tasks')
 celery_app.config_from_object(celeryconfig)
 
 logger = logging.getLogger(__name__)
+
+MEMORY_CHUNK_MAX_MESSAGES = settings.memory.chunk_max_messages
+MEMORY_CHUNK_TARGET_TOKENS = settings.memory.chunk_target_tokens
 
 _task_lock_client = None
 SUMMARY_LOCK_TTL = 300

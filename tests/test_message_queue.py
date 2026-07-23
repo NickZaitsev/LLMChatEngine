@@ -1,10 +1,12 @@
-import pytest
 import asyncio
 import json
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 import redis
 
-from message_manager import MessageQueueManager
+from messaging import MessageQueueManager
+
 
 class TestMessageQueueManager:
     """Test cases for MessageQueueManager class."""
@@ -35,7 +37,7 @@ class TestMessageQueueManager:
     
     def test_init_failure(self):
         """Test failed initialization of MessageQueueManager."""
-        with patch('message_manager.redis_async.from_url') as mock_from_url:
+        with patch('messaging.queue.redis_async.from_url') as mock_from_url:
             mock_from_url.side_effect = Exception("Connection failed")
             with pytest.raises(Exception):
                 MessageQueueManager(self.redis_url)
@@ -48,11 +50,7 @@ class TestMessageQueueManager:
             manager = MessageQueueManager(self.redis_url)
             
             # Mock Redis methods
-            with patch.object(manager.redis_client, 'rpush') as mock_rpush, \
-                 patch.object(manager.redis_client, 'sadd') as mock_sadd:
-                
-                mock_rpush.return_value = 1
-                mock_sadd.return_value = 1
+            with patch.object(manager, 'enqueue_script', new=AsyncMock(return_value=1)) as mock_enqueue:
                 
                 await manager.enqueue_message(
                     user_id=self.user_id,
@@ -62,12 +60,12 @@ class TestMessageQueueManager:
                 )
                 
                 # Verify rpush was called with correct arguments
-                mock_rpush.assert_called_once()
-                args = mock_rpush.call_args[0]
-                assert args[0] == f"queue:{self.user_id}:default"
+                mock_enqueue.assert_awaited_once()
+                args = mock_enqueue.await_args.kwargs
+                assert args["keys"][0] == f"queue:{self.user_id}:default"
                 
                 # Verify the message content
-                message_json = args[1]
+                message_json = args["args"][1]
                 message_data = json.loads(message_json)
                 assert message_data["user_id"] == self.user_id
                 assert message_data["chat_id"] == self.chat_id
@@ -77,7 +75,8 @@ class TestMessageQueueManager:
                 assert message_data["retry_count"] == 0
                 
                 # Verify sadd was called to add user to active users set
-                mock_sadd.assert_called_once_with("dispatcher:active_users", f"{self.user_id}:default")
+                assert args["keys"][1] == "dispatcher:active_users"
+                assert args["args"][0] == f"{self.user_id}:default"
     
     @pytest.mark.asyncio
     async def test_enqueue_message_validation_errors(self):
@@ -95,8 +94,7 @@ class TestMessageQueueManager:
                 )
             
             # Negative chat IDs are valid Telegram group/supergroup IDs.
-            with patch.object(manager.redis_client, 'rpush', return_value=1), \
-                 patch.object(manager.redis_client, 'sadd', return_value=1):
+            with patch.object(manager, 'enqueue_script', new=AsyncMock(return_value=1)):
                 await manager.enqueue_message(
                     user_id=self.user_id,
                     chat_id=-1,

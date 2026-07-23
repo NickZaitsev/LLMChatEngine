@@ -6,8 +6,8 @@ from typing import List
 
 from llama_index.embeddings.gemini import GeminiEmbedding
 
-import config
 from core.abstractions import EmbeddingModel as EmbeddingModelAbstraction
+from settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +27,11 @@ class GeminiEmbeddingModel(EmbeddingModelAbstraction):
         """
         logger.info(f"Loading Gemini embedding model {model_name}...")
         self._model = GeminiEmbedding(
-            api_key=config.GEMINI_API_KEY,
+            api_key=settings.llm.gemini_api_key,
             model_name=model_name,
         )
 
-    async def get_embedding(self, text: str) -> List[float]:
+    async def get_embedding(self, text: str) -> list[float]:
         """
         Get the embedding for a single piece of text.
         """
@@ -41,7 +41,7 @@ class GeminiEmbeddingModel(EmbeddingModelAbstraction):
             logger.error(f"Failed to get Gemini embedding: {e}", exc_info=True)
             return []
 
-    async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    async def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """
         Get the embeddings for a list of texts.
         """

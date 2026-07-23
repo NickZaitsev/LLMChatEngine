@@ -11,16 +11,26 @@ This bot allows administrators to:
 import asyncio
 import hashlib
 import logging
-from pathlib import Path
 import uuid
-from typing import Optional, Dict, Any
+from pathlib import Path
+from typing import Any, Dict, Optional
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters,
+)
 
-from token_encryption import encrypt_token, decrypt_token
-from features import BotFeature, DEFAULT_FEATURE_FLAGS, has_feature
-from config import BOOKS_STORAGE_DIR
+from features import DEFAULT_FEATURE_FLAGS, BotFeature, has_feature
+from settings import settings
+from token_encryption import decrypt_token, encrypt_token
+
+BOOKS_STORAGE_DIR = settings.books.storage_dir
 from service_container import ServiceContainer
 from settings import build_settings
 
@@ -56,7 +66,7 @@ class AdminBot:
         admin_token: str,
         admin_user_ids: list,
         db_url: str,
-        service_container: Optional[ServiceContainer] = None,
+        service_container: ServiceContainer | None = None,
     ):
         """
         Initialize the admin bot.
@@ -72,9 +82,9 @@ class AdminBot:
         self.service_container = service_container or ServiceContainer(
             build_settings().model_copy(update={"DATABASE_URL": db_url})
         )
-        self.application: Optional[Application] = None
+        self.application: Application | None = None
         self.storage = None
-        self._pending_bot_data: Dict[int, Dict[str, Any]] = {}  # user_id -> pending data
+        self._pending_bot_data: dict[tuple[int, int], dict[str, Any]] = {}  # (user_id, chat_id) -> pending data
 
         # Reference to bot manager for hot-reload
         self.bot_manager = None
@@ -173,7 +183,9 @@ Use these commands to manage your bot fleet."""
         # Store encrypted token
         self._pending_bot_data[self._session_key(update)]['token'] = token
 
-        # Delete the message containing the token for security
+        # Delete the message containing the token for security.
+        # Best-effort boundary: deletion can fail (already deleted, missing
+        # permission) and must never block the /addbot flow.
         try:
             await update.message.delete()
         except Exception:
@@ -565,7 +577,7 @@ Use these commands to manage your bot fleet."""
         await self._init_storage()
 
         args = context.args
-        if len(args) < 2:
+        if not args or len(args) < 2:
             features_list = "\n".join([f"  • {f.value}" for f in BotFeature])
             await update.message.reply_text(
                 f"Usage: /togglefeature <bot_id> <feature>\n\n"
@@ -919,7 +931,7 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _parse_book_meta(text: str, default_title: str) -> tuple[str, Optional[str]]:
+def _parse_book_meta(text: str | None, default_title: str) -> tuple[str, str | None]:
     value = (text or "").strip()
     if not value:
         return default_title, None

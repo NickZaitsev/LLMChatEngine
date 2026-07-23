@@ -8,15 +8,21 @@ while using the new PostgreSQL storage system for persistence and scalability.
 import logging
 import time
 import uuid
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 from uuid import UUID
 
-from config import MAX_CONVERSATION_HISTORY, PROMPT_REPLY_TOKEN_BUDGET, MAX_CONTEXT_TOKENS, RESERVED_TOKENS, AVAILABLE_HISTORY_TOKENS
 from core.utils import mask_db_url
-from storage import create_storage, Storage
-from storage.interfaces import Message, Conversation, User, MessageLog
+from settings import settings
+from storage import Storage, create_storage
+from storage.interfaces import Conversation, Message, MessageLog
 
 logger = logging.getLogger(__name__)
+
+MAX_CONVERSATION_HISTORY = settings.bot.max_conversation_history
+PROMPT_REPLY_TOKEN_BUDGET = settings.prompts.reply_token_budget
+MAX_CONTEXT_TOKENS = settings.bot.max_context_tokens
+RESERVED_TOKENS = settings.bot.reserved_tokens
+AVAILABLE_HISTORY_TOKENS = settings.bot.available_history_tokens
 
 
 class PostgresConversationManager:
@@ -30,7 +36,7 @@ class PostgresConversationManager:
     - Optional semantic memory search
     """
 
-    def __init__(self, db_url: str, use_pgvector: bool = True, storage: Optional[Storage] = None):
+    def __init__(self, db_url: str, use_pgvector: bool = True, storage: Storage | None = None):
         """
         Initialize the PostgreSQL conversation manager.
 
@@ -40,10 +46,9 @@ class PostgresConversationManager:
         """
         self.db_url = db_url
         self.use_pgvector = use_pgvector
-        self.storage: Optional[Storage] = storage
+        self.storage: Storage | None = storage
         self._owns_storage = storage is None
-        self._user_cache: Dict[int, User] = {}  # Cache for user objects
-        self._conversation_id_cache: Dict[tuple[int, Optional[uuid.UUID]], uuid.UUID] = {}
+        self._conversation_id_cache: dict[tuple[int, uuid.UUID | None], uuid.UUID] = {}
 
         logger.info("PostgresConversationManager initialized. DB: %s, pgvector: %s",
                    mask_db_url(db_url), use_pgvector)
@@ -62,7 +67,7 @@ class PostgresConversationManager:
             self.storage = None
             logger.info("Storage connection closed")
 
-    async def _ensure_user_and_conversation(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> Conversation:
+    async def _ensure_user_and_conversation(self, user_id: int, bot_id: uuid.UUID | None = None) -> Conversation:
         """
         Ensure user and conversation exist, creating them if needed.
 
@@ -94,9 +99,6 @@ class PostgresConversationManager:
             )
             logger.info("Created new user: %s (telegram_id: %d)", user.id, user_id)
 
-        # Cache user
-        self._user_cache[user_id] = user
-
         # Check for existing conversation
         conversations = await self.storage.conversations.list_conversations(str(user.id), bot_id=str(bot_id) if bot_id else None)
         if conversations:
@@ -116,7 +118,7 @@ class PostgresConversationManager:
         self._conversation_id_cache[cache_key] = conversation.id
         return conversation
 
-    async def save_message_to_history(self, user_id: int, role: str, content: str, bot_id: Optional[uuid.UUID] = None) -> MessageLog:
+    async def save_message_to_history(self, user_id: int, role: str, content: str, bot_id: uuid.UUID | None = None) -> MessageLog:
         """
         Save a message to both message history tables.
 
@@ -133,7 +135,7 @@ class PostgresConversationManager:
 
         return await self.storage.message_history.save_message(user_id, role, content, bot_id=bot_id)
 
-    async def add_message_async(self, user_id: int, role: str, content: str, bot_id: Optional[uuid.UUID] = None) -> Message:
+    async def add_message_async(self, user_id: int, role: str, content: str, bot_id: uuid.UUID | None = None) -> Message:
         """
         Add a message to the user's conversation history.
 
@@ -164,7 +166,7 @@ class PostgresConversationManager:
                    user_id, role, len(content))
         return message
 
-    async def get_conversation_async(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> List[Dict]:
+    async def get_conversation_async(self, user_id: int, bot_id: uuid.UUID | None = None) -> list[dict]:
         """
         Get the conversation history for a user.
 
@@ -194,7 +196,7 @@ class PostgresConversationManager:
             logger.error("Error getting conversation for user %d: %s", user_id, e)
             return []
 
-    async def clear_conversation_async(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> None:
+    async def clear_conversation_async(self, user_id: int, bot_id: uuid.UUID | None = None) -> None:
         """
         Clear conversation history for a user by deleting all messages.
 
@@ -216,15 +218,15 @@ class PostgresConversationManager:
 
             # Remove from cache to clear any cached data
             cache_key = (user_id, bot_id)
-            if cache_key in self._conversation_cache:
-                del self._conversation_cache[cache_key]
+            if cache_key in self._conversation_id_cache:
+                del self._conversation_id_cache[cache_key]
 
             logger.info("Cleared conversation for user %d", user_id)
 
         except Exception as e:
             logger.error("Error clearing conversation for user %d: %s", user_id, e)
 
-    async def get_formatted_conversation_async(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> List[Dict]:
+    async def get_formatted_conversation_async(self, user_id: int, bot_id: uuid.UUID | None = None) -> list[dict]:
         """
         Get conversation formatted for AI API with token management.
 
@@ -256,7 +258,7 @@ class PostgresConversationManager:
             logger.error("Error formatting conversation for user %d: %s", user_id, e)
             return []
 
-    async def get_user_stats_async(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> Dict:
+    async def get_user_stats_async(self, user_id: int, bot_id: uuid.UUID | None = None) -> dict:
         """
         Get statistics about user's conversation.
 
@@ -323,7 +325,7 @@ class PostgresConversationManager:
             logger.error("Error getting conversation summary for user %d: %s", user_id, e)
             return "Error retrieving conversation summary."
 
-    async def debug_conversation_state_async(self, user_id: int, bot_id: Optional[uuid.UUID] = None) -> Dict:
+    async def debug_conversation_state_async(self, user_id: int, bot_id: uuid.UUID | None = None) -> dict:
         """
         Debug method to show current conversation state.
         """

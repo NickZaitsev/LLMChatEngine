@@ -11,18 +11,19 @@ This module tests the core buffering functionality including:
 - Configuration parameter usage
 """
 
-import pytest
-import pytest_asyncio
 import asyncio
 import time
 from unittest.mock import AsyncMock, Mock, patch
 
-from buffer_manager import BufferManager, UserBuffer, MessageBufferEntry
+import pytest
+import pytest_asyncio
+
+from buffer_manager import BufferManager, MessageBufferEntry, UserBuffer
 from config import (
-    BUFFER_SHORT_MESSAGE_TIMEOUT,
     BUFFER_LONG_MESSAGE_TIMEOUT,
     BUFFER_MAX_MESSAGES,
-    BUFFER_WORD_COUNT_THRESHOLD
+    BUFFER_SHORT_MESSAGE_TIMEOUT,
+    BUFFER_WORD_COUNT_THRESHOLD,
 )
 
 

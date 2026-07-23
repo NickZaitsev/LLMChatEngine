@@ -5,20 +5,27 @@ This module provides fixtures for testing the storage system using
 an in-memory SQLite database for speed and isolation.
 """
 
+import uuid
+from collections.abc import AsyncGenerator
+
 import pytest
 import pytest_asyncio
-import uuid
-from typing import AsyncGenerator
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from app_context import AppContext
+from storage import Storage, create_storage
 from storage.models import Base
 from storage.repos import (
-    PostgresMessageRepo, PostgresMessageHistoryRepo, PostgresConversationRepo,
-    PostgresUserRepo, PostgresPersonaRepo, PostgresBotRepo, PostgresBookRepo, PostgresUserBotSettingsRepo
+    PostgresBookRepo,
+    PostgresBotRepo,
+    PostgresConversationRepo,
+    PostgresMessageHistoryRepo,
+    PostgresMessageRepo,
+    PostgresPersonaRepo,
+    PostgresUserBotSettingsRepo,
+    PostgresUserRepo,
 )
-from storage import create_storage, Storage
 from storage_conversation_manager import PostgresConversationManager
-from app_context import AppContext
 
 
 @pytest_asyncio.fixture
@@ -70,8 +77,13 @@ async def storage(engine) -> AsyncGenerator[Storage, None]:
     
     # Create storage using the shared engine components
     from storage.repos import (
-        PostgresMessageRepo, PostgresConversationRepo,
-        PostgresUserRepo, PostgresPersonaRepo, PostgresBotRepo, PostgresBookRepo, PostgresUserBotSettingsRepo
+        PostgresBookRepo,
+        PostgresBotRepo,
+        PostgresConversationRepo,
+        PostgresMessageRepo,
+        PostgresPersonaRepo,
+        PostgresUserBotSettingsRepo,
+        PostgresUserRepo,
     )
     
     storage = Storage(
@@ -147,7 +159,6 @@ async def sample_conversation(conversation_repo: PostgresConversationRepo, sampl
 
 import config
 
-
 PERFORMANCE_TEST_FILES = {
     "test_buffer_performance.py",
 }
@@ -200,8 +211,8 @@ def assert_uuid_string(value: str) -> None:
 @pytest_asyncio.fixture
 async def app_context(engine) -> "AppContext":
     """Create an application context for testing with an in-memory SQLite database."""
-    from app_context import AppContext
     from ai_handler import AIHandler
+    from app_context import AppContext
     from config import MAX_ACTIVE_MESSAGES, SUMMARIZATION_PROMPT
 
     # Use the in-memory engine for the test session

@@ -1,5 +1,5 @@
-from llama_index.core.schema import TextNode
 import pytest
+from llama_index.core.schema import TextNode
 
 from knowledge.chunker import BookChunk
 from knowledge.manager import BookKnowledgeManager

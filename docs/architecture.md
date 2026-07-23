@@ -38,7 +38,7 @@ graph TD
 
     subgraph "Отправка ответа пользователю"
         Redis["Очередь Redis<br>MessageQueueManager"]
-        H["message_manager.py - MessageDispatcher<br>Достает ответы из очереди"]
+        H["messaging/dispatcher.py - MessageDispatcher<br>Достает ответы из очереди"]
         
         D -- "3. Ставит ответ в очередь" --> Redis
         Redis -- "1. Диспетчер забирает сообщение" --> H

@@ -7,30 +7,49 @@ import time
 import traceback
 from typing import Optional
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
-from core.utils import mask_db_url
-from core.bot_config import BotConfig
-from service_container import ServiceContainer
-from config import (TELEGRAM_TOKEN, BOT_NAME,
-                    PROVIDER, LMSTUDIO_STARTUP_CHECK, MEMORY_ENABLED, PROACTIVE_MESSAGING_ENABLED,
-                    MESSAGE_PREVIEW_LENGTH,
-                    POLLING_INTERVAL,
-                    MEMORY_TRIGGER_EVERY_N_MESSAGES,
-                    MEMORY_CHUNK_MAX_MESSAGES, MEMORY_CHUNK_TARGET_TOKENS)
-from storage_conversation_manager import PostgresConversationManager
 from ai_handler import AIHandler
-from message_manager import TypingIndicatorManager, send_ai_response, clean_ai_response, generate_ai_response
 from buffer_manager import BufferManager
+from core.bot_config import BotConfig
+from core.utils import mask_db_url
 from features import BotFeature, has_feature
+from messaging import (
+    TypingIndicatorManager,
+    clean_ai_response,
+    generate_ai_response,
+    send_ai_response,
+)
+from service_container import ServiceContainer
+from settings import settings as app_settings
+from storage_conversation_manager import PostgresConversationManager
 
-# Set up logging
+# Set up logging (level configurable via LOG_LEVEL, validated in AppSettings)
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=getattr(logging, app_settings.LOG_LEVEL, logging.INFO)
 )
 logger = logging.getLogger(__name__)
+
+TELEGRAM_TOKEN = app_settings.TELEGRAM_TOKEN
+BOT_NAME = app_settings.bot.name
+PROVIDER = app_settings.llm.provider
+LMSTUDIO_STARTUP_CHECK = app_settings.llm.lmstudio_startup_check
+MEMORY_ENABLED = app_settings.memory.enabled
+PROACTIVE_MESSAGING_ENABLED = app_settings.proactive.enabled
+MESSAGE_PREVIEW_LENGTH = app_settings.bot.message_preview_length
+POLLING_INTERVAL = app_settings.bot.polling_interval
+MEMORY_TRIGGER_EVERY_N_MESSAGES = app_settings.memory.trigger_every_n_messages
+MEMORY_CHUNK_MAX_MESSAGES = app_settings.memory.chunk_max_messages
+MEMORY_CHUNK_TARGET_TOKENS = app_settings.memory.chunk_target_tokens
 
 # Proactive messaging import (conditional)
 try:
@@ -45,8 +64,8 @@ class TelegramChatBot:
 
     def __init__(
         self,
-        bot_config: Optional[BotConfig] = None,
-        service_container: Optional[ServiceContainer] = None,
+        bot_config: BotConfig | None = None,
+        service_container: ServiceContainer | None = None,
     ):
         self.service_container = service_container or ServiceContainer()
         self._owns_service_container = service_container is None
@@ -68,6 +87,8 @@ class TelegramChatBot:
         self.ai_handler = AIHandler()
         self.typing_manager = self.service_container.typing_manager or TypingIndicatorManager()
         self.application = None
+        self._cleanup_lock = asyncio.Lock()
+        self._cleaned_up = False
         self.pending_clear_confirmation = set()
         self._storage_initialized = False
         self.bot_config = bot_config
@@ -182,7 +203,6 @@ class TelegramChatBot:
                     chat_id=chat_id,
                     text=cleaned_ai_response,
                     message_type="regular",
-                    bot_token=self.bot_token,
                     bot_id=str(self.bot_id) if self.bot_id else None
                 )
                 logger.info("Response enqueued for user %s", user_id)
@@ -632,7 +652,8 @@ I'm designed to be flexible and adapt to your preferences."""
                 return
             # Any other next message cancels the pending confirmation
             self.pending_clear_confirmation.remove(user_id)
-            logger.info("Pending clear confirmation cancelled for user %s due to next message: '%s'", user_id, text)
+            # Do not log the user's message text; only the fact of cancellation.
+            logger.info("Pending clear confirmation cancelled for user %s by next message", user_id)
             await update.message.reply_text("❌ Clear cancelled. To clear history, send /clear and then /ok as your next message.")
         except Exception as e:
             logger.error("Error in _monitor_pending_clear: %s", e)
@@ -641,12 +662,17 @@ I'm designed to be flexible and adapt to your preferences."""
         """Handle incoming text messages with buffering mechanism"""
         user = update.effective_user
         user_id = user.id
+        if update.message is None or update.message.text is None:
+            return
         user_message = update.message.text
         chat_id = update.effective_chat.id
 
+        # The message text is personal content: log only length at INFO, and
+        # keep a truncated preview at DEBUG for troubleshooting.
+        logger.info("Message from user %s (%d chars)", user_id, len(user_message))
         message_preview = (user_message[:MESSAGE_PREVIEW_LENGTH] + "..."
                           if len(user_message) > MESSAGE_PREVIEW_LENGTH else user_message)
-        logger.info("Message from user %s: '%s' (%d chars)", user_id, message_preview, len(user_message))
+        logger.debug("Message from user %s: '%s'", user_id, message_preview)
         route_key = self._buffer_route_key(user_id)
 
         # Store chat context for buffered dispatch
@@ -683,7 +709,13 @@ I'm designed to be flexible and adapt to your preferences."""
                 )
                 # Try to dispatch via Celery
                 try:
-                    from memory.tasks import extract_memories, acquire_task_lock, memory_lock_key, release_task_lock, MEMORY_LOCK_TTL
+                    from memory.tasks import (
+                        MEMORY_LOCK_TTL,
+                        acquire_task_lock,
+                        extract_memories,
+                        memory_lock_key,
+                        release_task_lock,
+                    )
 
                     lock_key = memory_lock_key(conversation_id)
                     if acquire_task_lock(lock_key, MEMORY_LOCK_TTL):
@@ -794,12 +826,13 @@ I'm designed to be flexible and adapt to your preferences."""
         """Handle errors in the bot application"""
         logger.error("Exception while handling an update: %s", context.error)
 
-        logger.error("Full traceback:")
-        for line in traceback.format_exception(type(context.error), context.error, context.error.__traceback__):
-            logger.error("  %s", line.rstrip())
+        if context.error is not None:
+            logger.error("Full traceback:")
+            for line in traceback.format_exception(type(context.error), context.error, context.error.__traceback__):
+                logger.error("  %s", line.rstrip())
 
         # Stop any active typing indicators for this chat
-        if update and hasattr(update, 'effective_chat') and update.effective_chat:
+        if isinstance(update, Update) and update.effective_chat:
             try:
                 chat_id = update.effective_chat.id
                 route_key = self._buffer_route_key(update.effective_user.id) if update.effective_user else None
@@ -808,7 +841,7 @@ I'm designed to be flexible and adapt to your preferences."""
             except Exception as typing_error:
                 logger.error("Failed to stop typing indicator on error: %s", typing_error)
 
-        if update and hasattr(update, 'message') and update.message:
+        if isinstance(update, Update) and update.message:
             logger.error("Failed to send response after exception: %s", context.error)
 
         # if update and hasattr(update, 'message') and update.message:
@@ -908,6 +941,14 @@ I'm designed to be flexible and adapt to your preferences."""
 
     async def cleanup(self):
         """Cleanup resources when shutting down"""
+        async with self._cleanup_lock:
+            if self._cleaned_up:
+                return
+            self._cleaned_up = True
+            await self._cleanup_resources()
+
+    async def _cleanup_resources(self) -> None:
+        """Perform the single owned cleanup path."""
         logger.info("Cleaning up bot resources...")
 
         # Stop message dispatcher
@@ -925,6 +966,8 @@ I'm designed to be flexible and adapt to your preferences."""
                     self.dispatcher_task.cancel()
                     await self.dispatcher_task
                 logger.info("Dispatcher task cleaned up successfully")
+            except asyncio.CancelledError:
+                pass
             except Exception as e:
                 logger.error("Error during dispatcher task cleanup: %s", e)
 
@@ -935,9 +978,11 @@ I'm designed to be flexible and adapt to your preferences."""
             except Exception as e:
                 logger.error("Error during service container cleanup: %s", e)
 
-    def build_application(self, token_override: Optional[str] = None) -> Application:
+    def build_application(self, token_override: str | None = None) -> Application:
         """Build and register the Telegram application handlers."""
         token = token_override or self.bot_token
+        if not token:
+            raise ValueError("Bot token is not configured")
         app = (
             Application.builder()
             .token(token)
@@ -987,21 +1032,6 @@ I'm designed to be flexible and adapt to your preferences."""
         self.application.run_polling(allowed_updates=Update.ALL_TYPES, poll_interval=POLLING_INTERVAL)
 
 
-async def shutdown_handler(bot_instance):
-    """Handle graceful shutdown"""
-    await bot_instance.cleanup()
-
-
 if __name__ == "__main__":
     logger.info("Starting %s application", BOT_NAME)
-    bot = TelegramChatBot()
-    try:
-        bot.run()
-    except KeyboardInterrupt:
-        logger.info("Bot shutdown requested by user (Ctrl+C)")
-        logger.info("%s is shutting down", bot._get_bot_name())
-        asyncio.run(shutdown_handler(bot))
-
-    except Exception as e:
-        logger.error("Error running bot: %s", e)
-        asyncio.run(shutdown_handler(bot))
+    TelegramChatBot().run()

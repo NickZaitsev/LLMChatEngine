@@ -9,7 +9,8 @@ refactoring the core logic.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Any, Optional, Protocol
+from typing import Any, List, Optional, Protocol
+
 
 class VectorStore(ABC):
     """
@@ -17,7 +18,7 @@ class VectorStore(ABC):
     """
 
     @abstractmethod
-    async def upsert(self, nodes: List[Any]) -> None:
+    async def upsert(self, nodes: list[Any]) -> None:
         """
         Upsert nodes into the vector store.
 
@@ -27,7 +28,9 @@ class VectorStore(ABC):
         pass
 
     @abstractmethod
-    async def query(self, query_embedding: List[float], top_k: int, user_id: str) -> List[Any]:
+    async def query(
+        self, query_embedding: list[float], top_k: int, user_id: str, bot_id: str | None = None
+    ) -> list[Any]:
         """
         Query the vector store for similar nodes.
 
@@ -35,19 +38,32 @@ class VectorStore(ABC):
             query_embedding: The query embedding.
             top_k: The number of top results to return.
             user_id: The ID of the user to filter memories for.
+            bot_id: Optional ID of the bot to filter memories for.
 
         Returns:
             A list of similar nodes.
         """
         pass
 
+    async def fetch_neighbors(
+        self, conversation_id: str, chunk_index: int, user_id: str, radius: int = 1
+    ) -> list[dict]:
+        """
+        Fetch chunks adjacent to a given chunk in the same conversation.
+
+        Implementations that do not support neighbor expansion return an
+        empty list (the default).
+        """
+        return []
+
     @abstractmethod
-    async def clear(self, user_id: str) -> None:
+    async def clear(self, user_id: str, bot_id: str | None = None) -> None:
         """
         Clear all nodes for a specific user from the vector store.
 
         Args:
             user_id: The ID of the user whose data should be cleared.
+            bot_id: Optional ID of the bot to scope the clearing.
         """
         pass
 
@@ -55,18 +71,24 @@ class VectorStore(ABC):
 class KnowledgeStore(Protocol):
     """Bot-scoped vector store contract for immutable reference knowledge."""
 
-    async def upsert(self, nodes: List[Any]) -> None:
+    async def upsert(self, nodes: list[Any]) -> None:
         """Upsert knowledge nodes into the store."""
         ...
 
     async def query(
         self,
-        query_embedding: List[float],
+        query_embedding: list[float],
         top_k: int,
         bot_id: str,
-        min_score: Optional[float] = None,
-    ) -> List[Any]:
+        min_score: float | None = None,
+    ) -> list[Any]:
         """Query similar knowledge nodes scoped to a bot."""
+        ...
+
+    async def fetch_neighbors(
+        self, book_id: str, chunk_index: int, radius: int = 1
+    ) -> list[dict]:
+        """Fetch chunks adjacent to a given chunk in the same book."""
         ...
 
     async def delete_book(self, book_id: str) -> None:
@@ -80,7 +102,7 @@ class EmbeddingModel(ABC):
     """
 
     @abstractmethod
-    async def get_embedding(self, text: str) -> List[float]:
+    async def get_embedding(self, text: str) -> list[float]:
         """
         Get the embedding for a single piece of text.
 
@@ -93,7 +115,7 @@ class EmbeddingModel(ABC):
         pass
 
     @abstractmethod
-    async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    async def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """
         Get the embeddings for a list of texts.
 
@@ -112,7 +134,7 @@ class SummarizationModel(ABC):
     """
 
     @abstractmethod
-    async def summarize(self, text: str, prompt_template: str, user_id: Optional[str] = None) -> str:
+    async def summarize(self, text: str, prompt_template: str, user_id: str | None = None) -> str:
         """
         Summarize a piece of text.
 

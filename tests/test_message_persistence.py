@@ -1,10 +1,12 @@
-import pytest
 import asyncio
 import json
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 import redis
 
-from message_manager import MessageQueueManager, MessageDispatcher
+from messaging import MessageDispatcher, MessageQueueManager
+
 
 @pytest.mark.asyncio
 async def test_message_persistence():
@@ -28,9 +30,9 @@ async def test_message_persistence():
     mock_typing_manager_class.return_value = mock_typing_manager_instance
     
     mock_redis = Mock()
-    with patch('message_manager.redis_async.from_url', return_value=mock_redis), \
-         patch('message_manager.Bot', new=mock_bot_class), \
-         patch('message_manager.TypingIndicatorManager', new=mock_typing_manager_class):
+    with patch('messaging.queue.redis_async.from_url', return_value=mock_redis), \
+         patch('messaging.dispatcher.Bot', new=mock_bot_class), \
+         patch('messaging.dispatcher.TypingIndicatorManager', new=mock_typing_manager_class):
         
         # Mock Redis methods
         mock_redis.rpush.return_value = 1

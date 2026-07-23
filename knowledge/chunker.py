@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable
+from collections.abc import Iterable
 
-from config import BOOK_CHUNK_OVERLAP_TOKENS, BOOK_CHUNK_TARGET_TOKENS
 from core.tokens import TokenCounter
+from settings import settings
+
+BOOK_CHUNK_TARGET_TOKENS = settings.books.chunk_target_tokens
+BOOK_CHUNK_OVERLAP_TOKENS = settings.books.chunk_overlap_tokens
 
 
 @dataclass(frozen=True)

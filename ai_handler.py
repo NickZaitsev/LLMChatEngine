@@ -1,35 +1,36 @@
 """LLM provider clients and response orchestration for chat generation."""
 
 import asyncio
-from functools import partial
 import logging
 import random
 import sys
-from typing import List, Dict, Any, Optional
+from functools import partial
+from typing import Any, Dict, List, Optional
 
-from config import (
-    AZURE_API_KEY,
-    AZURE_ENDPOINT,
-    AZURE_MODEL,
-    BOT_PERSONALITY,
-    GEMINI_API_KEY,
-    GEMINI_MODEL,
-    LMSTUDIO_AUTO_LOAD,
-    LMSTUDIO_BASE_URL,
-    LMSTUDIO_MAX_LOAD_WAIT,
-    LMSTUDIO_MODEL,
-    LMSTUDIO_SERVER_TIMEOUT,
-    MAX_ACTIVE_MESSAGES,
-    MEMORY_ENABLED,
-    PROMPT_HISTORY_BUDGET,
-    PROMPT_REPLY_TOKEN_BUDGET,
-    PROVIDER,
-    TEMPERATURE,
-)
+from settings import settings
+
+_llm_settings = settings.llm
+AZURE_API_KEY = _llm_settings.azure_api_key
+AZURE_ENDPOINT = _llm_settings.azure_endpoint
+AZURE_MODEL = _llm_settings.azure_model
+GEMINI_API_KEY = _llm_settings.gemini_api_key
+GEMINI_MODEL = _llm_settings.gemini_model
+LMSTUDIO_AUTO_LOAD = _llm_settings.lmstudio_auto_load
+LMSTUDIO_BASE_URL = _llm_settings.lmstudio_base_url
+LMSTUDIO_MAX_LOAD_WAIT = _llm_settings.lmstudio_max_load_wait
+LMSTUDIO_MODEL = _llm_settings.lmstudio_model
+LMSTUDIO_SERVER_TIMEOUT = _llm_settings.lmstudio_server_timeout
+PROVIDER = _llm_settings.provider
+BOT_PERSONALITY = settings.bot.personality
+MAX_ACTIVE_MESSAGES = settings.bot.max_active_messages
+MEMORY_ENABLED = settings.memory.enabled
+PROMPT_HISTORY_BUDGET = settings.prompts.history_budget
+PROMPT_REPLY_TOKEN_BUDGET = settings.prompts.reply_token_budget
+TEMPERATURE = settings.bot.temperature
 
 # Import OpenAI clients (v1+)
 try:
-    from openai import OpenAI, AzureOpenAI
+    from openai import AzureOpenAI, OpenAI
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
@@ -70,7 +71,7 @@ logger = logging.getLogger(__name__)
 class ModelClient:
     """Abstracts interaction with different LLM providers"""
     
-    def __init__(self, provider="azure", llm_config: Dict = None):
+    def __init__(self, provider="azure", llm_config: dict | None = None):
         if not OPENAI_AVAILABLE:
             raise ImportError("OpenAI package not available. Install with: pip install openai")
         
@@ -85,7 +86,7 @@ class ModelClient:
             if not all([azure_endpoint, azure_api_key, azure_model]):
                 raise ValueError("Azure provider requires AZURE_ENDPOINT, AZURE_API_KEY, and AZURE_MODEL to be set in .env")
             
-            self.client = AzureOpenAI(
+            self.client: Any = AzureOpenAI(
                 azure_endpoint=azure_endpoint,
                 api_key=azure_api_key,
                 api_version="2024-06-01",
@@ -141,7 +142,7 @@ class ModelClient:
         else:
             raise ValueError(f"Unsupported provider: {provider}. Supported providers: 'azure', 'lmstudio', 'gemini'")
     
-    def ask(self, messages, temperature: Optional[float] = None, max_tokens: Optional[int] = None):
+    def ask(self, messages, temperature: float | None = None, max_tokens: int | None = None):
         """Send a message to the LLM and get a response"""
         try:
             logger.info("Sending request to %s provider with %d messages", self.provider, len(messages))
@@ -237,9 +238,11 @@ class ModelClient:
             if self.provider == "gemini":
                 # Placeholder for any Gemini-specific info in the future
                 pass
-        except Exception:
-            pass
-            
+        except Exception as e:
+            # Best-effort diagnostics only: never fail the caller because an
+            # optional provider attribute could not be read.
+            logger.debug("Could not collect optional provider info: %s", e)
+
         return info
     
     async def get_lmstudio_status(self):
@@ -261,7 +264,7 @@ class AIHandler:
         self.max_tokens = PROMPT_REPLY_TOKEN_BUDGET
         self.temperature = TEMPERATURE
         self.prompt_assembler = prompt_assembler
-        self.llm_config: Dict = {}
+        self.llm_config: dict = {}
         
         # Retry configuration
         self.max_retries = DEFAULT_MAX_RETRIES
@@ -282,19 +285,20 @@ class AIHandler:
         self.prompt_assembler = prompt_assembler
         logger.info("Prompt assembler has been set for AIHandler.")
 
-    async def get_response(self, prompt: str) -> Optional[str]:
+    async def get_response(self, prompt: str) -> str | None:
         """Get a direct response from the LLM for a given prompt."""
         messages = [{"role": "user", "content": prompt}]
         return await self._make_ai_request(messages)
 
-    async def generate_response(self, user_message: str, conversation_history: List[Dict], conversation_id: str = None, role: str = "user") -> Optional[str]:
+    async def generate_response(self, user_message: str, conversation_history: list[dict], conversation_id: str | None = None, role: str = "user") -> str | None:
         """Generate a response.
 
         Returns None when generation fails after retry handling; callers decide
         whether to stay silent or send a user-facing fallback.
         """
-        logger.info("generate_response called with user_message: %s, conversation_id: %s, prompt_assembler: %s",
-                   user_message[:50] if user_message else "None", conversation_id, self.prompt_assembler)
+        # User message text is personal content: never log it above DEBUG.
+        logger.debug("generate_response called (conversation_id: %s, prompt_assembler set: %s)",
+                     conversation_id, self.prompt_assembler is not None)
         if not self.model_client:
             logger.error("ModelClient not available; cannot generate AI response")
             return None
@@ -308,7 +312,7 @@ class AIHandler:
 
             # Use PromptAssembler if available and conversation_id is provided
             if self.prompt_assembler and conversation_id:
-                logger.info("Using PromptAssembler for advanced prompt building")
+                logger.debug("Using PromptAssembler for advanced prompt building")
                 try:
                     messages = await self.prompt_assembler.build_prompt(
                         conversation_id=conversation_id,
@@ -340,7 +344,7 @@ class AIHandler:
                             messages.append({"role": role, "content": user_message})
                             logger.debug("Added %s message to prompt: %s", role, user_message[:50] + "..." if len(user_message) > 50 else user_message)
                     
-                    logger.info("PromptAssembler built %d messages for LLM", len(messages))
+                    logger.debug("PromptAssembler built %d messages for LLM", len(messages))
                     
                 except Exception as e:
                     logger.error("PromptAssembler failed: %s", e)
@@ -383,13 +387,13 @@ class AIHandler:
 
                     # Trigger summarization if needed
                     try:
-                        if MEMORY_ENABLED and self.prompt_assembler:
+                        if MEMORY_ENABLED and self.prompt_assembler and conversation_id:
                             from memory.tasks import (
-                                create_conversation_summary,
+                                SUMMARY_LOCK_TTL,
                                 acquire_task_lock,
+                                create_conversation_summary,
                                 release_task_lock,
                                 summary_lock_key,
-                                SUMMARY_LOCK_TTL,
                             )
                             
                             active_messages_count = await self.prompt_assembler.get_active_message_count(conversation_id)
@@ -409,7 +413,7 @@ class AIHandler:
 
                     return response
                     
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.warning("Request timed out on attempt %d/%d after %.1f seconds",
                                  attempt + 1, self.max_retries, self.request_timeout)
                     
@@ -478,7 +482,7 @@ class AIHandler:
         if hasattr(self, 'prompt_assembler') and self.prompt_assembler:
             self.prompt_assembler.personality = new_personality
     
-    def get_provider_info(self) -> Dict:
+    def get_provider_info(self) -> dict:
         """Get information about the current LLM provider"""
         if self.model_client:
             return self.model_client.get_provider_info()
@@ -495,7 +499,7 @@ class AIHandler:
             logger.error("Failed to update provider to %s: %s", new_provider, e)
             return False
 
-    def apply_llm_config(self, llm_config: Dict[str, Any]) -> bool:
+    def apply_llm_config(self, llm_config: dict[str, Any]) -> bool:
         """Apply per-bot LLM configuration overrides."""
         self.llm_config = dict(llm_config or {})
 
@@ -517,7 +521,7 @@ class AIHandler:
             logger.error("Failed to apply llm_config: %s", e)
             return False
     
-    def get_retry_config(self) -> Dict:
+    def get_retry_config(self) -> dict:
         """Get current retry configuration"""
         return {
             "max_retries": self.max_retries,
@@ -526,8 +530,8 @@ class AIHandler:
             "request_timeout": self.request_timeout
         }
     
-    def update_retry_config(self, max_retries: int = None, base_delay: float = None, 
-                           max_delay: float = None, request_timeout: float = None) -> None:
+    def update_retry_config(self, max_retries: int | None = None, base_delay: float | None = None,
+                           max_delay: float | None = None, request_timeout: float | None = None) -> None:
         """Update retry configuration"""
         if max_retries is not None:
             self.max_retries = max_retries
@@ -545,7 +549,7 @@ class AIHandler:
         """Check if the AI handler is available and ready"""
         return self.model_client is not None
     
-    def get_model_info(self) -> Dict:
+    def get_model_info(self) -> dict:
         """Get information about the current model and configuration"""
         if not self.model_client:
             return {"error": "ModelClient not available"}
@@ -560,7 +564,7 @@ class AIHandler:
             "retry_config": self.get_retry_config()
         }
     
-    def generate_greeting(self, user_name: str = None) -> str:
+    def generate_greeting(self, user_name: str | None = None) -> str:
         """Generate a personalized greeting"""
         if user_name:
             greetings = [

@@ -8,9 +8,10 @@ This module tests message repository operations including:
 - Token estimation
 """
 
-import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from uuid import uuid4
+
+import pytest
 
 from storage.repos import PostgresMessageRepo
 from tests.conftest import assert_uuid_string
@@ -204,7 +205,7 @@ class TestMessageRepo:
         """Test fetching messages since timestamp with no results"""
         # Arrange
         conversation_id = str(sample_conversation.id)
-        future_time = datetime.now(timezone.utc) + timedelta(hours=1)
+        future_time = datetime.now(UTC) + timedelta(hours=1)
         
         # Create a message
         await message_repo.append_message(

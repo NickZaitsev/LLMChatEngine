@@ -2,21 +2,23 @@
 Integration tests for multi-bot architecture.
 """
 import asyncio
-import pytest
 import uuid
-from unittest.mock import MagicMock, AsyncMock, patch
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+from llama_index.core.vector_stores import VectorStoreQuery
+
+from admin_bot import AdminBot
+from bot_manager import BotManager
+from features import DEFAULT_FEATURE_FLAGS, BotFeature
+from memory.llamaindex.vector_store import PgVectorStore
+from multibot_adapter import BotConfig, create_bot_with_config
 from storage.interfaces import Bot
 from storage.models import UserBotSettings
-from features import BotFeature, DEFAULT_FEATURE_FLAGS
-from multibot_adapter import create_bot_with_config, BotConfig
-from bot_manager import BotManager
-from admin_bot import AdminBot
-from memory.llamaindex.vector_store import PgVectorStore
-from llama_index.core.vector_stores import VectorStoreQuery
 from storage_conversation_manager import PostgresConversationManager
+
 
 @pytest.fixture
 def mock_bot_config():
@@ -40,8 +42,8 @@ def test_bot_model_creation():
         is_active=True,
         feature_flags={"feature": True},
         llm_config={"model": "gpt-4"},
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc)
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC)
     )
     assert bot.name == "TestBot"
     assert bot.is_active is True
@@ -54,8 +56,8 @@ def test_user_bot_settings_model_creation():
         user_id=uuid.uuid4(),
         bot_id=uuid.uuid4(),
         settings={"theme": "dark"},
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc)
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC)
     )
     assert settings.settings["theme"] == "dark"
 
@@ -387,6 +389,49 @@ async def test_bot_manager_removes_crashed_bot_from_running_state(mock_bot_confi
 
     assert mock_bot_config.id not in manager.bots
     assert mock_bot_config.id not in manager.applications
+
+
+@pytest.mark.asyncio
+async def test_bot_manager_uses_per_bot_stop_event_and_orderly_shutdown(mock_bot_config):
+    manager = BotManager("postgresql://u:p@h:5432/db")
+    manager.bot_configs[mock_bot_config.id] = mock_bot_config
+    mock_app = MagicMock()
+    mock_app.initialize = AsyncMock()
+    mock_app.start = AsyncMock()
+    mock_app.updater.start_polling = AsyncMock()
+    mock_app.updater.stop = AsyncMock()
+    mock_app.stop = AsyncMock()
+    mock_app.shutdown = AsyncMock()
+    bot_instance = MagicMock()
+    bot_instance._initialize_storage = AsyncMock()
+    bot_instance._initialize_memory_components = AsyncMock()
+    bot_instance._initialize_lmstudio_model = AsyncMock()
+
+    with patch.object(manager, "_ensure_shared_dispatcher", new=AsyncMock()), \
+         patch("multibot_adapter.create_bot_with_config", return_value=bot_instance), \
+         patch("multibot_adapter.build_application_for_bot", return_value=mock_app):
+        await manager.start_bot(mock_bot_config.id)
+        await asyncio.sleep(0)
+        assert mock_bot_config.id in manager._stop_events
+        await manager.stop_bot(mock_bot_config.id)
+
+    mock_app.updater.stop.assert_awaited_once()
+    mock_app.stop.assert_awaited_once()
+    mock_app.shutdown.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_crash_wakes_watchdog_without_polling():
+    manager = BotManager("postgresql://u:p@h:5432/db")
+    manager.bots[uuid.uuid4()] = MagicMock()
+    manager._running = True
+    failed = asyncio.get_running_loop().create_future()
+    failed.set_exception(RuntimeError("dispatcher crashed"))
+    manager._shared_dispatcher_task = failed
+
+    manager._on_dispatcher_done(failed)
+
+    assert manager._dispatcher_watchdog_event.is_set()
 
 
 @pytest.mark.asyncio

@@ -1,13 +1,13 @@
 import asyncio
 import logging
-import sys
 import os
+import sys
 
 # Add the parent directory to the path so we can import our modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from storage_conversation_manager import PostgresConversationManager
 from config import DATABASE_URL, USE_PGVECTOR
+from storage_conversation_manager import PostgresConversationManager
 
 # Set up logging
 logging.basicConfig(

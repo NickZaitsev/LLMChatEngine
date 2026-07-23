@@ -83,8 +83,7 @@ async def test_ingest_book_async_marks_ready_and_deletes_source(monkeypatch, tmp
     repo = FakeBookRepo(book)
     manager = FakeBookKnowledgeManager()
 
-    monkeypatch.setattr("knowledge.tasks.BOOKS_STORAGE_DIR", str(tmp_path))
-    monkeypatch.setattr("knowledge.tasks.BOOKS_KEEP_SOURCE_FILES", False)
+    monkeypatch.setattr("knowledge.tasks.settings", SimpleNamespace(books=SimpleNamespace(storage_dir=str(tmp_path), keep_source_files=False)))
     monkeypatch.setattr("knowledge.tasks.extract_text", lambda path, fmt: "parsed text")
     monkeypatch.setattr(
         "knowledge.tasks.get_app_context",
@@ -136,7 +135,7 @@ async def test_ingest_book_async_marks_failed_on_parse_error(monkeypatch, tmp_pa
     def fail_parse(path, fmt):
         raise ValueError("bad parse")
 
-    monkeypatch.setattr("knowledge.tasks.BOOKS_STORAGE_DIR", str(tmp_path))
+    monkeypatch.setattr("knowledge.tasks.settings", SimpleNamespace(books=SimpleNamespace(storage_dir=str(tmp_path), keep_source_files=False)))
     monkeypatch.setattr("knowledge.tasks.extract_text", fail_parse)
     monkeypatch.setattr(
         "knowledge.tasks.get_app_context",

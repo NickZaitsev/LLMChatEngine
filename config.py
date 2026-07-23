@@ -7,7 +7,6 @@ Existing modules can keep importing these module-level names during migration.
 import dotenv
 
 from settings import (
-    AppSettings,
     DEFAULT_BOT_NAME,
     DEFAULT_BOT_PERSONALITY,
     DEFAULT_LMSTUDIO_MODEL,
@@ -18,6 +17,7 @@ from settings import (
     DEFAULT_RESERVED_TOKENS,
     DEFAULT_TEMPERATURE,
     SUMMARIZATION_PROMPT,
+    AppSettings,
     build_settings,
 )
 

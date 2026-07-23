@@ -1,12 +1,15 @@
-import pytest
 import asyncio
-from uuid import uuid4
 from unittest.mock import AsyncMock, MagicMock, patch
-from app_context import AppContext
+from uuid import uuid4
+
+import pytest
+
 from ai_handler import AIHandler
+from app_context import AppContext
+from memory.tasks import create_conversation_summary_async
 from prompt.assembler import PromptAssembler
 from storage.repos import PostgresConversationRepo, PostgresMessageRepo
-from memory.tasks import create_conversation_summary_async
+
 
 @pytest.mark.asyncio
 async def test_summarization_flow(app_context: AppContext):

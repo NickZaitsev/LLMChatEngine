@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import re
 import warnings
-from typing import Any
+from typing import Any, TypedDict
 
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 DEFAULT_BOT_NAME = "Bot"
 DEFAULT_PROVIDER = "azure"
@@ -91,12 +90,18 @@ class MemorySettings(BaseModel):
     retrieval_expand_neighbors: int
 
 
+class CadenceDict(TypedDict):
+    name: str
+    interval: int
+    jitter: int
+
+
 class CadenceSettings(BaseModel):
     name: str
     interval: int
     jitter: int
 
-    def as_dict(self) -> dict[str, int | str]:
+    def as_dict(self) -> CadenceDict:
         return {"name": self.name, "interval": self.interval, "jitter": self.jitter}
 
 
@@ -188,6 +193,8 @@ class AppSettings(BaseSettings):
         super().__init__(**data)
         self._explicit_fields = explicit_fields
 
+    LOG_LEVEL: str = "INFO"
+
     TELEGRAM_TOKEN: str | None = None
     ADMIN_BOT_TOKEN: str | None = None
     ADMIN_USER_IDS: list[int] = Field(default_factory=list)
@@ -216,41 +223,41 @@ class AppSettings(BaseSettings):
     MAX_CONVERSATION_HISTORY: int = DEFAULT_MAX_CONVERSATION_HISTORY
     TEMPERATURE: float = DEFAULT_TEMPERATURE
     MAX_ACTIVE_MESSAGES: int = 50
-    MAX_CONTEXT_TOKENS: int = DEFAULT_MAX_CONTEXT_TOKENS
-    RESERVED_TOKENS: int = DEFAULT_RESERVED_TOKENS
-    REQUEST_TIMEOUT: float = 80.0
-    MESSAGE_PREVIEW_LENGTH: int = 50
-    SHORT_MESSAGE_THRESHOLD: int = 10
-    POLLING_INTERVAL: float = 0.5
+    MAX_CONTEXT_TOKENS: int = Field(default=DEFAULT_MAX_CONTEXT_TOKENS, gt=0)
+    RESERVED_TOKENS: int = Field(default=DEFAULT_RESERVED_TOKENS, ge=0)
+    REQUEST_TIMEOUT: float = Field(default=80.0, gt=0)
+    MESSAGE_PREVIEW_LENGTH: int = Field(default=50, gt=0)
+    SHORT_MESSAGE_THRESHOLD: int = Field(default=10, ge=0)
+    POLLING_INTERVAL: float = Field(default=0.5, gt=0)
 
-    PROMPT_MAX_MEMORY_ITEMS: int = 3
-    PROMPT_MEMORY_TOKEN_BUDGET_RATIO: float = 0.4
-    PROMPT_TRUNCATION_LENGTH: int = 200
+    PROMPT_MAX_MEMORY_ITEMS: int = Field(default=3, gt=0)
+    PROMPT_MEMORY_TOKEN_BUDGET_RATIO: float = Field(default=0.4, ge=0, le=1)
+    PROMPT_TRUNCATION_LENGTH: int = Field(default=200, gt=0)
     PROMPT_INCLUDE_SYSTEM_TEMPLATE: bool = True
-    PROMPT_HISTORY_BUDGET: int | None = None
-    PROMPT_REPLY_TOKEN_BUDGET: int | None = None
+    PROMPT_HISTORY_BUDGET: int | None = Field(default=None, gt=0)
+    PROMPT_REPLY_TOKEN_BUDGET: int | None = Field(default=None, gt=0)
 
     MEMORY_ENABLED: bool = True
     MEMORY_EMBEDDING_PROVIDER: str = "lmstudio"
     MEMORY_SUMMARIZER_MODE: str = "local"
     MEMORY_EMBED_MODEL: str = "text-embedding-qwen3-embedding-0.6b"
-    MEMORY_EMBED_DIM: int = 1024
+    MEMORY_EMBED_DIM: int = Field(default=1024, gt=0)
     VECTOR_STORE_TABLE_NAME: str = "llama_pg_vector_store"
-    MEMORY_CHUNK_MAX_MESSAGES: int = 4
-    MEMORY_CHUNK_TARGET_TOKENS: int = 300
-    MEMORY_TRIGGER_EVERY_N_MESSAGES: int = 4
-    MEMORY_RETRIEVAL_EXPAND_NEIGHBORS: int = 1
+    MEMORY_CHUNK_MAX_MESSAGES: int = Field(default=4, ge=2)
+    MEMORY_CHUNK_TARGET_TOKENS: int = Field(default=300, ge=50)
+    MEMORY_TRIGGER_EVERY_N_MESSAGES: int = Field(default=4, ge=2)
+    MEMORY_RETRIEVAL_EXPAND_NEIGHBORS: int = Field(default=1, ge=0)
 
     BOOK_RAG_ENABLED: bool = True
     BOOKS_STORAGE_DIR: str = "./book_files"
     BOOKS_KEEP_SOURCE_FILES: bool = False
-    BOOK_CHUNK_TARGET_TOKENS: int = 400
-    BOOK_CHUNK_OVERLAP_TOKENS: int = 50
-    BOOK_RAG_TOP_K: int = 4
-    BOOK_RAG_MIN_SCORE: float = 0.35
-    BOOK_RAG_TOKEN_BUDGET_RATIO: float = 0.25
-    BOOK_RAG_EXPAND_NEIGHBORS: int = 1
-    BOOK_EMBED_BATCH_SIZE: int = 64
+    BOOK_CHUNK_TARGET_TOKENS: int = Field(default=400, ge=50)
+    BOOK_CHUNK_OVERLAP_TOKENS: int = Field(default=50, ge=0)
+    BOOK_RAG_TOP_K: int = Field(default=4, gt=0)
+    BOOK_RAG_MIN_SCORE: float = Field(default=0.35, ge=0, le=1)
+    BOOK_RAG_TOKEN_BUDGET_RATIO: float = Field(default=0.25, ge=0, le=1)
+    BOOK_RAG_EXPAND_NEIGHBORS: int = Field(default=1, ge=0)
+    BOOK_EMBED_BATCH_SIZE: int = Field(default=64, gt=0)
 
     MIN_TYPING_SPEED: int = 10
     MAX_TYPING_SPEED: int = 30
@@ -263,10 +270,10 @@ class AppSettings(BaseSettings):
     PROACTIVE_MESSAGING_ENABLED: bool = True
     PROACTIVE_MESSAGING_REDIS_URL: str | None = None
     MESSAGE_QUEUE_REDIS_URL: str | None = None
-    MESSAGE_QUEUE_MAX_RETRIES: int = 3
-    MESSAGE_QUEUE_LOCK_TIMEOUT: int = 30
-    MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL: int = 10
-    MESSAGE_QUEUE_DISPATCHER_INTERVAL: float = 0.1
+    MESSAGE_QUEUE_MAX_RETRIES: int = Field(default=3, ge=0)
+    MESSAGE_QUEUE_LOCK_TIMEOUT: int = Field(default=30, gt=0)
+    MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL: int = Field(default=10, gt=0)
+    MESSAGE_QUEUE_DISPATCHER_INTERVAL: float = Field(default=0.1, gt=0)
 
     PROACTIVE_MESSAGING_INTERVAL_1H: int = 3600
     PROACTIVE_MESSAGING_JITTER_1H: int = 20
@@ -297,6 +304,17 @@ class AppSettings(BaseSettings):
     BUFFER_WORD_COUNT_THRESHOLD: int = 30
     BUFFER_CLEANUP_INTERVAL: int = 300
 
+    @field_validator("LOG_LEVEL", mode="before")
+    @classmethod
+    def _normalize_log_level(cls, value: Any) -> str:
+        if value in (None, ""):
+            return "INFO"
+        level = str(value).strip().upper()
+        valid = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}
+        if level not in valid:
+            raise ValueError(f"LOG_LEVEL must be one of {sorted(valid)}")
+        return level
+
     @field_validator("ADMIN_USER_IDS", mode="before")
     @classmethod
     def _parse_admin_user_ids(cls, value: Any) -> list[int]:
@@ -309,7 +327,17 @@ class AppSettings(BaseSettings):
         return value
 
     @model_validator(mode="after")
-    def _validate_settings(self) -> "AppSettings":
+    def _validate_settings(self) -> AppSettings:
+        if self.RESERVED_TOKENS >= self.MAX_CONTEXT_TOKENS:
+            raise ValueError("RESERVED_TOKENS must be less than MAX_CONTEXT_TOKENS")
+        if self.BOOK_CHUNK_OVERLAP_TOKENS >= self.BOOK_CHUNK_TARGET_TOKENS:
+            raise ValueError("BOOK_CHUNK_OVERLAP_TOKENS must be less than BOOK_CHUNK_TARGET_TOKENS")
+        if self.MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL >= self.MESSAGE_QUEUE_LOCK_TIMEOUT:
+            raise ValueError("MESSAGE_QUEUE_LOCK_REFRESH_INTERVAL must be less than MESSAGE_QUEUE_LOCK_TIMEOUT")
+        if self.prompt_history_budget > self.MAX_CONTEXT_TOKENS:
+            raise ValueError("PROMPT_HISTORY_BUDGET must not exceed MAX_CONTEXT_TOKENS")
+        if self.prompt_reply_token_budget > self.MAX_CONTEXT_TOKENS:
+            raise ValueError("PROMPT_REPLY_TOKEN_BUDGET must not exceed MAX_CONTEXT_TOKENS")
         if not self.TELEGRAM_TOKEN:
             warnings.warn("TELEGRAM_TOKEN is not set. The bot cannot run without it.")
         if not self.DATABASE_URL:

@@ -10,14 +10,14 @@ This script can be run independently to verify the function works correctly.
 """
 
 import asyncio
-import sys
 import os
+import sys
 import textwrap
 
 # Add the parent directory to the path so we can import ai_handler
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from message_manager import send_ai_response
+from messaging import send_ai_response
 
 
 class MockBot:

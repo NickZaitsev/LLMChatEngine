@@ -1,9 +1,14 @@
+# Logging
+LOG_LEVEL=INFO                                   # CRITICAL, ERROR, WARNING, INFO, DEBUG or NOTSET
+
 # Telegram Bot Configuration
 TELEGRAM_TOKEN=your_telegram_bot_token_here
 
 # Admin Bot Configuration
 ADMIN_BOT_TOKEN=your_admin_bot_token_here
 ADMIN_USER_IDS=123456789,987654321
+# Must be a generated Fernet key, NOT a human passphrase:
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 TOKEN_ENCRYPTION_KEY=your_generated_key_here
 
 # Database Configuration
@@ -16,6 +21,9 @@ PROVIDER=azure                                    # Options: "azure" or "lmstudi
 AZURE_ENDPOINT=https://your-endpoint.openai.azure.com/
 AZURE_API_KEY=your_azure_api_key_here
 AZURE_MODEL=your_azure_deployment_name
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-model-name
+GEMINI_EMBEDDING_MODEL=gemini-embedding-model-name
 
 # LM Studio Configuration
 LMSTUDIO_MODEL=deepseek/DeepSeek-V3-0324         # Any LM Studio model name
@@ -33,6 +41,10 @@ BOT_PERSONALITY="You are {BOT_NAME}, a caring and attentive AI companion. You ar
 MAX_CONVERSATION_HISTORY=100
 TEMPERATURE=0.8
 MAX_ACTIVE_MESSAGES=50
+REQUEST_TIMEOUT=80
+MESSAGE_PREVIEW_LENGTH=50
+SHORT_MESSAGE_THRESHOLD=10
+POLLING_INTERVAL=0.5
 
 # Context Management
 MAX_CONTEXT_TOKENS=8000
@@ -53,7 +65,10 @@ MEMORY_EMBEDDING_PROVIDER=lmstudio
 MEMORY_EMBED_MODEL="Qwen3-Embedding-0.6B"
 MEMORY_EMBED_DIM=1024 # Embedding dimension for the model
 VECTOR_STORE_TABLE_NAME="llama_pg_vector_store"
-MEMORY_CHUNK_OVERLAP=20
+MEMORY_CHUNK_MAX_MESSAGES=4
+MEMORY_CHUNK_TARGET_TOKENS=300
+MEMORY_TRIGGER_EVERY_N_MESSAGES=4
+MEMORY_RETRIEVAL_EXPAND_NEIGHBORS=1
 
 # Book Knowledge / RAG
 BOOK_RAG_ENABLED=true
@@ -74,6 +89,10 @@ MAX_TYPING_SPEED=30
 MAX_DELAY=5
 RANDOM_OFFSET_MIN=0.1
 RANDOM_OFFSET_MAX=0.5
+INDICATE_TYPING_DURING_DELAY=false
+
+# Shared Redis
+REDIS_URL=redis://redis:6379/0
 
 # Proactive Messaging
 PROACTIVE_MESSAGING_ENABLED=true
@@ -95,6 +114,10 @@ PROACTIVE_MESSAGING_MAX_CONSECUTIVE_OUTREACHES=5
 PROACTIVE_MESSAGING_RETRY_DELAY=300
 PROACTIVE_MESSAGING_MAX_RETRIES=3
 PROACTIVE_MESSAGING_RESTART_DELAY_MAX=900
+PROACTIVE_MESSAGING_RECENT_HISTORY_LIMIT=8
+PROACTIVE_MESSAGING_RECENT_PROACTIVE_LIMIT=6
+PROACTIVE_MESSAGING_MEMORY_HINT_LIMIT=5
+PROACTIVE_MESSAGING_RANDOM_SEED=
 PROACTIVE_MESSAGING_PROMPT="Сгенерируй дружеское, заботливое сообщение, чтобы проверить, как у пользователя дела, на том языке, на котором ты обычно с ним разговариваешь. Сообщение должно быть кратким, естественным и прозрачным: не утверждай, что ты человек. Не повторяйся"
 
 # Message Queue
