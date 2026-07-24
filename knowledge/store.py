@@ -77,6 +77,7 @@ class BookVectorStore:
 
     async def delete_book(self, book_id: str) -> None:
         """Delete all vector rows for a book."""
+        await asyncio.to_thread(self._store._initialize)
         table_name = self._store.table_name
         sql = (
             f'DELETE FROM public."data_{table_name}" '
