@@ -14,7 +14,7 @@ from uuid import UUID
 from core.utils import mask_db_url
 from settings import settings
 from storage import Storage, create_storage
-from storage.interfaces import Conversation, Message, MessageLog
+from storage.interfaces import Conversation, Message
 
 logger = logging.getLogger(__name__)
 
@@ -118,23 +118,6 @@ class PostgresConversationManager:
         self._conversation_id_cache[cache_key] = conversation.id
         return conversation
 
-    async def save_message_to_history(self, user_id: int, role: str, content: str, bot_id: uuid.UUID | None = None) -> MessageLog:
-        """
-        Save a message to both message history tables.
-
-        Args:
-            user_id: Telegram user ID
-            role: Role of the message sender ("user" | "assistant")
-            content: The message content
-
-        Returns:
-            MessageLog object
-        """
-        if not self.storage:
-            raise RuntimeError("Storage not initialized. Call initialize() first.")
-
-        return await self.storage.message_history.save_message(user_id, role, content, bot_id=bot_id)
-
     async def add_message_async(self, user_id: int, role: str, content: str, bot_id: uuid.UUID | None = None) -> Message:
         """
         Add a message to the user's conversation history.
@@ -155,12 +138,6 @@ class PostgresConversationManager:
             content=content,
             extra_data={"telegram_user_id": user_id}
         )
-
-        # Also save to message history tables
-        try:
-            await self.save_message_to_history(user_id, role, content, bot_id=bot_id)
-        except Exception as e:
-            logger.error("Failed to save message to history tables: %s", e)
 
         logger.info("Added message: user=%d, role=%s, length=%d chars",
                    user_id, role, len(content))

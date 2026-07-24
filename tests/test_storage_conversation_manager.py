@@ -51,6 +51,30 @@ async def test_ensure_user_and_conversation_does_not_create_default_persona():
 
 
 @pytest.mark.asyncio
+async def test_add_message_writes_only_canonical_conversation_history(caplog):
+    manager = PostgresConversationManager("postgresql://u:***@h:5432/db", use_pgvector=False)
+    conversation = SimpleNamespace(id=uuid.uuid4())
+    stored_message = SimpleNamespace(id=uuid.uuid4())
+
+    manager.storage = SimpleNamespace(
+        messages=SimpleNamespace(append_message=AsyncMock(return_value=stored_message)),
+    )
+    manager._ensure_user_and_conversation = AsyncMock(return_value=conversation)
+
+    with caplog.at_level("ERROR", logger="storage_conversation_manager"):
+        result = await manager.add_message_async(123, "user", "hello", bot_id=None)
+
+    assert result is stored_message
+    manager.storage.messages.append_message.assert_awaited_once_with(
+        conversation_id=str(conversation.id),
+        role="user",
+        content="hello",
+        extra_data={"telegram_user_id": 123},
+    )
+    assert "history tables" not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_clear_conversation_deletes_default_bot_user_history():
     manager = PostgresConversationManager("postgresql://u:p@h:5432/db", use_pgvector=False)
     conversation = SimpleNamespace(id="conv-1")
