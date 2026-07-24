@@ -18,7 +18,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.drop_table("messages_user")
+    op.drop_table("messages_user", if_exists=True)
 
 
 def downgrade() -> None:

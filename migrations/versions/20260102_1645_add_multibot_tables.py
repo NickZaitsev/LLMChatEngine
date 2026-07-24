@@ -52,17 +52,21 @@ def upgrade() -> None:
     op.add_column('conversations', sa.Column('bot_id', sa.UUID(), nullable=True))
     op.create_foreign_key(None, 'conversations', 'bots', ['bot_id'], ['id'], ondelete='CASCADE')
 
-    # Add bot_id to memories
-    op.add_column('memories', sa.Column('bot_id', sa.UUID(), nullable=True))
-    op.create_index('ix_memories_bot_id', 'memories', ['bot_id'], unique=False)
-    op.create_foreign_key(None, 'memories', 'bots', ['bot_id'], ['id'], ondelete='CASCADE')
+    # The memories table was removed by revision 87cdcd5520f9, but some
+    # legacy databases still have it. Preserve the legacy upgrade path
+    # without breaking a canonical fresh install.
+    if sa.inspect(op.get_bind()).has_table('memories'):
+        op.add_column('memories', sa.Column('bot_id', sa.UUID(), nullable=True))
+        op.create_index('ix_memories_bot_id', 'memories', ['bot_id'], unique=False)
+        op.create_foreign_key(None, 'memories', 'bots', ['bot_id'], ['id'], ondelete='CASCADE')
 
 
 def downgrade() -> None:
-    # Remove bot_id from memories
-    op.drop_constraint(None, 'memories', type_='foreignkey')
-    op.drop_index('ix_memories_bot_id', table_name='memories')
-    op.drop_column('memories', 'bot_id')
+    # Remove bot_id from the optional legacy memories table.
+    if sa.inspect(op.get_bind()).has_table('memories'):
+        op.drop_constraint(None, 'memories', type_='foreignkey')
+        op.drop_index('ix_memories_bot_id', table_name='memories')
+        op.drop_column('memories', 'bot_id')
 
     # Remove bot_id from conversations
     op.drop_constraint(None, 'conversations', type_='foreignkey')
