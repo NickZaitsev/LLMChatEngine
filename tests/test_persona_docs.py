@@ -22,5 +22,14 @@ def test_persona_doc_covers_required_commands_and_notes():
         "20 МБ",  # 20 МБ size limit
         "MEMORY_EMBED_DIM",
         "book_files",
+        "не языковая модель",
+        "docs/agents/persona-prompt-gotchas.md",
     ):
         assert token in doc, f"persona doc is missing {token!r}"
+
+
+def test_persona_prompt_gotchas_are_linked_from_agent_rules():
+    gotchas = Path("docs/agents/persona-prompt-gotchas.md")
+    assert gotchas.exists()
+    agent_rules = Path("AGENTS.md").read_text(encoding="utf-8")
+    assert "docs/agents/persona-prompt-gotchas.md" in agent_rules

@@ -52,6 +52,8 @@ TypeScript: before finishing, run `npm run check` when available. Otherwise, run
 
 # Gotchas and observations
 
+- For persona bots, identity must be an absolute first prompt rule with explicit bans on AI/model self-description; see [persona prompt gotchas](docs/agents/persona-prompt-gotchas.md).
+
 While working, record observations in docs/agents/ folder. Before finishing a task, ask: "would the next agent working here make a mistake without knowing this AND it is important enough?" If yes, add it to AGENTS.md as a bullet of at most two lines; if two lines are not enough, put the full write-up in docs/agents/<topic>.md and link it from here. Everything else stays only in docs/agents/ folder.
 
 Do not add trivial, obvious, stylistic, temporary, or low-impact notes to AGENTS.md. Keep those only in docs/agents/ .
