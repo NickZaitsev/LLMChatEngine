@@ -20,6 +20,15 @@ x-app-config: &app-config
   AZURE_MODEL: "${AZURE_MODEL:-}"
   GEMINI_MODEL: "${GEMINI_MODEL:-}"
   GEMINI_EMBEDDING_MODEL: "${GEMINI_EMBEDDING_MODEL:-}"
+  GEMINI_RPM: "${GEMINI_RPM:-15}"
+  GEMINI_TPM: "${GEMINI_TPM:-250000}"
+  GEMINI_RPD: "${GEMINI_RPD:-500}"
+  GEMINI_TIMEOUT_MS: "${GEMINI_TIMEOUT_MS:-60000}"
+  GEMINI_MAX_RETRIES: "${GEMINI_MAX_RETRIES:-3}"
+  GEMINI_RETRY_BASE_SECONDS: "${GEMINI_RETRY_BASE_SECONDS:-2.0}"
+  GEMINI_RETRY_MAX_SECONDS: "${GEMINI_RETRY_MAX_SECONDS:-60.0}"
+  GEMINI_DEFAULT_COOLDOWN_SECONDS: "${GEMINI_DEFAULT_COOLDOWN_SECONDS:-5.0}"
+  GEMINI_RETRY_CAPACITY_ERRORS_INDEFINITELY: "${GEMINI_RETRY_CAPACITY_ERRORS_INDEFINITELY:-false}"
   LMSTUDIO_MODEL: "${LMSTUDIO_MODEL:-}"
   LMSTUDIO_BASE_URL: "${LMSTUDIO_BASE_URL:-http://host.docker.internal:1234/v1}"
   LMSTUDIO_AUTO_LOAD: "${LMSTUDIO_AUTO_LOAD:-true}"
@@ -133,6 +142,7 @@ services:
       TOKEN_ENCRYPTION_KEY: "${TOKEN_ENCRYPTION_KEY}"
       AZURE_API_KEY: "${AZURE_API_KEY:-}"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_API_KEYS: "${GEMINI_API_KEYS:-}"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -215,6 +225,7 @@ services:
       TOKEN_ENCRYPTION_KEY: "${TOKEN_ENCRYPTION_KEY}"
       AZURE_API_KEY: "${AZURE_API_KEY:-}"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_API_KEYS: "${GEMINI_API_KEYS:-}"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -270,6 +281,7 @@ services:
       DATABASE_URL: "postgresql+asyncpg://ai_bot:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/ai_bot"
       AZURE_API_KEY: "${AZURE_API_KEY:-}"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_API_KEYS: "${GEMINI_API_KEYS:-}"
     depends_on:
       migrate:
         condition: service_completed_successfully

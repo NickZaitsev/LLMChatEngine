@@ -78,12 +78,17 @@ ADMIN_BOT_TOKEN=your_admin_bot_token_here
 ADMIN_USER_IDS=123456789
 TOKEN_ENCRYPTION_KEY=your_fernet_key_here
 
-PROVIDER=lmstudio
-LMSTUDIO_MODEL=your_model
-LMSTUDIO_BASE_URL=http://host-machine:1234/v1
+PROVIDER=gemini_gateway
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_RPM=15
+GEMINI_TPM=250000
+GEMINI_RPD=500
 ```
 
-Внутри Docker Compose строка подключения `DATABASE_URL` собирается автоматически из `DB_PASSWORD` и указывает на сервис `postgres`; отдельно её задавать не нужно. Для Azure или Gemini установите `PROVIDER=azure` или `PROVIDER=gemini` и заполните соответствующие ключи из `env_example.txt`.
+`gemini_gateway` использует общий пакет `gemini-gateway`: он добавляет ротацию нескольких ключей, клиентские RPM/TPM/RPD-лимиты, ограниченные ретраи и классификацию ошибок. Для нескольких ключей задайте `GEMINI_API_KEYS=key1,key2,key3`; одиночный `GEMINI_API_KEY` остаётся совместимым вариантом. Прямой старый клиент доступен через `PROVIDER=gemini`.
+
+Внутри Docker Compose строка подключения `DATABASE_URL` собирается автоматически из `DB_PASSWORD` и указывает на сервис `postgres`; отдельно её задавать не нужно. Для Azure или LM Studio установите `PROVIDER=azure` или `PROVIDER=lmstudio` и заполните соответствующие параметры из `env_example.txt`.
 
 ### Запуск
 

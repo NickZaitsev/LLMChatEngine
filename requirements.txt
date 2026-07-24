@@ -1,4 +1,4 @@
-python-telegram-bot==20.7
+python-telegram-bot==22.8
 python-dotenv==1.0.0
 openai==1.108.1
 sqlalchemy==2.0.44
@@ -9,6 +9,7 @@ tiktoken==0.12.0
 celery==5.5.3
 redis==7.0.0
 google-generativeai==0.7.1
+gemini-gateway==0.2.0
 llama-index==0.14.5
 llama-index-vector-stores-postgres==0.7.1
 llama-index-llms-lmstudio==0.4.1

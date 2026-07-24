@@ -1,6 +1,7 @@
 """LLM provider clients and response orchestration for chat generation."""
 
 import asyncio
+import json
 import logging
 import random
 import sys
@@ -14,7 +15,17 @@ AZURE_API_KEY = _llm_settings.azure_api_key
 AZURE_ENDPOINT = _llm_settings.azure_endpoint
 AZURE_MODEL = _llm_settings.azure_model
 GEMINI_API_KEY = _llm_settings.gemini_api_key
+GEMINI_API_KEYS = _llm_settings.gemini_api_keys
 GEMINI_MODEL = _llm_settings.gemini_model
+GEMINI_RPM = _llm_settings.gemini_rpm
+GEMINI_TPM = _llm_settings.gemini_tpm
+GEMINI_RPD = _llm_settings.gemini_rpd
+GEMINI_TIMEOUT_MS = _llm_settings.gemini_timeout_ms
+GEMINI_MAX_RETRIES = _llm_settings.gemini_max_retries
+GEMINI_RETRY_BASE_SECONDS = _llm_settings.gemini_retry_base_seconds
+GEMINI_RETRY_MAX_SECONDS = _llm_settings.gemini_retry_max_seconds
+GEMINI_DEFAULT_COOLDOWN_SECONDS = _llm_settings.gemini_default_cooldown_seconds
+GEMINI_RETRY_CAPACITY_ERRORS_INDEFINITELY = _llm_settings.gemini_retry_capacity_errors_indefinitely
 LMSTUDIO_AUTO_LOAD = _llm_settings.lmstudio_auto_load
 LMSTUDIO_BASE_URL = _llm_settings.lmstudio_base_url
 LMSTUDIO_MAX_LOAD_WAIT = _llm_settings.lmstudio_max_load_wait
@@ -45,6 +56,16 @@ except ImportError:
     GEMINI_AVAILABLE = False
     genai = None
 
+# Import the shared Gemini gateway.
+try:
+    from gemini_gateway import GeminiGateway, GeminiGatewayConfig
+
+    GEMINI_GATEWAY_AVAILABLE = True
+except ImportError:
+    GEMINI_GATEWAY_AVAILABLE = False
+    GeminiGateway = None
+    GeminiGatewayConfig = None
+
 # Import LM Studio Manager
 try:
     from lmstudio_manager import LMStudioManager
@@ -66,6 +87,34 @@ RETRYABLE_ERROR_PATTERNS = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_gemini_api_keys(value: Any) -> tuple[str, ...]:
+    """Normalize one or more configured Gemini keys without logging them."""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        normalized = value.replace(";", ",").replace("\n", ",")
+        return tuple(item.strip() for item in normalized.split(",") if item.strip())
+    if isinstance(value, (list, tuple)):
+        return tuple(str(item).strip() for item in value if str(item).strip())
+    return (str(value).strip(),) if str(value).strip() else ()
+
+
+def _parse_bool(value: Any) -> bool:
+    """Parse bool-like per-bot JSON values without Python truthiness traps."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+        raise ValueError(f"Invalid boolean value: {value!r}")
+    if isinstance(value, (int, float)) and value in {0, 1}:
+        return bool(value)
+    raise ValueError(f"Invalid boolean value: {value!r}")
 
 
 class ModelClient:
@@ -138,9 +187,64 @@ class ModelClient:
             self.client = genai.GenerativeModel(gemini_model)
             self.model_name = gemini_model
             logger.info("ModelClient initialized with Gemini provider - Model: %s", gemini_model)
-            
+
+        elif provider == "gemini_gateway":
+            if not GEMINI_GATEWAY_AVAILABLE:
+                raise ImportError("Gemini Gateway package not available. Install with: pip install gemini-gateway")
+
+            raw_keys = self.llm_config.get("gemini_api_keys", GEMINI_API_KEYS)
+            if not raw_keys:
+                raw_keys = self.llm_config.get("gemini_api_key", GEMINI_API_KEY)
+            api_keys = _parse_gemini_api_keys(raw_keys)
+            gemini_model = self.llm_config.get("model", self.llm_config.get("gemini_model", GEMINI_MODEL))
+            if not api_keys or not gemini_model:
+                raise ValueError(
+                    "Gemini Gateway provider requires GEMINI_API_KEYS or GEMINI_API_KEY "
+                    "and GEMINI_MODEL to be set in .env"
+                )
+
+            gateway_temperature = float(self.llm_config.get("temperature", TEMPERATURE))
+            gateway_config = GeminiGatewayConfig(
+                model=gemini_model,
+                api_keys=api_keys,
+                requests_per_minute=int(self.llm_config.get("gemini_rpm", GEMINI_RPM)),
+                tokens_per_minute=int(self.llm_config.get("gemini_tpm", GEMINI_TPM)),
+                requests_per_day=int(self.llm_config.get("gemini_rpd", GEMINI_RPD)),
+                request_timeout_ms=int(self.llm_config.get("gemini_timeout_ms", GEMINI_TIMEOUT_MS)),
+                max_retries=int(self.llm_config.get("gemini_max_retries", GEMINI_MAX_RETRIES)),
+                retry_base_delay_seconds=float(
+                    self.llm_config.get("gemini_retry_base_seconds", GEMINI_RETRY_BASE_SECONDS)
+                ),
+                retry_max_delay_seconds=float(
+                    self.llm_config.get("gemini_retry_max_seconds", GEMINI_RETRY_MAX_SECONDS)
+                ),
+                default_cooldown_seconds=float(
+                    self.llm_config.get(
+                        "gemini_default_cooldown_seconds",
+                        GEMINI_DEFAULT_COOLDOWN_SECONDS,
+                    )
+                ),
+                temperature=gateway_temperature,
+                max_output_tokens=int(
+                    self.llm_config.get("max_tokens", PROMPT_REPLY_TOKEN_BUDGET)
+                ),
+                retry_capacity_errors_indefinitely=_parse_bool(
+                    self.llm_config.get(
+                        "gemini_retry_capacity_errors_indefinitely",
+                        GEMINI_RETRY_CAPACITY_ERRORS_INDEFINITELY,
+                    )
+                ),
+            )
+            self.client = GeminiGateway(gateway_config)
+            self.model_name = gemini_model
+            self._gemini_gateway_temperature = gateway_temperature
+            logger.info("ModelClient initialized with Gemini Gateway provider - Model: %s", gemini_model)
+
         else:
-            raise ValueError(f"Unsupported provider: {provider}. Supported providers: 'azure', 'lmstudio', 'gemini'")
+            raise ValueError(
+                f"Unsupported provider: {provider}. Supported providers: "
+                "'azure', 'lmstudio', 'gemini', 'gemini_gateway'"
+            )
     
     def ask(self, messages, temperature: float | None = None, max_tokens: int | None = None):
         """Send a message to the LLM and get a response"""
@@ -157,7 +261,18 @@ class ModelClient:
                 content_preview = content[:1000] + "..." if len(content) > 1000 else content
                 logger.debug("  Request Message %d [%s]: %s", i + 1, role, content_preview)
             
-            if self.provider == 'gemini':
+            if self.provider == "gemini_gateway":
+                if (
+                    temperature is not None
+                    and float(temperature) != self._gemini_gateway_temperature
+                ):
+                    raise ValueError(
+                        "Gemini Gateway does not support a per-call temperature override; "
+                        "set temperature in the bot LLM configuration instead"
+                    )
+                prompt = json.dumps(messages, ensure_ascii=False)
+                content = self.client.generate_text(prompt, max_output_tokens=max_tokens)
+            elif self.provider == 'gemini':
                 system_instruction = None
                 if messages and messages[0].get('role') == 'system':
                     system_instruction = messages[0].get('content')
@@ -370,18 +485,25 @@ class AIHandler:
                 content = msg.get("content", "")
                 logger.debug("  Message %d [%s]: %s", i + 1, role, content)
             
-            # Retry logic with exponential backoff and proper timeout
-            for attempt in range(self.max_retries):
-                logger.info("Attempt %d/%d", attempt + 1, self.max_retries)
+            # Gemini Gateway owns its bounded retries and synchronous request
+            # timeout. Wrapping it in another wait_for/retry loop can leave the
+            # worker thread running after cancellation and multiply requests.
+            gateway_manages_retries = self.model_client.provider == "gemini_gateway"
+            max_attempts = 1 if gateway_manages_retries else self.max_retries
+            for attempt in range(max_attempts):
+                logger.info("Attempt %d/%d", attempt + 1, max_attempts)
                 
                 try:
-                    response = await asyncio.wait_for(
-                        self._make_ai_request(messages),
-                        timeout=self.request_timeout
-                    )
+                    if gateway_manages_retries:
+                        response = await self._make_ai_request(messages)
+                    else:
+                        response = await asyncio.wait_for(
+                            self._make_ai_request(messages),
+                            timeout=self.request_timeout
+                        )
                     
                     if attempt > 0:
-                        logger.info("Success on retry attempt %d/%d", attempt + 1, self.max_retries)
+                        logger.info("Success on retry attempt %d/%d", attempt + 1, max_attempts)
                     
                     logger.info("Response received (%d chars)", len(response))
 
@@ -415,9 +537,9 @@ class AIHandler:
                     
                 except TimeoutError:
                     logger.warning("Request timed out on attempt %d/%d after %.1f seconds",
-                                 attempt + 1, self.max_retries, self.request_timeout)
+                                 attempt + 1, max_attempts, self.request_timeout)
                     
-                    if attempt < self.max_retries - 1:
+                    if attempt < max_attempts - 1:
                         delay = min(self.base_delay * (2 ** attempt), self.max_delay)
                         logger.info("Retrying in %.1f seconds...", delay)
                         await asyncio.sleep(delay)
@@ -432,15 +554,15 @@ class AIHandler:
                     # Check if this is a retryable error
                     is_retryable = any(pattern in error_message for pattern in RETRYABLE_ERROR_PATTERNS)
                     
-                    if is_retryable and attempt < self.max_retries - 1:
+                    if is_retryable and attempt < max_attempts - 1:
                         delay = min(self.base_delay * (2 ** attempt), self.max_delay)
                         logger.warning("Retryable error on attempt %d/%d, retrying in %.1f seconds: %s", 
-                                     attempt + 1, self.max_retries, delay, e)
+                                     attempt + 1, max_attempts, delay, e)
                         await asyncio.sleep(delay)
                         continue
                     else:
-                        if attempt >= self.max_retries - 1:
-                            logger.error("Max retries (%d) reached. Final error: %s", self.max_retries, e)
+                        if attempt >= max_attempts - 1:
+                            logger.error("Max retries (%d) reached. Final error: %s", max_attempts, e)
                         else:
                             logger.error("Non-retryable error on attempt %d: %s", attempt + 1, e)
                         raise e

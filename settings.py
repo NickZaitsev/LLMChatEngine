@@ -64,8 +64,18 @@ class LLMSettings(BaseModel):
     lmstudio_server_timeout: int
     lmstudio_startup_check: bool
     gemini_api_key: str | None
+    gemini_api_keys: str | None
     gemini_model: str | None
     gemini_embedding_model: str | None
+    gemini_rpm: int
+    gemini_tpm: int
+    gemini_rpd: int
+    gemini_timeout_ms: int
+    gemini_max_retries: int
+    gemini_retry_base_seconds: float
+    gemini_retry_max_seconds: float
+    gemini_default_cooldown_seconds: float
+    gemini_retry_capacity_errors_indefinitely: bool
 
 
 class PromptSettings(BaseModel):
@@ -215,8 +225,18 @@ class AppSettings(BaseSettings):
     LMSTUDIO_SERVER_TIMEOUT: int = 80
     LMSTUDIO_STARTUP_CHECK: bool = True
     GEMINI_API_KEY: str | None = None
+    GEMINI_API_KEYS: str | None = None
     GEMINI_MODEL: str | None = None
     GEMINI_EMBEDDING_MODEL: str | None = None
+    GEMINI_RPM: int = Field(default=15, gt=0)
+    GEMINI_TPM: int = Field(default=250_000, gt=0)
+    GEMINI_RPD: int = Field(default=500, gt=0)
+    GEMINI_TIMEOUT_MS: int = Field(default=60_000, gt=0)
+    GEMINI_MAX_RETRIES: int = Field(default=3, ge=1)
+    GEMINI_RETRY_BASE_SECONDS: float = Field(default=2.0, gt=0)
+    GEMINI_RETRY_MAX_SECONDS: float = Field(default=60.0, gt=0)
+    GEMINI_DEFAULT_COOLDOWN_SECONDS: float = Field(default=5.0, ge=0)
+    GEMINI_RETRY_CAPACITY_ERRORS_INDEFINITELY: bool = False
 
     BOT_NAME: str = DEFAULT_BOT_NAME
     BOT_PERSONALITY: str = DEFAULT_BOT_PERSONALITY
@@ -342,10 +362,10 @@ class AppSettings(BaseSettings):
             warnings.warn("TELEGRAM_TOKEN is not set. The bot cannot run without it.")
         if not self.DATABASE_URL:
             warnings.warn("DATABASE_URL is required for PostgreSQL storage.")
-        if self.PROVIDER not in {"azure", "lmstudio", "gemini"}:
+        if self.PROVIDER not in {"azure", "lmstudio", "gemini", "gemini_gateway"}:
             warnings.warn(
                 f"PROVIDER '{self.PROVIDER}' is not supported. "
-                "Supported values: 'azure', 'lmstudio', 'gemini'"
+                "Supported values: 'azure', 'lmstudio', 'gemini', 'gemini_gateway'"
             )
         if self.PROVIDER == "azure":
             if not self.AZURE_ENDPOINT:
@@ -366,6 +386,11 @@ class AppSettings(BaseSettings):
                 warnings.warn("GEMINI_API_KEY is not set for Gemini provider")
             if not self.GEMINI_MODEL:
                 warnings.warn("GEMINI_MODEL is not set for Gemini provider")
+        if self.PROVIDER == "gemini_gateway":
+            if not self.GEMINI_API_KEYS and not self.GEMINI_API_KEY:
+                warnings.warn("GEMINI_API_KEYS or GEMINI_API_KEY is required for Gemini Gateway")
+            if not self.GEMINI_MODEL:
+                warnings.warn("GEMINI_MODEL is not set for Gemini Gateway provider")
 
         self._warn_between("PROMPT_MEMORY_TOKEN_BUDGET_RATIO", self.PROMPT_MEMORY_TOKEN_BUDGET_RATIO)
         self._warn_between("BOOK_RAG_MIN_SCORE", self.BOOK_RAG_MIN_SCORE)
@@ -511,8 +536,18 @@ class AppSettings(BaseSettings):
             lmstudio_server_timeout=self.LMSTUDIO_SERVER_TIMEOUT,
             lmstudio_startup_check=self.LMSTUDIO_STARTUP_CHECK,
             gemini_api_key=self.GEMINI_API_KEY,
+            gemini_api_keys=self.GEMINI_API_KEYS,
             gemini_model=self.GEMINI_MODEL,
             gemini_embedding_model=self.GEMINI_EMBEDDING_MODEL,
+            gemini_rpm=self.GEMINI_RPM,
+            gemini_tpm=self.GEMINI_TPM,
+            gemini_rpd=self.GEMINI_RPD,
+            gemini_timeout_ms=self.GEMINI_TIMEOUT_MS,
+            gemini_max_retries=self.GEMINI_MAX_RETRIES,
+            gemini_retry_base_seconds=self.GEMINI_RETRY_BASE_SECONDS,
+            gemini_retry_max_seconds=self.GEMINI_RETRY_MAX_SECONDS,
+            gemini_default_cooldown_seconds=self.GEMINI_DEFAULT_COOLDOWN_SECONDS,
+            gemini_retry_capacity_errors_indefinitely=self.GEMINI_RETRY_CAPACITY_ERRORS_INDEFINITELY,
         )
 
     @property
