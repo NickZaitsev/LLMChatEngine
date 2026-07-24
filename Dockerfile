@@ -53,8 +53,9 @@ COPY . .
 # Set the PATH to use the virtual environment's Python and packages
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Change ownership of the app directory to the non-root user
-RUN chown -R bot:bot /app
+# Prepare the book-storage mount point before the named volume is initialized,
+# so Docker copies non-root ownership into a newly created volume.
+RUN mkdir -p /app/book_files && chown -R bot:bot /app
 
 # Create celery directories and set ownership
 RUN mkdir -p /var/lib/celery/beat_schedule /var/lib/celery/worker_state && \

@@ -117,3 +117,12 @@ def test_compose_scopes_secrets_per_service():
     # No service uses the whole-file env_file dump.
     for name, service in services.items():
         assert "env_file" not in service, f"{name} must not mount the whole .env"
+
+
+def test_docker_image_prepares_book_volume_for_non_root_runtime() -> None:
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+
+    create_storage = "mkdir -p /app/book_files"
+    switch_to_bot = "USER bot"
+    assert create_storage in dockerfile
+    assert dockerfile.index(create_storage) < dockerfile.index(switch_to_bot)
